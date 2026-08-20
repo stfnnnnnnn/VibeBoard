@@ -15,7 +15,7 @@
 - This working directory is **not a git repository** (confirmed via `git status` failing). Task steps therefore end in a verification checkpoint, not a `git commit` — do not run git commands as part of this plan. If you want history tracking, initialize git before starting; that's a separate decision, not part of this plan.
 - No test framework is installed in this project, and none should be added for this feature — the existing project convention (see `log1.md`) is `tsc --noEmit`, direct SQL against the live DB, `curl` route checks, and hand-verification against real captured data. This plan follows that convention: pure functions (`credentials.ts` roundtrip, `normalize.ts`, the pure diff helper in `sync.ts`) get real `node:assert`-based throwaway verification scripts (genuine red/green, just without a test runner); DB- and network-touching code is verified with direct SQL and `curl`/manual real-Canvas-account checks, exactly as this project already verifies its OCR pipeline and DB migrations.
 - All new tables scope through `user_subjects`/`user_login`, matching the existing `activities`/`quizzes`/`exams`/`grade_entries` convention — never introduce a parallel user-identity concept.
-- `CANVAS_TOKEN_ENC_KEY` (64 hex chars = 32 bytes, for AES-256-GCM) and `CANVAS_CRON_SECRET` (any random string) must be added to `.env.local` before Task 2 and Task 9 respectively. Generate with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+- `CANVAS_TOKEN_ENC_KEY` (64 hex chars = 32 bytes, for AES-256-GCM) and `CRON_SECRET` (any random string) must be added to `.env.local` before Task 2 and Task 9 respectively. Generate with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. **`CRON_SECRET` is not an arbitrary name** — it must be exactly this, because Vercel Cron auto-injects `Authorization: Bearer $CRON_SECRET` only for an env var with this exact name; anything else requires manually configuring the header, which is easy to forget and fails closed (silent 401 forever) rather than loudly. **Deployment checklist: set `CRON_SECRET` in the Vercel project's env vars — not `CANVAS_CRON_SECRET`, which was the name used through Task 9's original implementation and renamed during final review.**
 - Every new API route starts with the same `auth()` session check already used throughout `src/app/api/studypulse/**` (`const session = await auth(); if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });`) — copy this pattern exactly, don't invent a new auth helper.
 
 ---
@@ -1242,8 +1242,10 @@ export async function syncAllDueConnections(maxConnections = 10): Promise<void> 
 - [ ] **Step 2: Add the env var**
 
 ```bash
-node -e "console.log('CANVAS_CRON_SECRET=' + require('crypto').randomBytes(24).toString('hex'))" >> .env.local
+node -e "console.log('CRON_SECRET=' + require('crypto').randomBytes(24).toString('hex'))" >> .env.local
 ```
+
+Note: originally implemented as `CANVAS_CRON_SECRET`, renamed to `CRON_SECRET` during final review (see Global Constraints) so Vercel's automatic cron auth header injection works without extra configuration.
 
 - [ ] **Step 3: Write `src/app/api/canvas/sync/manual/route.ts`**
 
