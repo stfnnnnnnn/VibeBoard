@@ -30,6 +30,7 @@ export interface EntryRow {
   score:           string;
   items:           string;
   grade:           number | null;
+  canvas_linked?:  boolean;
   saving?:         boolean;
 }
 
@@ -253,6 +254,13 @@ function EntrySection({
   };
 
   const setField = useCallback((idx: number, field: keyof EntryRow, val: string) => {
+    const row = entries[idx];
+    if (field === 'score' && row.canvas_linked) {
+      const ok = window.confirm(
+        `This score comes from Canvas. It will be overwritten by Canvas on the next sync — edit anyway?`
+      );
+      if (!ok) return;
+    }
     onUpdate(entries.map((r, i) => {
       if (i !== idx) return r;
       const next = { ...r, [field]: val };
@@ -552,6 +560,13 @@ function CustomEntrySection({
   };
 
   const setField = useCallback((idx: number, field: keyof EntryRow, val: string) => {
+    const row = entries[idx];
+    if (field === 'score' && row.canvas_linked) {
+      const ok = window.confirm(
+        `This score comes from Canvas. It will be overwritten by Canvas on the next sync — edit anyway?`
+      );
+      if (!ok) return;
+    }
     updateEntries(entries.map((r, i) => {
       if (i !== idx) return r;
       const next = { ...r, [field]: val };
