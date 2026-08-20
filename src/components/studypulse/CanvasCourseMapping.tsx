@@ -42,6 +42,8 @@ export default function CanvasCourseMapping({
       const data = await res.json();
       if (!res.ok) { alert(data.error ?? 'Failed'); return; }
       onChange();
+    } catch (err) {
+      alert('Map failed: ' + (err as Error).message);
     } finally {
       setBusy(null);
     }
