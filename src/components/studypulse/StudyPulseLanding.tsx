@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calculator, Home, RefreshCw, Layers3, TrendingUp, Award, CalendarClock, CalendarDays } from 'lucide-react';
+import { Calculator, Home, RefreshCw, Layers3, TrendingUp, Award, CalendarClock, CalendarDays, GraduationCap } from 'lucide-react';
 
 /* ─── Types ─── */
 export interface TrimesterData {
@@ -419,6 +419,9 @@ export default function StudyPulseLanding({
             </button>
             <button className="sp-pill" onClick={() => router.push('/studypulse/schedule')} style={PILL}>
               <CalendarDays size={15} /> Schedule
+            </button>
+            <button className="sp-pill" onClick={() => router.push('/studypulse/canvas')} style={PILL}>
+              <GraduationCap size={15} /> Canvas
             </button>
             <button
               className="sp-pill"
