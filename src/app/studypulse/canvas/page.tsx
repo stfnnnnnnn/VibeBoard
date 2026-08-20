@@ -13,7 +13,7 @@ export default async function CanvasPage() {
   const userId = parseInt(session.user.id);
 
   const [connRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT canvas_user_name, status, last_sync_at, last_sync_status FROM canvas_connections WHERE user_id = ?`,
+    `SELECT canvas_user_name, status, last_sync_at, last_sync_status FROM canvas_connections WHERE user_id = ? AND status = 'active'`,
     [userId],
   );
 
