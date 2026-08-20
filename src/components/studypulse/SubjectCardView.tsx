@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import GradingSetupWizard, { type GradingPresetFull } from './GradingSetupWizard';
 import TargetGradePanel from './TargetGradePanel';
+import SubjectActivityBankPanel from './SubjectActivityBankPanel';
 import {
   loadTransmutationTable, transmute, avgTransmuted,
   type TransmutationTable,
@@ -1518,6 +1519,8 @@ export default function SubjectCardView({
           existingPresets={existingPresets}
         />
       )}
+
+      <SubjectActivityBankPanel userSubjectId={userSubjectId} />
 
       {/* ── Subject header ── */}
       <div style={{ ...GLASS, padding: '24px 28px', marginBottom: '22px' }}>
