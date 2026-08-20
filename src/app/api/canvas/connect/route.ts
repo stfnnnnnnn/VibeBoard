@@ -32,7 +32,8 @@ export async function POST(req: NextRequest) {
     if (err instanceof CanvasApiError) {
       return Response.json({ error: `Could not reach Canvas at ${cleanBaseUrl}. Check the domain is correct.` }, { status: 400 });
     }
-    throw err;
+    // Handle network-level fetch failures (DNS, connection refusal, malformed URL, etc.)
+    return Response.json({ error: `Could not reach Canvas at ${cleanBaseUrl}. Check the domain is correct.` }, { status: 400 });
   }
 
   const { enc, iv, tag } = encryptToken(access_token);
