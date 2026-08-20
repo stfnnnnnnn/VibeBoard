@@ -4,12 +4,18 @@ import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
 import SubjectCardView from '@/components/studypulse/SubjectCardView';
 import type { EntryRow, GradingConfig } from '@/components/studypulse/SubjectCardView';
+import { ensureCanvasSchema } from '@/lib/migrate';
 
 export default async function SubjectCardPage(
   props: { params: Promise<{ id: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) redirect('/login');
+
+  // The four entry queries below join canvas_entry_links (for the canvas_linked
+  // flag) unconditionally, so make sure the Canvas tables exist before running
+  // them — idempotent, cheap after the first call.
+  await ensureCanvasSchema();
 
   const { id } = await props.params;
   const userId        = parseInt(session.user.id);
