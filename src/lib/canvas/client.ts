@@ -14,8 +14,26 @@ function parseNextLink(linkHeader: string | null): string | null {
   return null;
 }
 
+/** A single Canvas call must not be able to stall a whole sync run indefinitely. */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 async function requestWithRetry(url: string, token: string, attempt = 1): Promise<Response> {
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // A timeout-triggered abort (TimeoutError) and a network-level failure (DNS, reset,
+    // connection refused) are both transient — same retry budget as a 5xx.
+    if (attempt >= 3) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new CanvasApiError(`Canvas request failed after ${attempt} attempts (${message})`, 0);
+    }
+    await sleep(2 ** attempt * 500); // 1s, 2s, 4s
+    return requestWithRetry(url, token, attempt + 1);
+  }
 
   if (res.status === 401) throw new CanvasAuthError();
 
@@ -67,7 +85,10 @@ export async function canvasGetAll(
 /** Validates a token by fetching the connected Canvas user's own profile. Throws CanvasAuthError on a bad token. */
 export async function canvasValidateToken(baseUrl: string, token: string): Promise<{ id: number; name: string }> {
   const url = `${baseUrl.replace(/\/$/, '')}/api/v1/users/self`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
   if (res.status === 401) throw new CanvasAuthError('Invalid Canvas access token');
   if (!res.ok) throw new CanvasApiError(`Could not reach Canvas at ${baseUrl} (status ${res.status})`, res.status);
   const data = await res.json() as { id: number; name: string };
