@@ -50,7 +50,7 @@ async function getMappedCourses(connectionId: number): Promise<CanvasCourseRow[]
 
 export { discoverCourses, getMappedCourses };
 
-import { normalizeAssignment, type NormalizedAssignment } from './normalize';
+import { normalizeAssignment, gradeBreakdown, type NormalizedAssignment } from './normalize';
 
 /** Pure: true if the connected student's submission state differs from what's stored. */
 export function submissionFieldsChanged(
@@ -63,6 +63,7 @@ export function submissionFieldsChanged(
 interface BankRow extends RowDataPacket {
   id:                 number;
   due_at:             string | null;
+  points_possible:    number | null;
   submission_status:  string | null;
   submission_score:   number | null;
   canvas_updated_at:  string;
@@ -107,18 +108,23 @@ async function upsertAssignment(
 
   const stored = existing[0];
 
-  // mysql2 returns DATETIME columns as MySQL-format strings ("2026-08-20 10:00:00", via
-  // dateStrings: true on the pool) while Canvas's JSON gives ISO-8601 ("2026-08-20T10:00:00Z").
-  // Compare as timestamps, not raw strings, or every sync would report a false change.
+  // Both sides are now "YYYY-MM-DD HH:MM:SS" UTC strings — mysql2 returns DATETIME columns
+  // in that form (dateStrings: true on the pool) and normalize.ts converts Canvas's ISO-8601
+  // into the same form before it ever reaches here. Compare as timestamps, not raw strings.
   const storedUpdatedMs = new Date(stored.canvas_updated_at).getTime();
   const freshUpdatedMs  = new Date(a.canvasUpdatedAt).getTime();
   const storedDueMs = stored.due_at ? new Date(stored.due_at).getTime() : null;
   const freshDueMs  = a.dueAt ? new Date(a.dueAt).getTime() : null;
 
-  // submission_score is a DECIMAL(8,2) column; without decimalNumbers: true on the pool,
-  // mysql2 returns it as a string ("95.00"), not a number. Coerce before comparing against
-  // Canvas's raw JSON number, preserving null.
-  const storedScore = stored.submission_score === null ? null : Number(stored.submission_score);
+  // submission_score/points_possible are DECIMAL(8,2) columns; without decimalNumbers: true
+  // on the pool, mysql2 returns them as strings ("95.00"), not numbers. Coerce before
+  // comparing against Canvas's raw JSON numbers, preserving null.
+  const storedScore  = stored.submission_score === null ? null : Number(stored.submission_score);
+  const storedPoints = stored.points_possible  === null ? null : Number(stored.points_possible);
+
+  const dueChanged    = storedDueMs !== freshDueMs;
+  const scoreChanged  = storedScore !== a.submissionScore;
+  const pointsChanged = storedPoints !== a.pointsPossible;
 
   const metadataChanged = storedUpdatedMs !== freshUpdatedMs;
   const submissionChanged = submissionFieldsChanged(
@@ -133,10 +139,10 @@ async function upsertAssignment(
     return false;
   }
 
-  if (metadataChanged && storedDueMs !== freshDueMs) {
+  if (metadataChanged && dueChanged) {
     await logEvent(connection.id, stored.id, 'due_date_changed', { dueAt: stored.due_at }, { dueAt: a.dueAt });
   }
-  if (submissionChanged && storedScore !== a.submissionScore) {
+  if (submissionChanged && scoreChanged) {
     await logEvent(connection.id, stored.id, 'score_changed',
       { score: storedScore }, { score: a.submissionScore });
   }
@@ -158,7 +164,14 @@ async function upsertAssignment(
   );
 
   if (stored.bank_status === 'included') {
-    await propagateToLinkedEntry(stored.id, a);
+    // Only propagate what actually changed: a due-date-only Canvas edit must not overwrite
+    // the linked entry's grade (which would wipe it to null on an ungraded assignment).
+    // A points_possible change counts as a score change because `grade` is a percentage
+    // derived from both numbers.
+    await propagateToLinkedEntry(stored.id, a, {
+      deadlineChanged: dueChanged,
+      scoreChanged:    scoreChanged || pointsChanged,
+    });
   }
 
   return true;
@@ -183,25 +196,59 @@ async function syncCourseAssignments(
 
 export { syncCourseAssignments };
 
-async function propagateToLinkedEntry(bankItemId: number, fresh: NormalizedAssignment): Promise<void> {
+interface PropagateFlags {
+  /** Canvas's due_at differs from what's stored — the linked entry's deadline should follow. */
+  deadlineChanged: boolean;
+  /** Canvas's submission score (or points_possible) differs — the linked entry's grade should follow. */
+  scoreChanged:    boolean;
+}
+
+async function propagateToLinkedEntry(
+  bankItemId: number, fresh: NormalizedAssignment, changed: PropagateFlags,
+): Promise<void> {
+  const sets:   string[] = [];
+  const params: (string | number | null)[] = [];
+
+  if (changed.deadlineChanged) {
+    // dueAt is already a UTC "YYYY-MM-DD HH:MM:SS" string (normalize.ts), so the date
+    // portion is deterministic rather than dependent on the server's timezone.
+    sets.push('deadline = ?');
+    params.push(fresh.dueAt ? fresh.dueAt.slice(0, 10) : null);
+  }
+  if (changed.scoreChanged) {
+    // Canvas reports raw points; VibeBoard's `grade` column is a percentage. Store the
+    // derived percentage plus the score/items pair the rest of the app renders alongside it.
+    const { grade, score, items } = gradeBreakdown(fresh.submissionScore, fresh.pointsPossible);
+    sets.push('grade = ?', 'score = ?', 'items = ?');
+    params.push(grade, score, items);
+  }
+  if (sets.length === 0) return;
+
   const [linkRows] = await pool.execute<RowDataPacket[]>(
     `SELECT activity_id, quiz_id, exam_id, grade_entry_id FROM canvas_entry_links WHERE bank_item_id = ?`,
     [bankItemId],
   );
   if (linkRows.length === 0) return;
   const link = linkRows[0];
-  const deadline = fresh.dueAt ? fresh.dueAt.slice(0, 10) : null;
-  const grade = fresh.submissionScore;
 
+  let table: string, pkColumn: string, pkValue: number;
   if (link.activity_id) {
-    await pool.execute('UPDATE activities SET deadline = ?, grade = ? WHERE activity_id = ?', [deadline, grade, link.activity_id]);
+    table = 'activities';    pkColumn = 'activity_id'; pkValue = link.activity_id as number;
   } else if (link.quiz_id) {
-    await pool.execute('UPDATE quizzes SET deadline = ?, grade = ? WHERE quiz_id = ?', [deadline, grade, link.quiz_id]);
+    table = 'quizzes';       pkColumn = 'quiz_id';     pkValue = link.quiz_id as number;
   } else if (link.exam_id) {
-    await pool.execute('UPDATE exams SET deadline = ?, grade = ? WHERE exam_id = ?', [deadline, grade, link.exam_id]);
+    table = 'exams';         pkColumn = 'exam_id';     pkValue = link.exam_id as number;
   } else if (link.grade_entry_id) {
-    await pool.execute('UPDATE grade_entries SET deadline = ?, grade = ? WHERE entry_id = ?', [deadline, grade, link.grade_entry_id]);
+    table = 'grade_entries'; pkColumn = 'entry_id';    pkValue = link.grade_entry_id as number;
+  } else {
+    return;
   }
+
+  // Table/column names here are fixed internal literals, never user input.
+  await pool.execute(
+    `UPDATE ${table} SET ${sets.join(', ')} WHERE ${pkColumn} = ?`,
+    [...params, pkValue],
+  );
 }
 
 interface SyncError {
@@ -308,7 +355,13 @@ export async function syncConnection(connectionId: number, trigger: 'cron' | 'ma
   return { runId, status, coursesSynced, itemsFetched, itemsChanged };
 }
 
-export async function syncAllDueConnections(maxConnections = 10): Promise<void> {
+/**
+ * Connections are synced serially and each one makes several paginated Canvas calls, so the
+ * batch size is the main lever keeping a cron invocation inside the platform's function
+ * execution limit (see `maxDuration` on the cron route). Deliberately conservative: any
+ * connection not reached this invocation is simply the stalest one on the next.
+ */
+export async function syncAllDueConnections(maxConnections = 5): Promise<void> {
   const [due] = await pool.execute<RowDataPacket[]>(
     `SELECT id FROM canvas_connections
       WHERE status = 'active' AND (last_sync_at IS NULL OR last_sync_at < DATE_SUB(NOW(), INTERVAL 30 MINUTE))
