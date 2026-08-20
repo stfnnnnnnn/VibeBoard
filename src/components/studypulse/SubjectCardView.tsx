@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import GradingSetupWizard, { type GradingPresetFull } from './GradingSetupWizard';
 import TargetGradePanel from './TargetGradePanel';
-import SubjectActivityBankPanel from './SubjectActivityBankPanel';
 import {
   loadTransmutationTable, transmute, avgTransmuted,
   type TransmutationTable,
@@ -1520,8 +1519,6 @@ export default function SubjectCardView({
         />
       )}
 
-      <SubjectActivityBankPanel userSubjectId={userSubjectId} />
-
       {/* ── Subject header ── */}
       <div style={{ ...GLASS, padding: '24px 28px', marginBottom: '22px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
@@ -1730,6 +1727,14 @@ export default function SubjectCardView({
           >
             {isCustomMode ? '⚙️ Grading' : '🎓 Setup Grading'}
           </button>
+
+          <Link
+            href={`/studypulse/canvas?subject=${userSubjectId}`}
+            title="View pending Canvas Activity Bank items for this subject"
+            style={{ background: 'rgba(255,255,255,0.5)', border: '1px solid rgba(200,210,230,0.4)', borderRadius: '14px', padding: '8px 14px', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600, color: '#888', whiteSpace: 'nowrap', fontFamily: 'inherit', textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
+          >
+            📥 Activity Bank
+          </Link>
         </div>
       </div>
 
