@@ -106,9 +106,23 @@ async function upsertAssignment(
   }
 
   const stored = existing[0];
-  const metadataChanged = stored.canvas_updated_at !== a.canvasUpdatedAt;
+
+  // mysql2 returns DATETIME columns as MySQL-format strings ("2026-08-20 10:00:00", via
+  // dateStrings: true on the pool) while Canvas's JSON gives ISO-8601 ("2026-08-20T10:00:00Z").
+  // Compare as timestamps, not raw strings, or every sync would report a false change.
+  const storedUpdatedMs = new Date(stored.canvas_updated_at).getTime();
+  const freshUpdatedMs  = new Date(a.canvasUpdatedAt).getTime();
+  const storedDueMs = stored.due_at ? new Date(stored.due_at).getTime() : null;
+  const freshDueMs  = a.dueAt ? new Date(a.dueAt).getTime() : null;
+
+  // submission_score is a DECIMAL(8,2) column; without decimalNumbers: true on the pool,
+  // mysql2 returns it as a string ("95.00"), not a number. Coerce before comparing against
+  // Canvas's raw JSON number, preserving null.
+  const storedScore = stored.submission_score === null ? null : Number(stored.submission_score);
+
+  const metadataChanged = storedUpdatedMs !== freshUpdatedMs;
   const submissionChanged = submissionFieldsChanged(
-    stored.submission_status, stored.submission_score, a.submissionStatus, a.submissionScore,
+    stored.submission_status, storedScore, a.submissionStatus, a.submissionScore,
   );
 
   if (!metadataChanged && !submissionChanged) {
@@ -119,12 +133,12 @@ async function upsertAssignment(
     return false;
   }
 
-  if (metadataChanged && stored.due_at !== a.dueAt) {
+  if (metadataChanged && storedDueMs !== freshDueMs) {
     await logEvent(connection.id, stored.id, 'due_date_changed', { dueAt: stored.due_at }, { dueAt: a.dueAt });
   }
-  if (submissionChanged && stored.submission_score !== a.submissionScore) {
+  if (submissionChanged && storedScore !== a.submissionScore) {
     await logEvent(connection.id, stored.id, 'score_changed',
-      { score: stored.submission_score }, { score: a.submissionScore });
+      { score: storedScore }, { score: a.submissionScore });
   }
   if (submissionChanged && stored.submission_status !== a.submissionStatus) {
     await logEvent(connection.id, stored.id, 'submission_status_changed',
