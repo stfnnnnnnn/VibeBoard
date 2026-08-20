@@ -290,3 +290,21 @@ export async function syncConnection(connectionId: number, trigger: 'cron' | 'ma
 
   return { runId, status, coursesSynced, itemsFetched, itemsChanged };
 }
+
+export async function syncAllDueConnections(maxConnections = 10): Promise<void> {
+  const [due] = await pool.execute<RowDataPacket[]>(
+    `SELECT id FROM canvas_connections
+      WHERE status = 'active' AND (last_sync_at IS NULL OR last_sync_at < DATE_SUB(NOW(), INTERVAL 30 MINUTE))
+      ORDER BY last_sync_at IS NULL DESC, last_sync_at ASC
+      LIMIT ?`,
+    [maxConnections],
+  );
+  for (const row of due) {
+    try {
+      await syncConnection(row.id as number, 'cron');
+    } catch {
+      // Individual connection failures are already recorded on canvas_sync_runs/canvas_connections
+      // inside syncConnection; continue to the next connection rather than aborting the batch.
+    }
+  }
+}

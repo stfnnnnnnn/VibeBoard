@@ -1,0 +1,5 @@
+{
+  "crons": [
+    { "path": "/api/canvas/sync/cron", "schedule": "*/30 * * * *" }
+  ]
+}
