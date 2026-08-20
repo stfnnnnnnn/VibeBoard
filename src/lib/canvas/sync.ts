@@ -183,8 +183,25 @@ async function syncCourseAssignments(
 
 export { syncCourseAssignments };
 
-async function propagateToLinkedEntry(_bankItemId: number, _fresh: NormalizedAssignment): Promise<void> {
-  // Implemented in Task 11 once canvas_entry_links exists and is populated.
+async function propagateToLinkedEntry(bankItemId: number, fresh: NormalizedAssignment): Promise<void> {
+  const [linkRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT activity_id, quiz_id, exam_id, grade_entry_id FROM canvas_entry_links WHERE bank_item_id = ?`,
+    [bankItemId],
+  );
+  if (linkRows.length === 0) return;
+  const link = linkRows[0];
+  const deadline = fresh.dueAt ? fresh.dueAt.slice(0, 10) : null;
+  const grade = fresh.submissionScore;
+
+  if (link.activity_id) {
+    await pool.execute('UPDATE activities SET deadline = ?, grade = ? WHERE activity_id = ?', [deadline, grade, link.activity_id]);
+  } else if (link.quiz_id) {
+    await pool.execute('UPDATE quizzes SET deadline = ?, grade = ? WHERE quiz_id = ?', [deadline, grade, link.quiz_id]);
+  } else if (link.exam_id) {
+    await pool.execute('UPDATE exams SET deadline = ?, grade = ? WHERE exam_id = ?', [deadline, grade, link.exam_id]);
+  } else if (link.grade_entry_id) {
+    await pool.execute('UPDATE grade_entries SET deadline = ?, grade = ? WHERE entry_id = ?', [deadline, grade, link.grade_entry_id]);
+  }
 }
 
 interface SyncError {

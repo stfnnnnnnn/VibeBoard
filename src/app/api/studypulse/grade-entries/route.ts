@@ -2,7 +2,8 @@ import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import pool from '@/lib/db';
 import { ensureAccomplishedAt } from '@/lib/migrate';
-import type { RowDataPacket, ResultSetHeader } from 'mysql2';
+import type { RowDataPacket } from 'mysql2';
+import { insertGradeEntry } from '@/lib/studypulseEntries';
 
 /* GET /api/studypulse/grade-entries?subject_id=X&period_id=Y&cat_id=Z */
 export async function GET(req: NextRequest) {
@@ -41,31 +42,16 @@ export async function POST(req: NextRequest) {
   }
 
   await ensureAccomplishedAt();
-
   const ac = accomplished_at || null;
 
   try {
-    if (entry_id) {
-      await pool.execute(
-        `UPDATE grade_entries SET cat_id=?, period_id=?, is_lab=?, name=?, urgency=?,
-         status=?, deadline=?, score=?, items=?, grade=?, accomplished_at=?
-         WHERE entry_id=? AND user_subject_id=?`,
-        [cat_id, period_id, is_lab ? 1 : 0, name, urgency ?? 'Medium',
-         status ?? 'Pending', deadline || null, score ?? null, items ?? null, grade ?? null, ac,
-         entry_id, user_subject_id]
-      );
-      return Response.json({ status: 'success', entry_id });
-    } else {
-      const [res] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO grade_entries
-           (user_subject_id, cat_id, period_id, is_lab, name, urgency, status, deadline, score, items, grade, accomplished_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [user_subject_id, cat_id, period_id, is_lab ? 1 : 0, name,
-         urgency ?? 'Medium', status ?? 'Pending', deadline || null,
-         score ?? null, items ?? null, grade ?? null, ac]
-      );
-      return Response.json({ status: 'success', entry_id: res.insertId });
-    }
+    const { entryId } = await insertGradeEntry({
+      entryId: entry_id, userSubjectId: user_subject_id, catId: cat_id, periodId: period_id,
+      isLab: !!is_lab, name, urgency: urgency ?? 'Medium', status: status ?? 'Pending',
+      deadline: deadline || null, score: score ?? null, items: items ?? null, grade: grade ?? null,
+      accomplishedAt: ac,
+    });
+    return Response.json({ status: 'success', entry_id: entryId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return Response.json({ error: msg }, { status: 500 });
