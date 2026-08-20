@@ -11,6 +11,8 @@ interface BankItem {
   submission_score: number | null;
   course_name: string;
   user_subject_id: number | null;
+  /** 'custom' = the mapped subject uses a grading preset; Include isn't supported there yet. */
+  subject_mode?: 'legacy' | 'custom';
 }
 
 const GLASS: React.CSSProperties = {
@@ -65,7 +67,14 @@ export default function CanvasActivityBank({ items, onChange }: { items: BankIte
       <h3 style={{ margin: '0 0 12px', fontSize: '1rem', fontWeight: 800, color: '#333' }}>
         Activity Bank ({items.length})
       </h3>
-      {items.map(item => (
+      {items.map(item => {
+        // The Include modal only offers the legacy Activity/Quiz/Exam picker. On a
+        // custom-graded subject that path would insert a row the subject page never renders,
+        // so it's disabled here (and rejected server-side) until the period+category picker
+        // for custom-mode subjects exists.
+        const customMode  = item.subject_mode === 'custom';
+        const includeOff  = busy === item.id || !item.user_subject_id || customMode;
+        return (
         <div key={item.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(200,215,235,0.3)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <span style={{ fontWeight: 700, color: '#444', flexGrow: 1 }}>{item.name}</span>
@@ -73,8 +82,11 @@ export default function CanvasActivityBank({ items, onChange }: { items: BankIte
             <span style={{ fontSize: '0.78rem', color: '#999' }}>
               {item.due_at ? `Due ${new Date(item.due_at).toLocaleDateString()}` : 'No due date'}
             </span>
-            <button disabled={busy === item.id || !item.user_subject_id} onClick={() => setIncludingId(includingId === item.id ? null : item.id)}
-              style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: '#74bcd9', color: 'white', fontWeight: 700, cursor: 'pointer' }}>
+            <button disabled={includeOff} onClick={() => setIncludingId(includingId === item.id ? null : item.id)}
+              title={customMode ? 'Custom grading not yet supported for Canvas Include' : undefined}
+              style={{ padding: '6px 12px', borderRadius: '8px', border: 'none',
+                background: includeOff ? 'rgba(116,188,217,0.35)' : '#74bcd9', color: 'white', fontWeight: 700,
+                cursor: includeOff ? 'not-allowed' : 'pointer' }}>
               Include
             </button>
             <button disabled={busy === item.id} onClick={() => ignore(item.id)}
@@ -82,7 +94,12 @@ export default function CanvasActivityBank({ items, onChange }: { items: BankIte
               Ignore
             </button>
           </div>
-          {includingId === item.id && (
+          {customMode && (
+            <div style={{ marginTop: '6px', fontSize: '0.76rem', color: '#a07b8c', fontWeight: 600 }}>
+              Custom grading not yet supported for Canvas Include — coming soon
+            </div>
+          )}
+          {includingId === item.id && !customMode && (
             <div style={{ marginTop: '10px', display: 'flex', gap: '10px', alignItems: 'center' }}>
               <select value={targetType} onChange={e => setTargetType(e.target.value as typeof targetType)}
                 style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid rgba(180,190,215,0.5)' }}>
@@ -97,7 +114,8 @@ export default function CanvasActivityBank({ items, onChange }: { items: BankIte
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
