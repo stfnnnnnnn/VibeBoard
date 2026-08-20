@@ -41,7 +41,7 @@ export default function CanvasConnectPanel({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Connection failed');
       setToken('');
-      onChange();
+      window.location.reload();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -55,7 +55,7 @@ export default function CanvasConnectPanel({
     try {
       const res = await fetch('/api/canvas/disconnect', { method: 'POST' });
       if (!res.ok) throw new Error('Disconnect failed');
-      onChange();
+      window.location.reload();
     } catch (err) {
       setError((err as Error).message);
     } finally {
