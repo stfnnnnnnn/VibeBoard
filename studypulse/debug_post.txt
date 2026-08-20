@@ -1,0 +1,15 @@
+Array
+(
+    [name] => choi
+    [specific_type] => Final Exam
+    [urgency] => High
+    [status] => Pending
+    [deadline] => 2025-07-10
+    [score] => 80
+    [items] => 90
+    [type] => exams
+    [entry_id] => 
+    [user_subject_id] => 1
+    [grade] => 88.89
+    [add_entry] => 1
+)

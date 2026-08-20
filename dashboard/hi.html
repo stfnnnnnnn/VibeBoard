@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>User’s Home</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=DM+Sans:wght@400;700&family=Caveat:wght@500&display=swap" rel="stylesheet">
+
+  <style>
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', 'DM Sans', 'Segoe UI', sans-serif;
+      height: 100vh;
+      background: linear-gradient(-45deg, #a6d8ff, #ffcde1, #c2e9fb, #f9c5d1);
+      background-size: 300% 300%;
+      animation: gradientFlow 12s ease infinite;
+      color: #333;
+    }
+
+    @keyframes gradientFlow {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    body {
+      padding: 5px 5% 40px;
+      overflow-x: hidden;
+    }
+
+    h1 {
+      font-size: 4rem;
+      margin-bottom: 25px;
+      background: linear-gradient(to right, #f2a7c0, #74bcd9);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .widget, .card {
+      background: rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(12px);
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+      transition: all 0.3s ease;
+    }
+
+    .widget:hover, .card:hover {
+      transform: translateY(-6px);
+      box-shadow: 0 12px 25px rgba(0,0,0,0.2);
+    }
+
+    .quote {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 16px;
+      font-style: normal;
+      line-height: 1.6;
+      color: #444;
+      text-align: left;
+      padding: 6px 12px;
+    }
+
+    /* Force quote + weather side by side */
+    .two-cols {
+      display: flex;
+      gap: 20px;
+      align-items: stretch;
+    }
+
+    /* Each widget gets 50% width */
+    .quote-widget, .weather-widget {
+      flex: 1;
+      min-width: 0;
+    }
+
+    #weather-icon {
+      width: 36px;
+      height: 36px;
+      object-fit: contain;
+    }
+
+    .weather-widget {
+      font-size: 0.95rem;
+      gap: 8px;
+    }
+
+    .tiles {
+      width: 100%;
+      overflow-x: auto;
+      display: flex;
+      justify-content: center;
+      padding: 20px 0;
+    }
+
+    .tiles-wrapper {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+    }
+
+    .card {
+      flex-shrink: 0;
+      width: 400px;
+      height: 300px;
+      border-radius: 20px;
+      padding: 20px;
+      text-align: center;
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .card-link {
+      text-decoration: none;
+      color: inherit;
+      display: inline-block;
+    }
+
+    .card-link .card { cursor: pointer; }
+
+    .card:hover {
+      transform: translateY(-10px);
+      box-shadow: 0 15px 35px rgba(0,0,0,0.25);
+    }
+
+    .card img {
+      width: 100%;
+      height: 220px;
+      object-fit: cover;
+      border-radius: 14px;
+      margin-bottom: 10px;
+      image-rendering: smooth;
+    }
+
+    footer {
+      margin-top: 60px;
+      text-align: center;
+      color: #444;
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 768px) {
+      .two-cols { flex-direction: column; }
+
+      .tiles {
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .card { width: 90%; }
+
+      h1 {
+        font-size: 2.2rem;
+        text-align: center;
+      }
+    }
+
+    .pill-logout {
+      background: linear-gradient(to right, #f2a7c0, #74bcd9);
+      color: rgba(255, 255, 255, 0.97);
+      border: 2px solid #4dabf5;
+      border-radius: 20px;
+      border-color: #4dabf5;
+      box-shadow: 0 4px 12px rgba(77, 171, 245, 0.3);
+      padding: 8px 16px;
+      font-weight: 700;
+      font-size: 1.0rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+
+    .header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="header-row">
+    <h1 id="page-title">User’s Home</h1>
+
+    <!-- No PHP logout now; just a placeholder button -->
+    <button type="button" class="pill-logout" onclick="alert('Logout is disabled in static HTML.');">
+      Sign-Out
+    </button>
+  </div>
+
+  <div class="grid two-cols">
+    <!-- Quote Widget -->
+    <div class="widget quote-widget">
+      <p class="quote" id="quote-text">Loading inspirational quote...</p>
+    </div>
+
+    <!-- Weather Widget -->
+    <div class="widget weather-widget" id="weather-widget">
+      <div id="weather-location"><strong>Detecting...</strong></div>
+
+      <div id="weather-main" style="display: flex; align-items: center; gap: 10px;">
+        <img id="weather-icon" src="" alt="Weather Icon" style="display: none;">
+        <span id="weather-temp" style="font-size: 1.3rem;"></span>
+        <span id="weather-condition" style="font-size: 0.95rem; color: #555;"></span>
+      </div>
+
+      <div id="weather-extra" style="display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 12px;">
+        <span id="weather-feelslike">Feels like: -- °C</span>
+        <span id="weather-humidity">Humidity: --%</span>
+        <span id="weather-wind">Wind: -- kph</span>
+        <span id="weather-uv">UV Index: --</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="tiles">
+    <div class="tiles-wrapper">
+      <!-- Study Pulse -->
+      <a href="/VibeBoard/studypulse/studypulse.html" class="card-link">
+        <div class="card">
+          <img src="studypulse.png" alt="Study Pulse">
+        </div>
+      </a>
+
+      <!-- Finance Tracker -->
+      <a href="/VibeBoard/financetracker/financedashboard.html" class="card-link">
+        <div class="card">
+          <img src="financetracker.png" alt="Finance">
+        </div>
+      </a>
+
+      <!-- Habit Tracker -->
+      <a href="/VibeBoard/habittracker/habittracker.html" class="card-link">
+        <div class="card">
+          <img src="habittracker.png" alt="Habits">
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <footer>
+    &copy; <span id="year"></span> VibeBoard Dashboard
+  </footer>
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script>
+    // --- Replace PHP session first name with a simple localStorage-based name (optional) ---
+    const storedName = localStorage.getItem("first_name") || "User";
+    document.getElementById("page-title").textContent = `${storedName}’s Home`;
+
+    // Footer year (replaces PHP date('Y'))
+    document.getElementById("year").textContent = new Date().getFullYear();
+
+    // --- Weather ---
+    function getWeatherByCity(city) {
+      $.getJSON(`https://api.weatherapi.com/v1/current.json?key=fc4d2d021d814bb6854121406251307&q=${encodeURIComponent(city)}`, function(data) {
+        $('#weather-location').html(
+          `<strong>${String(data.location.name).toUpperCase()}</strong><br><span style="font-size: 0.9rem;">${data.location.region}, ${data.location.country}</span>`
+        );
+
+        $('#weather-icon').attr('src', data.current.condition.icon).show();
+        $('#weather-temp').text(`${data.current.temp_c} °C`);
+        $('#weather-condition').text(data.current.condition.text);
+
+        $('#weather-feelslike').text(`Feels like: ${data.current.feelslike_c} °C`);
+        $('#weather-humidity').text(`Humidity: ${data.current.humidity}%`);
+        $('#weather-wind').text(`Wind: ${data.current.wind_kph} kph`);
+        $('#weather-uv').text(`UV Index: ${data.current.uv}`);
+      }).fail(function() {
+        $('#weather-location').html('<strong>Location error</strong>');
+        $('#weather-temp').text(`-- °C`);
+        $('#weather-condition').text(`Unknown`);
+        $('#weather-icon').hide();
+        $('#weather-feelslike').text(`Feels like: -- °C`);
+        $('#weather-humidity').text(`Humidity: --%`);
+        $('#weather-wind').text(`Wind: -- kph`);
+        $('#weather-uv').text(`UV Index: --`);
+      });
+    }
+
+    // Prefer saved city
+    const savedCity = localStorage.getItem('weather_city');
+    if (savedCity) {
+      getWeatherByCity(savedCity);
+    }
+
+    // Try geolocation; if it fails and no saved city, prompt once
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(function(position) {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        getWeatherByCity(`${lat},${lon}`);
+      }, function() {
+        if (!savedCity) {
+          const city = prompt("Enter your city for weather updates:");
+          if (city) {
+            localStorage.setItem('weather_city', city);
+            getWeatherByCity(city);
+          }
+        }
+      });
+    } else {
+      if (!savedCity) {
+        const city = prompt("Enter your city for weather updates:");
+        if (city) {
+          localStorage.setItem('weather_city', city);
+          getWeatherByCity(city);
+        }
+      }
+    }
+
+    // --- Quote API ---
+    $.ajax({
+      method: 'GET',
+      url: 'https://api.api-ninjas.com/v1/quotes',
+      headers: { 'X-Api-Key': 'WcE16OTZDL6zHx+aTQqnZg==Q70bLxVPq9TANWFi' },
+      contentType: 'application/json',
+      success: function(result) {
+        if (Array.isArray(result) && result.length > 0) {
+          const quote = result[0];
+          $('#quote-text').html(`“${quote.quote}”<br>— ${quote.author}`);
+        } else {
+          $('#quote-text').text('No quote available at the moment.');
+        }
+      },
+      error: function(jqXHR) {
+        console.error('Error: ', jqXHR.responseText);
+        $('#quote-text').text('Failed to load quote.');
+      }
+    });
+  </script>
+</body>
+</html>

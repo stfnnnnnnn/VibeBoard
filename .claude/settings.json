@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"/c/xampp/mysql/bin/mysql.exe\" -h localhost -u root vibeboard -e \"ALTER TABLE grading_categories ADD COLUMN link_group VARCHAR\\(40\\) NULL; ALTER TABLE grading_categories ADD COLUMN collective_weight DECIMAL\\(5,2\\) NULL;\")",
+      "Bash(curl -s -o /dev/null -w \"studypulse: %{http_code}\\\\n\" http://localhost:3000/studypulse --max-time 8)",
+      "Bash(curl -s -o /dev/null -w \"subjects: %{http_code}\\\\n\" http://localhost:3000/studypulse/subjects --max-time 8)",
+      "Bash(curl -s -o /dev/null -w \"gwa-calculator: %{http_code}\\\\n\" http://localhost:3000/studypulse/gwa-calculator --max-time 8)"
+    ]
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true
+  }
+}

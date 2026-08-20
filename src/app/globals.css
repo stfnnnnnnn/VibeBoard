@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ────────────────────────────────────────────
+   Animated gradient background
+──────────────────────────────────────────── */
+@keyframes gradientFlow {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.vb-bg {
+  background: linear-gradient(-45deg, #a6d8ff, #ffcde1, #c2e9fb, #f9c5d1);
+  background-size: 300% 300%;
+  animation: gradientFlow 10s ease infinite;
+}
+
+/* ────────────────────────────────────────────
+   Reusable component tokens
+──────────────────────────────────────────── */
+@layer components {
+
+  /* Glass card */
+  .glass {
+    background: rgba(255, 255, 255, 0.25);
+    backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+  }
+
+  .glass-strong {
+    background: rgba(255, 255, 255, 0.42);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    border: 1px solid rgba(255, 255, 255, 0.32);
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    background: linear-gradient(to right, #f2a7c0, #74bcd9);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Form input */
+  .vb-input {
+    @apply w-full px-3.5 py-2.5 rounded-xl border border-white/40
+           bg-white/70 text-sm text-gray-700 placeholder-gray-400
+           focus:outline-none focus:border-vb-pink-400
+           focus:ring-2 focus:ring-vb-pink-400/25
+           transition-all duration-200;
+  }
+
+  /* Buttons */
+  .vb-btn {
+    @apply w-full py-3 px-4 rounded-xl font-semibold text-sm text-white
+           transition-colors duration-200 cursor-pointer
+           disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+
+  .vb-btn-pink {
+    @apply vb-btn bg-vb-pink-400 hover:bg-vb-pink-500 active:bg-vb-pink-600;
+  }
+
+  .vb-btn-blue {
+    @apply vb-btn bg-vb-blue-400 hover:bg-vb-blue-500 active:bg-vb-blue-600;
+  }
+
+  .vb-btn-ghost {
+    @apply vb-btn glass text-gray-700 hover:bg-white/50;
+  }
+}
+
+/* ────────────────────────────────────────────
+   Base reset
+──────────────────────────────────────────── */
+@layer base {
+  html, body {
+    @apply m-0 p-0;
+    overflow-x: hidden;
+  }
+  * {
+    box-sizing: border-box;
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(/c/xampp/mysql/bin/mysql -u root vibeboard -e ' *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(node -e ' *)",
+      "Bash(cp \"C:\\\\Users\\\\LENOVO\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--xampp-htdocs-VibeBoard\\\\8b2a7312-b9b0-4900-b548-c14ca3a103cc\\\\scratchpad\\\\test_date.mjs\" \"c:\\\\xampp\\\\htdocs\\\\VibeBoard\\\\test_date.mjs\")",
+      "Bash(node test_date.mjs)",
+      "Bash(rm \"c:\\\\xampp\\\\htdocs\\\\VibeBoard\\\\test_date.mjs\")",
+      "Bash(\"/c/xampp/mysql/bin/mysql.exe\" -h localhost -u root vibeboard -e \"DESCRIBE user_login;\")",
+      "Bash(\"/c/xampp/mysql/bin/mysql.exe\" -h localhost -u root vibeboard -e \"DESCRIBE trimesters;\")",
+      "Bash(\"/c/xampp/mysql/bin/mysql.exe\" -h localhost -u root vibeboard -e \"DESCRIBE grading_periods;\")",
+      "Bash(\"/c/xampp/mysql/bin/mysql.exe\" -h localhost -u root vibeboard -e \"DESCRIBE grading_presets;\")",
+      "Bash(\"/c/xampp/mysql/bin/mysql.exe\" -h localhost -u root vibeboard -e \"DESCRIBE grading_categories;\")",
+      "Bash(\"/c/xampp/mysql/bin/mysql.exe\" -h localhost -u root vibeboard -e \"DESCRIBE subject_grading;\")",
+      "Bash(\"/c/xampp/mysql/bin/mysql.exe\" -h localhost -u root vibeboard -e \"SELECT * FROM grading_periods LIMIT 10;\")",
+      "Bash(curl -s http://localhost:3000/ --max-time 8)"
+    ]
+  }
+}
