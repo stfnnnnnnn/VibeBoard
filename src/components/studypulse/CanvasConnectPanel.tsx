@@ -51,9 +51,13 @@ export default function CanvasConnectPanel({
 
   const disconnect = async () => {
     setBusy(true);
+    setError(null);
     try {
-      await fetch('/api/canvas/disconnect', { method: 'POST' });
+      const res = await fetch('/api/canvas/disconnect', { method: 'POST' });
+      if (!res.ok) throw new Error('Disconnect failed');
       onChange();
+    } catch (err) {
+      setError((err as Error).message);
     } finally {
       setBusy(false);
     }
