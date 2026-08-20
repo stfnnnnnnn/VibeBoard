@@ -38,5 +38,5 @@ async function handleCron(req: NextRequest) {
   }
 }
 
-export const GET  = handleCron;
-export const POST = handleCron;
+export async function GET(req: NextRequest)  { return handleCron(req); }
+export async function POST(req: NextRequest) { return handleCron(req); }
