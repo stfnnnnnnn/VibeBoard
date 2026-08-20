@@ -21,10 +21,10 @@ const GLASS: React.CSSProperties = {
 export default function CanvasActivityBank({ items, onChange }: { items: BankItem[]; onChange: () => void }) {
   const [includingId, setIncludingId] = useState<number | null>(null);
   const [targetType, setTargetType]   = useState<'activities' | 'quizzes' | 'exams'>('activities');
-  const [busy, setBusy]               = useState(false);
+  const [busy, setBusy]               = useState<number | null>(null);
 
   const confirmInclude = async (bankId: number) => {
-    setBusy(true);
+    setBusy(bankId);
     try {
       const res  = await fetch(`/api/canvas/bank/${bankId}/include`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -34,13 +34,15 @@ export default function CanvasActivityBank({ items, onChange }: { items: BankIte
       if (!res.ok) { alert(data.error ?? 'Failed'); return; }
       setIncludingId(null);
       onChange();
+    } catch (err) {
+      alert('Include failed: ' + (err as Error).message);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
   const ignore = async (bankId: number) => {
-    setBusy(true);
+    setBusy(bankId);
     try {
       const res = await fetch(`/api/canvas/bank/${bankId}/ignore`, { method: 'POST' });
       if (!res.ok) {
@@ -49,8 +51,10 @@ export default function CanvasActivityBank({ items, onChange }: { items: BankIte
         return;
       }
       onChange();
+    } catch (err) {
+      alert('Ignore failed: ' + (err as Error).message);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -69,11 +73,11 @@ export default function CanvasActivityBank({ items, onChange }: { items: BankIte
             <span style={{ fontSize: '0.78rem', color: '#999' }}>
               {item.due_at ? `Due ${new Date(item.due_at).toLocaleDateString()}` : 'No due date'}
             </span>
-            <button disabled={busy || !item.user_subject_id} onClick={() => setIncludingId(includingId === item.id ? null : item.id)}
+            <button disabled={busy === item.id || !item.user_subject_id} onClick={() => setIncludingId(includingId === item.id ? null : item.id)}
               style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: '#74bcd9', color: 'white', fontWeight: 700, cursor: 'pointer' }}>
               Include
             </button>
-            <button disabled={busy} onClick={() => ignore(item.id)}
+            <button disabled={busy === item.id} onClick={() => ignore(item.id)}
               style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: 'rgba(240,240,245,0.9)', color: '#888', fontWeight: 700, cursor: 'pointer' }}>
               Ignore
             </button>
@@ -86,7 +90,7 @@ export default function CanvasActivityBank({ items, onChange }: { items: BankIte
                 <option value="quizzes">Quiz</option>
                 <option value="exams">Exam</option>
               </select>
-              <button disabled={busy} onClick={() => confirmInclude(item.id)}
+              <button disabled={busy === item.id} onClick={() => confirmInclude(item.id)}
                 style={{ padding: '6px 14px', borderRadius: '8px', border: 'none', background: '#f2a7c0', color: 'white', fontWeight: 700, cursor: 'pointer' }}>
                 Confirm Include
               </button>
