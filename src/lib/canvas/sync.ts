@@ -71,7 +71,7 @@ interface BankRow extends RowDataPacket {
 
 async function logEvent(
   connectionId: number, bankItemId: number | null,
-  eventType: 'assignment_created' | 'due_date_changed' | 'score_changed' | 'submission_status_changed',
+  eventType: 'assignment_created' | 'due_date_changed' | 'score_changed' | 'submission_status_changed' | 'assignment_removed',
   oldData: unknown, newData: unknown,
 ): Promise<void> {
   await pool.execute(
@@ -185,4 +185,108 @@ export { syncCourseAssignments };
 
 async function propagateToLinkedEntry(_bankItemId: number, _fresh: NormalizedAssignment): Promise<void> {
   // Implemented in Task 11 once canvas_entry_links exists and is populated.
+}
+
+interface SyncError {
+  stage: string;
+  canvas_course_id?: number;
+  message: string;
+  retryable: boolean;
+}
+
+async function sweepRemovedAssignments(courseRowId: number, runId: number): Promise<void> {
+  const [stale] = await pool.execute<RowDataPacket[]>(
+    `SELECT id FROM canvas_activity_bank
+      WHERE course_id = ? AND last_seen_sync_run_id != ? AND bank_status != 'removed_upstream'`,
+    [courseRowId, runId],
+  );
+  if (stale.length === 0) return;
+
+  const [connRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT connection_id FROM canvas_courses WHERE id = ?`, [courseRowId],
+  );
+  const connectionId = connRows[0].connection_id as number;
+
+  for (const row of stale) {
+    await pool.execute(`UPDATE canvas_activity_bank SET bank_status = 'removed_upstream' WHERE id = ?`, [row.id]);
+    await logEvent(connectionId, row.id as number, 'assignment_removed', null, null);
+  }
+}
+
+export interface SyncResult {
+  runId:         number;
+  status:        'success' | 'partial' | 'failed';
+  coursesSynced: number;
+  itemsFetched:  number;
+  itemsChanged:  number;
+}
+
+export async function syncConnection(connectionId: number, trigger: 'cron' | 'manual'): Promise<SyncResult> {
+  const [connRows] = await pool.execute<CanvasConnectionRow[]>(
+    `SELECT * FROM canvas_connections WHERE id = ? AND status = 'active'`, [connectionId],
+  );
+  if (connRows.length === 0) {
+    throw new Error(`No active Canvas connection ${connectionId}`);
+  }
+  const connection = connRows[0];
+
+  const [runRes] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO canvas_sync_runs (connection_id, trigger_source, started_at, status) VALUES (?, ?, NOW(), 'running')`,
+    [connectionId, trigger],
+  );
+  const runId = runRes.insertId;
+
+  const errors: SyncError[] = [];
+  let coursesSynced = 0, itemsFetched = 0, itemsChanged = 0;
+
+  try {
+    await discoverCourses(connection);
+  } catch (err) {
+    const { CanvasAuthError } = await import('./errors');
+    if (err instanceof CanvasAuthError) {
+      await pool.execute(`UPDATE canvas_connections SET status = 'invalid', last_error = ? WHERE id = ?`,
+        ['Canvas token is invalid or expired', connectionId]);
+      await pool.execute(
+        `UPDATE canvas_sync_runs SET status = 'failed', finished_at = NOW(), errors_json = ? WHERE id = ?`,
+        [JSON.stringify([{ stage: 'discoverCourses', message: 'Auth failed', retryable: false }]), runId],
+      );
+      return { runId, status: 'failed', coursesSynced: 0, itemsFetched: 0, itemsChanged: 0 };
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    await pool.execute(
+      `UPDATE canvas_sync_runs SET status = 'failed', finished_at = NOW(), errors_json = ? WHERE id = ?`,
+      [JSON.stringify([{ stage: 'discoverCourses', message, retryable: true }]), runId],
+    );
+    await pool.execute(`UPDATE canvas_connections SET last_sync_status = 'failed', last_error = ? WHERE id = ?`,
+      [message, connectionId]);
+    return { runId, status: 'failed', coursesSynced: 0, itemsFetched: 0, itemsChanged: 0 };
+  }
+
+  const mappedCourses = await getMappedCourses(connectionId);
+  for (const course of mappedCourses) {
+    try {
+      const result = await syncCourseAssignments(connection, course, runId);
+      itemsFetched += result.fetched;
+      itemsChanged += result.changed;
+      await sweepRemovedAssignments(course.id, runId);
+      coursesSynced++;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push({ stage: 'syncCourseAssignments', canvas_course_id: course.canvas_course_id, message, retryable: true });
+    }
+  }
+
+  const status: SyncResult['status'] = errors.length === 0 ? 'success' : coursesSynced > 0 ? 'partial' : 'failed';
+
+  await pool.execute(
+    `UPDATE canvas_sync_runs SET status = ?, finished_at = NOW(), courses_synced = ?, items_fetched = ?,
+       items_changed = ?, errors_json = ? WHERE id = ?`,
+    [status, coursesSynced, itemsFetched, itemsChanged, errors.length ? JSON.stringify(errors) : null, runId],
+  );
+  await pool.execute(
+    `UPDATE canvas_connections SET last_sync_at = NOW(), last_sync_status = ?, last_error = ? WHERE id = ?`,
+    [status, errors.length ? errors[0].message : null, connectionId],
+  );
+
+  return { runId, status, coursesSynced, itemsFetched, itemsChanged };
 }
