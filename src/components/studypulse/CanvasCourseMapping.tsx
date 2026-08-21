@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface CanvasCourse {
   id: number;
@@ -29,11 +30,12 @@ export default function CanvasCourseMapping({
   existingSubjects: ExistingSubject[];
   onChange: () => void;
 }) {
+  const router = useRouter();
   const pending = courses.filter(c => c.mapping_status === 'pending');
   const [linkChoice, setLinkChoice] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<number | null>(null);
 
-  const act = async (courseId: number, body: object) => {
+  const act = async (courseId: number, body: { mode: 'link' | 'create' | 'ignore' } & Record<string, unknown>) => {
     setBusy(courseId);
     try {
       const res  = await fetch(`/api/canvas/courses/${courseId}/map`, {
@@ -41,6 +43,13 @@ export default function CanvasCourseMapping({
       });
       const data = await res.json();
       if (!res.ok) { alert(data.error ?? 'Failed'); return; }
+      /* 'create' just made a brand-new, ungraded subject — take the student
+         straight to it with the ?new=1 signal so the grading setup wizard opens.
+         'link' and 'ignore' create nothing, so they keep refreshing in place. */
+      if (body.mode === 'create' && data.user_subject_id) {
+        router.push(`/studypulse/${data.user_subject_id}?new=1`);
+        return;
+      }
       onChange();
     } catch (err) {
       alert('Map failed: ' + (err as Error).message);

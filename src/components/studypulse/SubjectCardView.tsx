@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { Suspense, useState, useMemo, useCallback, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import GradingSetupWizard, { type GradingPresetFull } from './GradingSetupWizard';
 import TargetGradePanel from './TargetGradePanel';
@@ -1246,6 +1247,13 @@ function GradeCalculator({
 
   const dp = transmutationOn ? 0 : 2;
 
+  /* Legacy subjects never went through the grading wizard, so they have no stored
+     grade_scale — default to '4pt', the same default ensureGradeScale() applies to
+     custom-mode presets. Display only; nothing above depends on it. */
+  const tgi = total > 0 ? toGradeInfo(total, '4pt') : null;
+
+  const modeLabel = mode === 'finals' ? 'Finals' : mode === 'midterm' ? 'Midterm' : 'What-If';
+
   return (
     <div style={{ ...GLASS, padding: '22px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
@@ -1261,52 +1269,64 @@ function GradeCalculator({
           ))}
         </div>
       </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem', minWidth: '380px' }}>
-          <thead>
-            <tr>
-              {['Component', 'Weight (%)', transmutationOn ? 'Trans. Grade' : 'Grade', 'Weighted'].map((h, i) => (
-                <th key={h} style={{ padding: '8px 12px', textAlign: i === 0 ? 'left' : 'center', color: '#8a9bb5', fontWeight: 600, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid rgba(116,188,217,0.25)' }}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(row => {
-              const weighted = (row.grade * row.weight) / 100;
-              const gs       = gradeStyle(row.grade);
-              return (
-                <tr key={row.label} style={{ borderBottom: '1px solid rgba(200,215,235,0.2)' }}>
-                  <td style={{ padding: '10px 12px', fontWeight: 600, color: '#444' }}>{row.label}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                    {mode === 'whatif' ? (
+      {/* ── Total card — same visual language as CustomGradeCalculator's period cards ── */}
+      <div style={{
+        background:   'rgba(255,255,255,0.4)',
+        borderRadius: '14px',
+        padding:      '14px 14px 10px',
+        display:      'flex',
+        flexDirection:'column',
+        gap:          '0',
+      }}>
+        {/* Card header */}
+        <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#8a9bb5', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>
+            {modeLabel}
+          </div>
+          <div style={{ fontSize: '2rem', fontWeight: 900, lineHeight: 1, color: tgs.text }}>
+            {total.toFixed(dp)}
+          </div>
+          {tgi && (
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: tgs.text, opacity: 0.85, marginTop: '2px' }}>
+              {tgi.letter} · {tgi.description}
+            </div>
+          )}
+        </div>
+
+        <div style={{ borderTop: '1px solid rgba(200,215,235,0.35)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {rows.map(row => {
+            const weighted = (row.grade * row.weight) / 100;
+            const gs       = gradeStyle(row.grade);
+            return (
+              <div key={row.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#444', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {row.label}
+                  </div>
+                  {mode === 'whatif' ? (
+                    <div style={{ marginTop: '3px' }}>
                       <input type="number" min="0" max="100" step="0.01" value={row.weight} onChange={e => setWifWeights(p => ({ ...p, [row.label]: parseFloat(e.target.value) || 0 }))} style={{ ...INPUT, textAlign: 'center', width: '76px' }} />
-                    ) : (
-                      <span style={{ background: 'rgba(116,188,217,0.2)', color: '#3a8dba', padding: '2px 12px', borderRadius: '999px', fontWeight: 600 }}>{row.weight}%</span>
-                    )}
-                  </td>
-                  <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                    {mode === 'whatif' ? (
-                      <input type="number" min="0" max="100" step="0.01" value={row.grade} onChange={e => setWifGrades(p => ({ ...p, [row.label]: parseFloat(e.target.value) || 0 }))} style={{ ...INPUT, textAlign: 'center', width: '76px' }} />
-                    ) : (
-                      <span style={{ background: gs.bg, color: gs.text, padding: '2px 12px', borderRadius: '999px', fontWeight: 700, display: 'inline-block' }}>{row.grade.toFixed(dp)}</span>
-                    )}
-                  </td>
-                  <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 600, color: '#555' }}>{weighted.toFixed(dp)}</td>
-                </tr>
-              );
-            })}
-            <tr style={{ borderTop: '2px solid rgba(116,188,217,0.25)' }}>
-              <td colSpan={3} style={{ padding: '12px 12px', textAlign: 'right', fontWeight: 700, color: '#444', fontSize: '0.95rem' }}>Total Grade:</td>
-              <td style={{ padding: '12px 12px', textAlign: 'center' }}>
-                <span style={{ background: tgs.bg, color: tgs.text, padding: '5px 20px', borderRadius: '999px', fontWeight: 800, fontSize: '1.1rem', display: 'inline-block' }}>
-                  {total.toFixed(dp)}
-                </span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '0.65rem', color: '#aaa', fontWeight: 600 }}>{row.weight}%</div>
+                  )}
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '52px' }}>
+                  {mode === 'whatif' ? (
+                    <input type="number" min="0" max="100" step="0.01" value={row.grade} onChange={e => setWifGrades(p => ({ ...p, [row.label]: parseFloat(e.target.value) || 0 }))} style={{ ...INPUT, textAlign: 'center', width: '76px' }} />
+                  ) : (
+                    <div style={{ fontSize: '0.88rem', fontWeight: 700, color: gs.text, lineHeight: 1.2 }}>
+                      {weighted.toFixed(dp)}
+                    </div>
+                  )}
+                  <div style={{ fontSize: '0.72rem', color: '#bbb', fontWeight: 500, marginTop: '1px' }}>
+                    {mode === 'whatif' ? `= ${weighted.toFixed(dp)}` : row.grade.toFixed(dp)}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
       {mode !== 'whatif' && (
         <p style={{ margin: '12px 0 0', fontSize: '0.75rem', color: '#aaa', textAlign: 'right' }}>
@@ -1341,7 +1361,19 @@ interface Props {
   existingPresets?:    Array<{ preset_id: number; name: string; period_count: number }>;
 }
 
-export default function SubjectCardView({
+/* The inner component calls useSearchParams() (to detect the ?new=1 signal a
+   just-created subject is linked with), which Next requires to sit inside a
+   <Suspense> boundary. Self-wrap here — same shape as CanvasClientShell — so the
+   server-component page can keep rendering <SubjectCardView> unchanged. */
+export default function SubjectCardView(props: Props) {
+  return (
+    <Suspense fallback={<div className="vb-bg" style={{ minHeight: '100vh' }} />}>
+      <SubjectCardViewInner {...props} />
+    </Suspense>
+  );
+}
+
+function SubjectCardViewInner({
   subject, userSubjectId,
   initialActivities = [], initialQuizzes = [], initialExams = [],
   gradingConfig: initialConfig = null,
@@ -1353,6 +1385,24 @@ export default function SubjectCardView({
   const [exams,      setExams]      = useState<EntryRow[]>(initialExams);
   const [config,     setConfig]     = useState<GradingConfig | null>(initialConfig);
   const [showWizard, setShowWizard] = useState(false);
+
+  /* ── Auto-launch the grading wizard for a just-created subject ──
+     Both creation paths (manual add on the subjects grid, and Canvas "Create
+     Subject") land here with ?new=1. Fire once on mount, then strip the param so
+     a refresh — or any later visit to this subject — doesn't re-open the wizard. */
+  const router       = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (searchParams.get('new') !== '1') return;
+    setShowWizard(true);
+    const rest = new URLSearchParams(searchParams.toString());
+    rest.delete('new');
+    const qs = rest.toString();
+    router.replace(`/studypulse/${userSubjectId}${qs ? `?${qs}` : ''}`, { scroll: false });
+  // Mount-only: the ?new=1 signal is consumed exactly once per fresh-creation visit.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* catId → current entries (kept in sync with CustomEntrySection) */
   const [catEntries, setCatEntries] = useState<Record<number, EntryRow[]>>(() => {

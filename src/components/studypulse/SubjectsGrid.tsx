@@ -109,9 +109,10 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
       });
       const data = await res.json();
       if (data.status !== 'success') throw new Error(data.error);
-      router.refresh();
-      setForm({ course_code: '', subject_name: '', year_level: '', term: '', semester: '', units: '3' });
-      setShowForm(false);
+      /* Go straight to the new subject with the ?new=1 signal — SubjectCardView
+         consumes it to auto-open the grading setup wizard. No need to reset or
+         close the form: we're leaving this page. */
+      router.push(`/studypulse/${data.user_subject_id}?new=1`);
     } catch (err) {
       setMessage((err as Error).message || 'Something went wrong. Please try again.');
     } finally {
