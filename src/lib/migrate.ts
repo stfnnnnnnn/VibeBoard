@@ -203,5 +203,48 @@ export async function ensureCanvasSchema(): Promise<void> {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS canvas_announcement_bank (
+      id                       INT AUTO_INCREMENT PRIMARY KEY,
+      connection_id            INT NOT NULL,
+      course_id                INT NOT NULL,
+      canvas_announcement_id   BIGINT NOT NULL,
+      title                    VARCHAR(255) NOT NULL,
+      message                  TEXT NULL,
+      html_url                 VARCHAR(500) NULL,
+      posted_at                DATETIME NULL,
+      canvas_updated_at        DATETIME NOT NULL,
+      bank_status              ENUM('pending','included','ignored','removed_upstream') NOT NULL DEFAULT 'pending',
+      first_seen_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_synced_at           DATETIME NOT NULL,
+      last_seen_sync_run_id    INT NULL,
+      UNIQUE KEY uniq_conn_announcement (connection_id, canvas_announcement_id),
+      FOREIGN KEY (connection_id) REFERENCES canvas_connections(id) ON DELETE CASCADE,
+      FOREIGN KEY (course_id) REFERENCES canvas_courses(id) ON DELETE CASCADE
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS canvas_announcement_links (
+      id               INT AUTO_INCREMENT PRIMARY KEY,
+      announcement_id  INT NOT NULL,
+      activity_id      INT NULL,
+      quiz_id          INT NULL,
+      exam_id          INT NULL,
+      grade_entry_id   INT NULL,
+      created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_announcement (announcement_id),
+      FOREIGN KEY (announcement_id) REFERENCES canvas_announcement_bank(id) ON DELETE CASCADE,
+      FOREIGN KEY (activity_id) REFERENCES activities(activity_id) ON DELETE CASCADE,
+      FOREIGN KEY (quiz_id) REFERENCES quizzes(quiz_id) ON DELETE CASCADE,
+      FOREIGN KEY (exam_id) REFERENCES exams(exam_id) ON DELETE CASCADE,
+      FOREIGN KEY (grade_entry_id) REFERENCES grade_entries(entry_id) ON DELETE CASCADE,
+      CHECK (
+        (activity_id IS NOT NULL) + (quiz_id IS NOT NULL) +
+        (exam_id IS NOT NULL) + (grade_entry_id IS NOT NULL) = 1
+      )
+    )
+  `);
+
   _ranCanvas = true;
 }
