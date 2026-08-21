@@ -2,7 +2,7 @@
 
 import { Suspense, useState, useMemo, useCallback, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import GradingSetupWizard, { type GradingPresetFull } from './GradingSetupWizard';
 import TargetGradePanel from './TargetGradePanel';
@@ -1389,8 +1389,10 @@ function SubjectCardViewInner({
   /* ── Auto-launch the grading wizard for a just-created subject ──
      Both creation paths (manual add on the subjects grid, and Canvas "Create
      Subject") land here with ?new=1. Fire once on mount, then strip the param so
-     a refresh — or any later visit to this subject — doesn't re-open the wizard. */
-  const router       = useRouter();
+     a refresh — or any later visit to this subject — doesn't re-open the wizard.
+     The param is dropped with history.replaceState rather than router.replace:
+     it's a pure URL-bar rewrite with no Next navigation, no re-render and no RSC
+     re-fetch, so it can't disturb the wizard we just opened in the same effect. */
   const searchParams = useSearchParams();
 
   useEffect(() => {
@@ -1399,7 +1401,7 @@ function SubjectCardViewInner({
     const rest = new URLSearchParams(searchParams.toString());
     rest.delete('new');
     const qs = rest.toString();
-    router.replace(`/studypulse/${userSubjectId}${qs ? `?${qs}` : ''}`, { scroll: false });
+    window.history.replaceState(null, '', `/studypulse/${userSubjectId}${qs ? `?${qs}` : ''}`);
   // Mount-only: the ?new=1 signal is consumed exactly once per fresh-creation visit.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
