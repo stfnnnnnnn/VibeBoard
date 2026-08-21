@@ -170,3 +170,38 @@ export function normalizeAssignment(raw: RawAssignment): NormalizedAssignment {
     submissionSubmittedAt: toMysqlUtc(raw.submission?.submitted_at),
   };
 }
+
+export interface NormalizedAnnouncement {
+  canvasAnnouncementId: number;
+  title:                string;
+  message:              string | null;
+  htmlUrl:              string | null;
+  postedAt:             string | null;
+  canvasUpdatedAt:      string;
+}
+
+interface RawAnnouncement {
+  id: number;
+  title: string;
+  message?: string | null;
+  html_url?: string;
+  posted_at?: string | null;
+  updated_at?: string | null;
+}
+
+/**
+ * Canvas discussion topics (announcements are discussion topics with only_announcements=true)
+ * don't reliably echo updated_at, so posted_at is the fallback — canvas_updated_at is NOT NULL
+ * in the schema and must always get a real value.
+ */
+export function normalizeAnnouncement(raw: RawAnnouncement): NormalizedAnnouncement {
+  return {
+    canvasAnnouncementId: raw.id,
+    title:           raw.title,
+    message:         raw.message ?? null,
+    htmlUrl:         raw.html_url ?? null,
+    postedAt:        toMysqlUtc(raw.posted_at),
+    canvasUpdatedAt: toMysqlUtc(raw.updated_at ?? raw.posted_at)
+      ?? new Date().toISOString().slice(0, 19).replace('T', ' '),
+  };
+}
