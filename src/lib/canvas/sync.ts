@@ -51,6 +51,7 @@ async function getMappedCourses(connectionId: number): Promise<CanvasCourseRow[]
 export { discoverCourses, getMappedCourses };
 
 import { normalizeAssignment, gradeBreakdown, type NormalizedAssignment } from './normalize';
+import { normalizeAnnouncement, type NormalizedAnnouncement } from './normalize';
 
 /** Pure: true if the connected student's submission state differs from what's stored. */
 export function submissionFieldsChanged(
@@ -277,6 +278,53 @@ async function sweepRemovedAssignments(courseRowId: number, runId: number): Prom
   }
 }
 
+async function upsertAnnouncement(
+  connection: CanvasConnectionRow, courseRowId: number, runId: number, a: NormalizedAnnouncement,
+): Promise<void> {
+  // Unlike upsertAssignment, announcements don't need change detection or event logging —
+  // they aren't graded, live Canvas data the way assignments are (see spec's non-goals).
+  // ON DUPLICATE KEY UPDATE covers "insert if new, otherwise refresh" in one round trip.
+  await pool.execute(
+    `INSERT INTO canvas_announcement_bank
+       (connection_id, course_id, canvas_announcement_id, title, message, html_url, posted_at,
+        canvas_updated_at, last_synced_at, last_seen_sync_run_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+     ON DUPLICATE KEY UPDATE
+       title = VALUES(title), message = VALUES(message), html_url = VALUES(html_url),
+       posted_at = VALUES(posted_at), canvas_updated_at = VALUES(canvas_updated_at),
+       last_synced_at = NOW(), last_seen_sync_run_id = VALUES(last_seen_sync_run_id)`,
+    [
+      connection.id, courseRowId, a.canvasAnnouncementId, a.title, a.message, a.htmlUrl,
+      a.postedAt, a.canvasUpdatedAt, runId,
+    ],
+  );
+}
+
+async function syncCourseAnnouncements(
+  connection: CanvasConnectionRow, course: CanvasCourseRow, runId: number,
+): Promise<{ fetched: number }> {
+  const raw = await canvasGetAll(connection, `/courses/${course.canvas_course_id}/discussion_topics`, {
+    'only_announcements': 'true',
+  });
+
+  for (const rawAnnouncement of raw) {
+    const a = normalizeAnnouncement(rawAnnouncement as never);
+    await upsertAnnouncement(connection, course.id, runId, a);
+  }
+
+  return { fetched: raw.length };
+}
+
+export { syncCourseAnnouncements };
+
+async function sweepRemovedAnnouncements(courseRowId: number, runId: number): Promise<void> {
+  await pool.execute(
+    `UPDATE canvas_announcement_bank SET bank_status = 'removed_upstream'
+      WHERE course_id = ? AND last_seen_sync_run_id != ? AND bank_status != 'removed_upstream'`,
+    [courseRowId, runId],
+  );
+}
+
 export interface SyncResult {
   runId:         number;
   status:        'success' | 'partial' | 'failed';
@@ -333,6 +381,11 @@ export async function syncConnection(connectionId: number, trigger: 'cron' | 'ma
       itemsFetched += result.fetched;
       itemsChanged += result.changed;
       await sweepRemovedAssignments(course.id, runId);
+
+      const announcementResult = await syncCourseAnnouncements(connection, course, runId);
+      itemsFetched += announcementResult.fetched;
+      await sweepRemovedAnnouncements(course.id, runId);
+
       coursesSynced++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
