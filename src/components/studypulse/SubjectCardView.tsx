@@ -1348,6 +1348,7 @@ interface Props {
   subject: {
     subject_name: string;
     course_code:  string;
+    section?:     string | null;
     units:        number;
     year_level:   string;
     trimester:    string;
@@ -1583,7 +1584,7 @@ function SubjectCardViewInner({
               {subject.subject_name}
             </h1>
             <p style={{ margin: '0 0 12px', color: '#666', fontSize: '0.95rem', fontWeight: 600 }}>
-              {subject.course_code}
+              {subject.course_code}{subject.section ? ` · Block ${subject.section}` : ''}
             </p>
             <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap', alignItems: 'center' }}>
               {[`${subject.units} Unit${subject.units !== 1 ? 's' : ''}`, subject.year_level, subject.trimester].map(lbl => (

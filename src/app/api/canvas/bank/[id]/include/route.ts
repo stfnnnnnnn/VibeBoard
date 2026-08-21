@@ -80,14 +80,15 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       );
     }
 
-    // Server-side mirror of the UI's guard: the Include modal only offers the legacy
-    // Activity/Quiz/Exam path, and a legacy row inserted against a custom-mode subject is
-    // never rendered anywhere (the subject page only loads those tables when there's no
-    // grading config) while still being counted in progress stats and synced forever.
+    // Server-side mirror of the UI's guard: a custom-mode subject only offers the
+    // period+category (grade_entries) path there, and a legacy Activity/Quiz/Exam row
+    // inserted against a custom-mode subject is never rendered anywhere (the subject page
+    // only loads those tables when there's no grading config) while still being counted in
+    // progress stats and synced forever.
     const subjectMode = await getSubjectMode(item.user_subject_id);
     if (subjectMode === 'custom' && LEGACY_TARGETS.includes(target_type)) {
       return Response.json(
-        { error: 'This subject uses custom grading. Canvas Include for custom-graded subjects is not supported yet.' },
+        { error: 'This subject uses custom grading. Choose a period and category instead.' },
         { status: 400 },
       );
     }

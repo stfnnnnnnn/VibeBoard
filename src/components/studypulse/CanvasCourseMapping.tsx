@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Link2, PlusCircle, EyeOff } from 'lucide-react';
+import { parseCanvasCourseCode } from '@/lib/canvas/normalize';
 
 interface CanvasCourse {
   id: number;
@@ -19,8 +21,22 @@ interface ExistingSubject {
 }
 
 const GLASS: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.22)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
-  borderRadius: '20px', border: '1px solid rgba(255,255,255,0.35)', boxShadow: '0 8px 28px rgba(0,0,0,0.12)',
+  background:           'rgba(255,255,255,0.4)',
+  backdropFilter:       'blur(14px)',
+  WebkitBackdropFilter: 'blur(14px)',
+  borderRadius:         '22px',
+  border:               '1px solid rgba(255,255,255,0.4)',
+  boxShadow:            '0 8px 24px rgba(31,38,68,0.09)',
+};
+
+const chip = (bg: string, color: string): React.CSSProperties => ({
+  background: bg, color, borderRadius: '999px', padding: '3px 10px',
+  fontSize: '0.72rem', fontWeight: 700, whiteSpace: 'nowrap',
+});
+
+const pillBtn: React.CSSProperties = {
+  border: 'none', borderRadius: '999px', padding: '8px 15px', fontWeight: 700,
+  fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px',
 };
 
 export default function CanvasCourseMapping({
@@ -58,42 +74,84 @@ export default function CanvasCourseMapping({
     }
   };
 
+  const createSubject = (course: CanvasCourse) => {
+    const parsed = parseCanvasCourseCode(course.course_code);
+    act(course.id, {
+      mode: 'create',
+      subject_name: course.name,
+      course_code:  parsed.courseCode || course.course_code || course.name,
+      section:      parsed.section,
+      units: 3, year_level: '1st Year', trimester: parsed.termLabel ?? '1st Trimester',
+    });
+  };
+
   if (pending.length === 0) return null;
 
   return (
-    <div style={{ ...GLASS, padding: '20px 24px', marginBottom: '20px' }}>
-      <h3 style={{ margin: '0 0 12px', fontSize: '1rem', fontWeight: 800, color: '#333' }}>
-        New Canvas Courses ({pending.length})
+    <div style={{ ...GLASS, padding: '22px 26px', marginBottom: '20px' }}>
+      <style jsx>{`
+        .ccm-row { transition: transform 150ms ease, box-shadow 150ms ease; }
+        .ccm-row:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(116,188,217,0.16); }
+        .ccm-select:focus { outline: none; border-color: #74bcd9; }
+        .ccm-link:hover   { background: rgba(116,188,217,0.85) !important; }
+        .ccm-create:hover { filter: brightness(1.04); }
+        .ccm-ignore:hover { background: rgba(255,255,255,0.85) !important; }
+      `}</style>
+      <h3 style={{
+        margin: '0 0 14px', fontSize: '1.05rem', fontWeight: 800, color: '#2d3748',
+        fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
+      }}>
+        New Canvas Courses <span style={{ color: '#8a94a6', fontWeight: 700 }}>({pending.length})</span>
       </h3>
-      {pending.map(course => (
-        <div key={course.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 0', borderBottom: '1px solid rgba(200,215,235,0.3)', flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 700, color: '#444', flexGrow: 1 }}>
-            {course.name} {course.course_code && <span style={{ color: '#999', fontWeight: 500 }}>({course.course_code})</span>}
-          </span>
-          <select value={linkChoice[course.id] ?? ''} onChange={e => setLinkChoice(prev => ({ ...prev, [course.id]: e.target.value }))}
-            style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid rgba(180,190,215,0.5)' }}>
-            <option value="">Link to existing subject…</option>
-            {existingSubjects.map(s => <option key={s.user_subject_id} value={s.user_subject_id}>{s.subject_name}</option>)}
-          </select>
-          <button disabled={busy === course.id || !linkChoice[course.id]}
-            onClick={() => act(course.id, { mode: 'link', user_subject_id: Number(linkChoice[course.id]) })}
-            style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: '#74bcd9', color: 'white', fontWeight: 700, cursor: 'pointer' }}>
-            Link
-          </button>
-          <button disabled={busy === course.id}
-            onClick={() => act(course.id, {
-              mode: 'create', subject_name: course.name, course_code: course.course_code ?? course.name,
-              units: 3, year_level: '1st Year', trimester: '1st Trimester',
-            })}
-            style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: '#f2a7c0', color: 'white', fontWeight: 700, cursor: 'pointer' }}>
-            Create Subject
-          </button>
-          <button disabled={busy === course.id} onClick={() => act(course.id, { mode: 'ignore' })}
-            style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: 'rgba(240,240,245,0.9)', color: '#888', fontWeight: 700, cursor: 'pointer' }}>
-            Ignore
-          </button>
-        </div>
-      ))}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {pending.map(course => {
+          const parsed = parseCanvasCourseCode(course.course_code);
+          return (
+          <div key={course.id} className="ccm-row" style={{
+            background: 'rgba(255,255,255,0.55)', borderRadius: '16px', padding: '14px 18px',
+            display: 'flex', flexDirection: 'column', gap: '12px',
+          }}>
+            <div>
+              <div style={{ fontWeight: 700, color: '#333', fontSize: '0.92rem' }}>{course.name}</div>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
+                {parsed.courseCode && <span style={chip('rgba(116,188,217,0.16)', '#2a7fa8')}>{parsed.courseCode}</span>}
+                {parsed.termLabel && <span style={chip('rgba(242,167,192,0.18)', '#a0507a')}>{parsed.termLabel}{parsed.schoolYear ? ` · SY ${parsed.schoolYear}` : ''}</span>}
+                {parsed.section && <span style={chip('rgba(120,130,150,0.14)', '#5c6b80')}>Block {parsed.section}</span>}
+                {!parsed.termLabel && course.course_code && !parsed.courseCode && (
+                  <span style={{ fontSize: '0.78rem', color: '#999' }}>{course.course_code}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Actions always live on their own row, in the same order, regardless of how
+                much text the name/chips above take up — nothing here should shift position
+                depending on the course's content. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <select value={linkChoice[course.id] ?? ''} onChange={e => setLinkChoice(prev => ({ ...prev, [course.id]: e.target.value }))}
+                className="ccm-select"
+                style={{ padding: '7px 12px', borderRadius: '10px', border: '1px solid rgba(180,190,215,0.5)', fontSize: '0.82rem', background: 'rgba(255,255,255,0.8)' }}>
+                <option value="">Link to existing subject…</option>
+                {existingSubjects.map(s => <option key={s.user_subject_id} value={s.user_subject_id}>{s.subject_name}</option>)}
+              </select>
+              <button className="ccm-link" disabled={busy === course.id || !linkChoice[course.id]}
+                onClick={() => act(course.id, { mode: 'link', user_subject_id: Number(linkChoice[course.id]) })}
+                style={{ ...pillBtn, background: '#74bcd9', color: 'white', opacity: !linkChoice[course.id] ? 0.5 : 1, cursor: !linkChoice[course.id] ? 'not-allowed' : 'pointer' }}>
+                <Link2 size={13} /> Link
+              </button>
+              <button className="ccm-create" disabled={busy === course.id}
+                onClick={() => createSubject(course)}
+                style={{ ...pillBtn, background: 'linear-gradient(to right, #f2a7c0, #74bcd9)', color: 'white', boxShadow: '0 4px 14px rgba(242,167,192,0.3)' }}>
+                <PlusCircle size={13} /> Create Subject
+              </button>
+              <button className="ccm-ignore" disabled={busy === course.id} onClick={() => act(course.id, { mode: 'ignore' })}
+                style={{ ...pillBtn, background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(200,210,230,0.5)', color: '#8a94a6', marginLeft: 'auto' }}>
+                <EyeOff size={13} /> Ignore
+              </button>
+            </div>
+          </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

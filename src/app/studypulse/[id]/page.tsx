@@ -4,7 +4,7 @@ import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
 import SubjectCardView from '@/components/studypulse/SubjectCardView';
 import type { EntryRow, GradingConfig } from '@/components/studypulse/SubjectCardView';
-import { ensureCanvasSchema } from '@/lib/migrate';
+import { ensureCanvasSchema, ensureSubjectSection } from '@/lib/migrate';
 
 export default async function SubjectCardPage(
   props: { params: Promise<{ id: string }> }
@@ -49,8 +49,9 @@ export default async function SubjectCardPage(
   const userId        = parseInt(session.user.id);
   const userSubjectId = parseInt(id);
 
+  await ensureSubjectSection();
   const [subjects] = await pool.execute<RowDataPacket[]>(`
-    SELECT s.subject_name, s.course_code, s.units, s.year_level, s.trimester
+    SELECT s.subject_name, s.course_code, s.section, s.units, s.year_level, s.trimester
     FROM user_subjects us
     JOIN subjects s ON us.subject_id = s.subject_id
     WHERE us.user_subject_id = ? AND us.user_id = ?
@@ -230,6 +231,7 @@ export default async function SubjectCardPage(
       subject={{
         subject_name: sub.subject_name as string,
         course_code:  sub.course_code as string,
+        section:      sub.section as string | null,
         units:        sub.units as number,
         year_level:   sub.year_level as string,
         trimester:    sub.trimester as string,

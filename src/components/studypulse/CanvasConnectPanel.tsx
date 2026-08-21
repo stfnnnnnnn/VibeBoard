@@ -1,14 +1,20 @@
 'use client';
 
 import { useState } from 'react';
+import { GraduationCap, AlertTriangle, RefreshCw, Unplug } from 'lucide-react';
 
 const GLASS: React.CSSProperties = {
-  background:           'rgba(255,255,255,0.22)',
+  background:           'rgba(255,255,255,0.4)',
   backdropFilter:       'blur(14px)',
   WebkitBackdropFilter: 'blur(14px)',
-  borderRadius:         '20px',
-  border:               '1px solid rgba(255,255,255,0.35)',
-  boxShadow:            '0 8px 28px rgba(0,0,0,0.12)',
+  borderRadius:         '22px',
+  border:               '1px solid rgba(255,255,255,0.4)',
+  boxShadow:            '0 8px 24px rgba(31,38,68,0.09)',
+};
+
+const pillBtn: React.CSSProperties = {
+  border: 'none', borderRadius: '999px', padding: '9px 18px', fontWeight: 700,
+  fontSize: '0.84rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px',
 };
 
 export interface ConnectionStatus {
@@ -80,53 +86,79 @@ export default function CanvasConnectPanel({
 
   if (connection.connected) {
     return (
-      <div style={{ ...GLASS, padding: '20px 24px', marginBottom: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 800, color: '#333' }}>
-            Connected to Canvas as {connection.canvas_user_name}
-          </span>
-          {connection.status === 'invalid' && (
-            <span style={{ color: '#dc2626', fontWeight: 700, fontSize: '0.85rem' }}>
-              ⚠ Token expired — reconnect below
+      <div style={{ ...GLASS, padding: '20px 26px', marginBottom: '20px' }}>
+        <style jsx>{`
+          .ccp-sync:hover:not(:disabled)  { filter: brightness(1.04); }
+          .ccp-discon:hover:not(:disabled) { background: rgba(254,226,226,0.9) !important; color: #c0392b !important; }
+        `}</style>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <GraduationCap size={18} color="#74bcd9" strokeWidth={2.2} />
+            <span style={{ fontWeight: 800, color: '#333', fontSize: '0.92rem' }}>
+              Connected to Canvas as {connection.canvas_user_name}
             </span>
-          )}
-          <span style={{ marginLeft: 'auto', fontSize: '0.8rem', color: '#888' }}>
-            {connection.last_sync_at
-              ? `Last synced ${new Date(connection.last_sync_at).toLocaleString()} (${connection.last_sync_status})`
-              : 'Never synced'}
-          </span>
-          <button onClick={syncNow} disabled={busy}
-            style={{ background: 'linear-gradient(to right, #f2a7c0, #74bcd9)', color: 'white', border: 'none', borderRadius: '10px', padding: '8px 16px', fontWeight: 700, cursor: busy ? 'wait' : 'pointer' }}>
-            {busy ? 'Syncing…' : 'Sync Now'}
-          </button>
-          <button onClick={disconnect} disabled={busy}
-            style={{ background: 'rgba(240,240,245,0.9)', border: 'none', borderRadius: '10px', padding: '8px 16px', fontWeight: 700, color: '#888', cursor: 'pointer' }}>
-            Disconnect
-          </button>
+            {connection.status === 'invalid' && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#c0392b', fontWeight: 700,
+                fontSize: '0.78rem', background: 'rgba(254,226,226,0.7)', borderRadius: '999px', padding: '3px 10px',
+              }}>
+                <AlertTriangle size={12} /> Token expired — reconnect below
+              </span>
+            )}
+          </div>
+          {/* Status text + actions always live on their own row, right-aligned, regardless
+              of how long the connected-user name above is. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.78rem', color: '#8a94a6', fontWeight: 600, marginRight: 'auto' }}>
+              {connection.last_sync_at
+                ? `Last synced ${new Date(connection.last_sync_at).toLocaleString()} (${connection.last_sync_status})`
+                : 'Never synced'}
+            </span>
+            <button className="ccp-sync" onClick={syncNow} disabled={busy}
+              style={{
+                ...pillBtn, color: 'white', background: 'linear-gradient(to right, #f2a7c0, #74bcd9)',
+                boxShadow: '0 4px 14px rgba(242,167,192,0.3)', cursor: busy ? 'wait' : 'pointer',
+              }}>
+              <RefreshCw size={14} /> {busy ? 'Syncing…' : 'Sync Now'}
+            </button>
+            <button className="ccp-discon" onClick={disconnect} disabled={busy}
+              style={{ ...pillBtn, background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(200,210,230,0.5)', color: '#8a94a6' }}>
+              <Unplug size={14} /> Disconnect
+            </button>
+          </div>
         </div>
-        {error && <div style={{ marginTop: '10px', color: '#dc2626', fontSize: '0.85rem' }}>{error}</div>}
+        {error && <div style={{ marginTop: '10px', color: '#dc2626', fontSize: '0.85rem', fontWeight: 600 }}>{error}</div>}
       </div>
     );
   }
 
   return (
-    <div style={{ ...GLASS, padding: '24px', marginBottom: '20px' }}>
-      <h2 style={{ margin: '0 0 12px', fontSize: '1.1rem', fontWeight: 800, color: '#333' }}>Connect Canvas</h2>
-      <p style={{ fontSize: '0.85rem', color: '#666', marginBottom: '14px' }}>
+    <div style={{ ...GLASS, padding: '24px 26px', marginBottom: '20px' }}>
+      <style jsx>{`.ccp-connect:hover:not(:disabled) { filter: brightness(1.04); }`}</style>
+      <h2 style={{
+        margin: '0 0 10px', fontSize: '1.05rem', fontWeight: 800, color: '#2d3748',
+        fontFamily: "'DM Sans', 'Segoe UI', sans-serif", display: 'flex', alignItems: 'center', gap: '8px',
+      }}>
+        <GraduationCap size={19} color="#74bcd9" strokeWidth={2.2} /> Connect Canvas
+      </h2>
+      <p style={{ fontSize: '0.85rem', color: '#8a94a6', marginBottom: '16px', lineHeight: 1.5 }}>
         Enter your Canvas domain, then generate an access token from your Canvas Settings page
         (Account → Settings → New Access Token) and paste it below.
       </p>
       <input placeholder="https://yourschool.instructure.com" value={baseUrl}
-        onChange={e => setBaseUrl(e.target.value)}
-        style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(180,190,215,0.5)', marginBottom: '10px' }} />
+        onChange={e => setBaseUrl(e.target.value)} className="vb-input" style={{ marginBottom: '10px' }} />
       <input placeholder="Paste your Canvas access token" value={token} type="password"
-        onChange={e => setToken(e.target.value)}
-        style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(180,190,215,0.5)', marginBottom: '10px' }} />
-      <button onClick={connect} disabled={busy || !baseUrl || !token}
-        style={{ background: 'linear-gradient(to right, #f2a7c0, #74bcd9)', color: 'white', border: 'none', borderRadius: '10px', padding: '10px 20px', fontWeight: 700, cursor: busy ? 'wait' : 'pointer' }}>
+        onChange={e => setToken(e.target.value)} className="vb-input" style={{ marginBottom: '14px' }} />
+      <button className="ccp-connect" onClick={connect} disabled={busy || !baseUrl || !token}
+        style={{
+          ...pillBtn, color: 'white', background: 'linear-gradient(to right, #f2a7c0, #74bcd9)',
+          boxShadow: '0 4px 14px rgba(242,167,192,0.3)',
+          opacity: (busy || !baseUrl || !token) ? 0.6 : 1,
+          cursor: busy ? 'wait' : (!baseUrl || !token) ? 'not-allowed' : 'pointer',
+        }}>
         {busy ? 'Connecting…' : 'Connect'}
       </button>
-      {error && <div style={{ marginTop: '10px', color: '#dc2626', fontSize: '0.85rem' }}>{error}</div>}
+      {error && <div style={{ marginTop: '10px', color: '#dc2626', fontSize: '0.85rem', fontWeight: 600 }}>{error}</div>}
     </div>
   );
 }

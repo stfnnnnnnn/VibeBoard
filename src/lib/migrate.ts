@@ -5,6 +5,7 @@ let _ranGs = false;
 let _ranFg = false;
 let _ranCl = false;
 let _ranCanvas = false;
+let _ranSs = false;
 
 /** Add accomplished_at column to entry tables if not already present. */
 export async function ensureAccomplishedAt(): Promise<void> {
@@ -66,6 +67,17 @@ export async function ensureCategoryLinking(): Promise<void> {
     if ((err as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw err;
   }
   _ranCl = true;
+}
+
+/** Add section (block, e.g. "TN37") column to subjects if not already present. */
+export async function ensureSubjectSection(): Promise<void> {
+  if (_ranSs) return;
+  try {
+    await pool.query(`ALTER TABLE subjects ADD COLUMN section VARCHAR(20) NULL`);
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw err;
+  }
+  _ranSs = true;
 }
 
 /** Create the Canvas integration tables if they don't already exist. */

@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import pool from '@/lib/db';
+import { ensureSubjectSection } from '@/lib/migrate';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 
 export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
@@ -10,7 +11,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   const { id } = await props.params;
   const courseRowId = parseInt(id);
   const userId = parseInt(session.user.id);
-  const { mode, user_subject_id, subject_name, course_code, units, year_level, trimester } = await req.json();
+  const { mode, user_subject_id, subject_name, course_code, section, units, year_level, trimester } = await req.json();
 
   const [ownedCourse] = await pool.execute<RowDataPacket[]>(
     `SELECT cc.id, cc.name FROM canvas_courses cc
@@ -44,9 +45,10 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     if (!subject_name || !course_code || !year_level || !trimester) {
       return Response.json({ error: 'subject_name, course_code, year_level, trimester are required' }, { status: 400 });
     }
+    await ensureSubjectSection();
     const [subRes] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO subjects (subject_name, course_code, units, year_level, trimester) VALUES (?,?,?,?,?)`,
-      [subject_name.trim(), course_code.trim(), Number(units) || 0, year_level, trimester],
+      `INSERT INTO subjects (subject_name, course_code, section, units, year_level, trimester) VALUES (?,?,?,?,?,?)`,
+      [subject_name.trim(), course_code.trim(), section ? String(section).trim() : null, Number(units) || 0, year_level, trimester],
     );
     const [usRes] = await pool.execute<ResultSetHeader>(
       `INSERT INTO user_subjects (user_id, subject_id) VALUES (?,?)`,

@@ -73,6 +73,57 @@ export function normalizeCourse(raw: RawCourse): NormalizedCourse {
   };
 }
 
+export interface ParsedCourseCode {
+  /** e.g. "3rd Trimester" — matches the exact labels subjects.trimester expects. Null if unparseable. */
+  termLabel:  string | null;
+  /** e.g. "2025-2026". Null if unparseable. */
+  schoolYear: string | null;
+  /** The bare course code with the term/SY prefix and block suffix stripped, e.g. "CS0061L".
+   *  Falls back to the full raw string when the pattern doesn't match. */
+  courseCode: string;
+  /** Block/section, e.g. "TN3" or "TN37" — null when there's no trailing segment to read.
+   *  Anything from a dash onward (e.g. the "-116" in "TN03-116") is dropped; that suffix isn't
+   *  part of the block itself. */
+  section:    string | null;
+}
+
+const TERM_UNIT: Record<string, string> = { S: 'Semester', T: 'Trimester', Q: 'Quarter' };
+const ORDINAL = ['', '1st', '2nd', '3rd', '4th', '5th', '6th'];
+
+/**
+ * This school's SIS course codes are "{n}{S|T|Q}SY{yy}{yy}_{course code}_{block section}",
+ * e.g. "3TSY2526_CS0061L_TN3" → 3rd Trimester, SY 2025-2026, CS0061L, block TN3. Canvas hands
+ * this back verbatim as `course.course_code`. Not every course on the account necessarily
+ * follows the scheme (manually created courses, other departments), so a non-matching string
+ * falls back to using the raw value as the course code with everything else left null, rather
+ * than throwing or mangling it.
+ *
+ * The course code and block section are split on the *last* underscore rather than assuming a
+ * fixed section length — a section like "TN37" comes through whole rather than getting clipped
+ * to a hardcoded width, and a course code that itself contains an underscore is still preserved.
+ */
+export function parseCanvasCourseCode(raw: string | null | undefined): ParsedCourseCode {
+  const trimmed = raw?.trim() ?? '';
+  const fallback: ParsedCourseCode = { termLabel: null, schoolYear: null, courseCode: trimmed, section: null };
+  if (!trimmed) return fallback;
+
+  const prefixMatch = trimmed.match(/^(\d)([STQ])SY(\d{2})(\d{2})_(.+)$/i);
+  if (!prefixMatch) return fallback;
+
+  const [, termNum, termUnit, syStart, syEnd, rest] = prefixMatch;
+  const splitAt     = rest.lastIndexOf('_');
+  const courseCode  = splitAt === -1 ? rest : rest.slice(0, splitAt);
+  const rawSection  = splitAt === -1 ? null : rest.slice(splitAt + 1);
+  const section     = rawSection ? rawSection.split('-')[0] : null;
+
+  return {
+    termLabel:  `${ORDINAL[Number(termNum)] ?? `${termNum}th`} ${TERM_UNIT[termUnit.toUpperCase()] ?? termUnit.toUpperCase()}`,
+    schoolYear: `20${syStart}-20${syEnd}`,
+    courseCode: courseCode || trimmed,
+    section,
+  };
+}
+
 export interface NormalizedAssignment {
   canvasAssignmentId:     number;
   canvasCourseId:         number;

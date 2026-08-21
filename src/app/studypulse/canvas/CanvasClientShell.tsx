@@ -1,8 +1,8 @@
 'use client';
 
 import { Suspense, useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { GraduationCap, Home, ArrowLeft } from 'lucide-react';
 import CanvasConnectPanel, { type ConnectionStatus } from '@/components/studypulse/CanvasConnectPanel';
 import CanvasCourseMapping from '@/components/studypulse/CanvasCourseMapping';
 import CanvasActivityBank from '@/components/studypulse/CanvasActivityBank';
@@ -12,7 +12,7 @@ export default function CanvasClientShell(props: {
   existingSubjects: { user_subject_id: number; subject_name: string }[];
 }) {
   return (
-    <Suspense fallback={<div style={{ padding: '24px', maxWidth: '900px', margin: '0 auto' }} />}>
+    <Suspense fallback={<div className="vb-bg" style={{ minHeight: '100vh' }} />}>
       <CanvasClientShellInner {...props} />
     </Suspense>
   );
@@ -24,6 +24,7 @@ function CanvasClientShellInner({
   initialConnection: ConnectionStatus;
   existingSubjects: { user_subject_id: number; subject_name: string }[];
 }) {
+  const router = useRouter();
   const [connection] = useState(initialConnection);
   const [courses, setCourses]     = useState<never[]>([]);
   const [bankItems, setBankItems] = useState<never[]>([]);
@@ -40,11 +41,12 @@ function CanvasClientShellInner({
       const bankUrl = subjectId
         ? `/api/canvas/bank?status=pending&user_subject_id=${subjectId}`
         : '/api/canvas/bank?status=pending';
+      // The course mapping list isn't rendered in the subject-scoped view, so skip fetching it.
       const [coursesRes, bankRes] = await Promise.all([
-        fetch('/api/canvas/courses'),
+        subjectId ? Promise.resolve(null) : fetch('/api/canvas/courses'),
         fetch(bankUrl),
       ]);
-      if (coursesRes.ok) setCourses((await coursesRes.json()).courses);
+      if (coursesRes?.ok) setCourses((await coursesRes.json()).courses);
       if (bankRes.ok) setBankItems((await bankRes.json()).items);
     } catch (err) {
       console.error('Failed to refresh Canvas data:', err);
@@ -54,28 +56,65 @@ function CanvasClientShellInner({
   useEffect(() => { refresh(); }, [refresh]);
 
   return (
-    <div style={{ padding: '24px', maxWidth: '900px', margin: '0 auto' }}>
-      <h1 style={{ fontSize: '1.4rem', fontWeight: 900, marginBottom: '18px' }}>Canvas Integration</h1>
-      {subjectId && (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px',
-          background: 'rgba(116,188,217,0.14)', border: '1px solid rgba(116,188,217,0.3)',
-          borderRadius: '12px', padding: '10px 16px', marginBottom: '18px',
-          fontSize: '0.85rem', color: '#3a8dba', fontWeight: 600,
-        }}>
-          <span>Showing pending items for {subjectName ?? 'this subject'}</span>
-          <Link href="/studypulse/canvas" style={{ color: '#3a8dba', fontSize: '0.8rem', fontWeight: 700, textDecoration: 'underline' }}>
-            View all subjects
-          </Link>
+    <div className="vb-bg" style={{ margin: 0, fontFamily: "'Inter', sans-serif", minHeight: '100vh', color: '#333' }}>
+      <style jsx>{`
+        .cvs-pill:hover { background: rgba(255,255,255,0.85) !important; }
+      `}</style>
+      <div style={{ maxWidth: '900px', padding: '32px', width: '100%', margin: '0 auto' }}>
+
+        {/* ── Header ── */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px 14px', marginBottom: '20px' }}>
+          <h1 className="gradient-text" style={{
+            fontSize: 'clamp(1.5rem, 3vw, 2rem)', fontWeight: 800, margin: 0,
+            fontFamily: "'DM Sans', 'Segoe UI', sans-serif", letterSpacing: '-0.01em',
+            display: 'flex', alignItems: 'center', gap: '10px',
+          }}>
+            <GraduationCap size={24} strokeWidth={2.4} /> Canvas Integration
+          </h1>
+          <button
+            className="cvs-pill"
+            onClick={() => router.push('/studypulse')}
+            style={{
+              marginLeft: 'auto', background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.45)',
+              borderRadius: '999px', padding: '8px 15px', cursor: 'pointer', display: 'flex', alignItems: 'center',
+              gap: '6px', fontSize: '0.82rem', fontWeight: 700, color: '#5c6b80',
+            }}
+          >
+            <Home size={14} color="#74bcd9" strokeWidth={2.2} /> Study Pulse
+          </button>
         </div>
-      )}
-      <CanvasConnectPanel connection={connection} onChange={refresh} />
-      {connection.connected && (
-        <>
-          <CanvasCourseMapping courses={courses} existingSubjects={existingSubjects} onChange={refresh} />
-          <CanvasActivityBank items={bankItems} onChange={refresh} />
-        </>
-      )}
+
+        {subjectId && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px',
+            background: 'rgba(116,188,217,0.14)', border: '1px solid rgba(116,188,217,0.3)',
+            borderRadius: '16px', padding: '11px 18px', marginBottom: '20px',
+            fontSize: '0.84rem', color: '#2a7fa8', fontWeight: 600,
+          }}>
+            <span>Showing pending items for {subjectName ?? 'this subject'}</span>
+            <button
+              className="cvs-pill"
+              onClick={() => router.push('/studypulse/canvas')}
+              style={{
+                background: 'transparent', border: 'none', color: '#2a7fa8', fontSize: '0.8rem', fontWeight: 700,
+                cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 8px', borderRadius: '999px',
+              }}
+            >
+              <ArrowLeft size={13} /> View all subjects
+            </button>
+          </div>
+        )}
+
+        <CanvasConnectPanel connection={connection} onChange={refresh} />
+        {connection.connected && (
+          <>
+            {/* Scoped to one subject, this view is purely the Activity Bank — the
+                New Canvas Courses mapping list is unrelated once you're already inside a subject. */}
+            {!subjectId && <CanvasCourseMapping courses={courses} existingSubjects={existingSubjects} onChange={refresh} />}
+            <CanvasActivityBank items={bankItems} onChange={refresh} />
+          </>
+        )}
+      </div>
     </div>
   );
 }

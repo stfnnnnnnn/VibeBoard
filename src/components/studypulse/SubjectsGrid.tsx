@@ -8,6 +8,7 @@ export interface SubjectCard {
   user_subject_id:  number;
   subject_name:     string;
   course_code:      string;
+  section?:         string | null;
   units:            number;
   year_level:       string;
   trimester:        string;
@@ -375,7 +376,7 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
                       fontSize: '0.72rem', fontWeight: 800, color: '#e88aa8',
                       textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px',
                     }}>
-                      {sub.course_code}
+                      {sub.course_code}{sub.section ? ` · ${sub.section}` : ''}
                     </div>
                     <div style={{
                       fontSize: '1.08rem', fontWeight: 700, color: '#2e3648', lineHeight: 1.25,
