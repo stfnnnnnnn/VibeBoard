@@ -79,6 +79,7 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
   const [message, setMessage] = useState('');
   const [form, setForm] = useState({
     course_code:  '',
+    section:      '',
     subject_name: '',
     year_level:   '',
     term:         '',
@@ -102,6 +103,7 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
           course_code:  form.course_code,
+          section:      form.section || null,
           subject_name: form.subject_name,
           year_level:   form.year_level,
           trimester:    form.semester,
@@ -290,6 +292,10 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
                   <input placeholder="e.g. CS101" value={form.course_code} onChange={e => set('course_code', e.target.value)} required className="vb-input" />
                 </div>
                 <div>
+                  {label('Block Section')}
+                  <input placeholder="e.g. TN37" value={form.section} onChange={e => set('section', e.target.value)} className="vb-input" />
+                </div>
+                <div>
                   {label('Subject Name', true)}
                   <input placeholder="e.g. Data Structures" value={form.subject_name} onChange={e => set('subject_name', e.target.value)} required className="vb-input" />
                 </div>
@@ -376,7 +382,7 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
                       fontSize: '0.72rem', fontWeight: 800, color: '#e88aa8',
                       textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px',
                     }}>
-                      {sub.course_code}{sub.section ? ` · ${sub.section}` : ''}
+                      {sub.course_code}
                     </div>
                     <div style={{
                       fontSize: '1.08rem', fontWeight: 700, color: '#2e3648', lineHeight: 1.25,
@@ -404,6 +410,14 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
                       background: 'rgba(116,188,217,0.18)', color: '#3a8dba',
                     }}>
                       {sub.trimester}
+                    </span>
+                  )}
+                  {sub.section && (
+                    <span style={{
+                      fontSize: '0.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: '999px',
+                      background: 'rgba(120,130,150,0.16)', color: '#5c6b80',
+                    }}>
+                      Block {sub.section}
                     </span>
                   )}
                 </div>

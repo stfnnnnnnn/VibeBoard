@@ -1584,7 +1584,7 @@ function SubjectCardViewInner({
               {subject.subject_name}
             </h1>
             <p style={{ margin: '0 0 12px', color: '#666', fontSize: '0.95rem', fontWeight: 600 }}>
-              {subject.course_code}{subject.section ? ` · Block ${subject.section}` : ''}
+              {subject.course_code}
             </p>
             <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap', alignItems: 'center' }}>
               {[`${subject.units} Unit${subject.units !== 1 ? 's' : ''}`, subject.year_level, subject.trimester].map(lbl => (
@@ -1592,6 +1592,11 @@ function SubjectCardViewInner({
                   {lbl}
                 </span>
               ))}
+              {subject.section && (
+                <span style={{ background: 'rgba(120,130,150,0.16)', color: '#5c6b80', borderRadius: '999px', padding: '3px 12px', fontSize: '0.77rem', fontWeight: 600 }}>
+                  Block {subject.section}
+                </span>
+              )}
               {isCustomMode && (
                 <span style={{ background: 'rgba(242,167,192,0.2)', color: '#c0607c', borderRadius: '999px', padding: '3px 12px', fontSize: '0.77rem', fontWeight: 600 }}>
                   {config.preset.name}
