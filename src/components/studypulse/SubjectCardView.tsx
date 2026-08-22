@@ -1788,6 +1788,14 @@ function SubjectCardViewInner({
           >
             📥 Activity Bank
           </Link>
+
+          <Link
+            href={`/studypulse/canvas?subject=${userSubjectId}#announcements`}
+            title="View Canvas announcements for this subject"
+            style={{ background: 'rgba(255,255,255,0.5)', border: '1px solid rgba(200,210,230,0.4)', borderRadius: '14px', padding: '8px 14px', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600, color: '#888', whiteSpace: 'nowrap', fontFamily: 'inherit', textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
+          >
+            📢 Announcements
+          </Link>
         </div>
       </div>
 

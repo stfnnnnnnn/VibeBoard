@@ -6,6 +6,7 @@ import { GraduationCap, Home, ArrowLeft } from 'lucide-react';
 import CanvasConnectPanel, { type ConnectionStatus } from '@/components/studypulse/CanvasConnectPanel';
 import CanvasCourseMapping from '@/components/studypulse/CanvasCourseMapping';
 import CanvasActivityBank from '@/components/studypulse/CanvasActivityBank';
+import CanvasAnnouncementBank from '@/components/studypulse/CanvasAnnouncementBank';
 
 export default function CanvasClientShell(props: {
   initialConnection: ConnectionStatus;
@@ -28,6 +29,7 @@ function CanvasClientShellInner({
   const [connection] = useState(initialConnection);
   const [courses, setCourses]     = useState<never[]>([]);
   const [bankItems, setBankItems] = useState<never[]>([]);
+  const [announcementItems, setAnnouncementItems] = useState<never[]>([]);
 
   const searchParams = useSearchParams();
   const subjectParam = searchParams.get('subject');
@@ -41,13 +43,18 @@ function CanvasClientShellInner({
       const bankUrl = subjectId
         ? `/api/canvas/bank?status=pending&user_subject_id=${subjectId}`
         : '/api/canvas/bank?status=pending';
+      const announcementsUrl = subjectId
+        ? `/api/canvas/announcements?user_subject_id=${subjectId}`
+        : '/api/canvas/announcements';
       // The course mapping list isn't rendered in the subject-scoped view, so skip fetching it.
-      const [coursesRes, bankRes] = await Promise.all([
+      const [coursesRes, bankRes, announcementsRes] = await Promise.all([
         subjectId ? Promise.resolve(null) : fetch('/api/canvas/courses'),
         fetch(bankUrl),
+        fetch(announcementsUrl),
       ]);
       if (coursesRes?.ok) setCourses((await coursesRes.json()).courses);
       if (bankRes.ok) setBankItems((await bankRes.json()).items);
+      if (announcementsRes.ok) setAnnouncementItems((await announcementsRes.json()).items);
     } catch (err) {
       console.error('Failed to refresh Canvas data:', err);
     }
@@ -112,6 +119,7 @@ function CanvasClientShellInner({
                 New Canvas Courses mapping list is unrelated once you're already inside a subject. */}
             {!subjectId && <CanvasCourseMapping courses={courses} existingSubjects={existingSubjects} onChange={refresh} />}
             <CanvasActivityBank items={bankItems} onChange={refresh} />
+            <CanvasAnnouncementBank items={announcementItems} onChange={refresh} />
           </>
         )}
       </div>
