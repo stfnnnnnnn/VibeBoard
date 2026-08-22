@@ -38,6 +38,14 @@ function CanvasClientShellInner({
     ? existingSubjects.find(s => String(s.user_subject_id) === subjectId)?.subject_name ?? null
     : null;
 
+  // Task/announcement review only happens per-subject, via a subject page's dedicated
+  // "Activity Bank" / "Announcements" button — each shows only its own panel. The general,
+  // un-scoped page (no subjectId) shows neither: it's just Connect Canvas + New Canvas
+  // Courses, so dumping every pending item from every subject doesn't clutter it.
+  const viewParam         = searchParams.get('view');
+  const showActivityBank  = subjectId != null && viewParam !== 'announcements';
+  const showAnnouncements = subjectId != null && viewParam === 'announcements';
+
   const refresh = useCallback(async () => {
     try {
       const bankUrl = subjectId
@@ -46,19 +54,19 @@ function CanvasClientShellInner({
       const announcementsUrl = subjectId
         ? `/api/canvas/announcements?user_subject_id=${subjectId}`
         : '/api/canvas/announcements';
-      // The course mapping list isn't rendered in the subject-scoped view, so skip fetching it.
+      // Skip fetching whichever panel this view won't render at all.
       const [coursesRes, bankRes, announcementsRes] = await Promise.all([
         subjectId ? Promise.resolve(null) : fetch('/api/canvas/courses'),
-        fetch(bankUrl),
-        fetch(announcementsUrl),
+        showActivityBank ? fetch(bankUrl) : Promise.resolve(null),
+        showAnnouncements ? fetch(announcementsUrl) : Promise.resolve(null),
       ]);
       if (coursesRes?.ok) setCourses((await coursesRes.json()).courses);
-      if (bankRes.ok) setBankItems((await bankRes.json()).items);
-      if (announcementsRes.ok) setAnnouncementItems((await announcementsRes.json()).items);
+      if (bankRes?.ok) setBankItems((await bankRes.json()).items);
+      if (announcementsRes?.ok) setAnnouncementItems((await announcementsRes.json()).items);
     } catch (err) {
       console.error('Failed to refresh Canvas data:', err);
     }
-  }, [subjectId]);
+  }, [subjectId, showActivityBank, showAnnouncements]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -98,7 +106,9 @@ function CanvasClientShellInner({
             borderRadius: '16px', padding: '11px 18px', marginBottom: '20px',
             fontSize: '0.84rem', color: '#2a7fa8', fontWeight: 600,
           }}>
-            <span>Showing pending items for {subjectName ?? 'this subject'}</span>
+            <span>
+              Showing {showAnnouncements && !showActivityBank ? 'announcements' : 'pending items'} for {subjectName ?? 'this subject'}
+            </span>
             <button
               className="cvs-pill"
               onClick={() => router.push('/studypulse/canvas')}
@@ -115,11 +125,12 @@ function CanvasClientShellInner({
         <CanvasConnectPanel connection={connection} onChange={refresh} />
         {connection.connected && (
           <>
-            {/* Scoped to one subject, this view is purely the Activity Bank — the
-                New Canvas Courses mapping list is unrelated once you're already inside a subject. */}
+            {/* Scoped to one subject, this view shows only the panel its entry button asked
+                for — the New Canvas Courses mapping list is unrelated once you're already
+                inside a subject, regardless of which panel is showing. */}
             {!subjectId && <CanvasCourseMapping courses={courses} existingSubjects={existingSubjects} onChange={refresh} />}
-            <CanvasActivityBank items={bankItems} onChange={refresh} />
-            <CanvasAnnouncementBank items={announcementItems} onChange={refresh} />
+            {showActivityBank && <CanvasActivityBank items={bankItems} onChange={refresh} />}
+            {showAnnouncements && <CanvasAnnouncementBank items={announcementItems} onChange={refresh} />}
           </>
         )}
       </div>

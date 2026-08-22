@@ -1782,7 +1782,7 @@ function SubjectCardViewInner({
           </button>
 
           <Link
-            href={`/studypulse/canvas?subject=${userSubjectId}`}
+            href={`/studypulse/canvas?subject=${userSubjectId}&view=activity`}
             title="View pending Canvas Activity Bank items for this subject"
             style={{ background: 'rgba(255,255,255,0.5)', border: '1px solid rgba(200,210,230,0.4)', borderRadius: '14px', padding: '8px 14px', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600, color: '#888', whiteSpace: 'nowrap', fontFamily: 'inherit', textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
           >
@@ -1790,7 +1790,7 @@ function SubjectCardViewInner({
           </Link>
 
           <Link
-            href={`/studypulse/canvas?subject=${userSubjectId}#announcements`}
+            href={`/studypulse/canvas?subject=${userSubjectId}&view=announcements`}
             title="View Canvas announcements for this subject"
             style={{ background: 'rgba(255,255,255,0.5)', border: '1px solid rgba(200,210,230,0.4)', borderRadius: '14px', padding: '8px 14px', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600, color: '#888', whiteSpace: 'nowrap', fontFamily: 'inherit', textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
           >
