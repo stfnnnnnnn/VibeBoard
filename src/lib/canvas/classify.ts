@@ -1,3 +1,8 @@
+export type SuggestedCategory =
+  | { kind: 'legacy'; target: 'activities' | 'quizzes' | 'exams' }
+  | { kind: 'custom'; categoryName: string }
+  | { kind: 'general' };
+
 const EXAM_KEYWORDS = ['exam', 'exams', 'final exam', 'finals', 'midterm exam', 'midterms'];
 const QUIZ_KEYWORDS = ['quiz', 'quizzes'];
 const ACTIVITY_KEYWORDS = [

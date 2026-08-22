@@ -2,12 +2,9 @@ import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
-import { suggestLegacyCategory, suggestCustomCategory, classificationText } from '@/lib/canvas/classify';
-
-type SuggestedCategory =
-  | { kind: 'legacy'; target: 'activities' | 'quizzes' | 'exams' }
-  | { kind: 'custom'; categoryName: string }
-  | { kind: 'general' };
+import {
+  suggestLegacyCategory, suggestCustomCategory, classificationText, type SuggestedCategory,
+} from '@/lib/canvas/classify';
 
 export async function GET(req: NextRequest) {
   const session = await auth();

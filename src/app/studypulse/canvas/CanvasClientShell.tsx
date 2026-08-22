@@ -6,7 +6,7 @@ import { GraduationCap, Home, ArrowLeft } from 'lucide-react';
 import CanvasConnectPanel, { type ConnectionStatus } from '@/components/studypulse/CanvasConnectPanel';
 import CanvasCourseMapping from '@/components/studypulse/CanvasCourseMapping';
 import CanvasActivityBank from '@/components/studypulse/CanvasActivityBank';
-import CanvasAnnouncementBank from '@/components/studypulse/CanvasAnnouncementBank';
+import CanvasAnnouncementBank, { type AnnouncementItem } from '@/components/studypulse/CanvasAnnouncementBank';
 
 export default function CanvasClientShell(props: {
   initialConnection: ConnectionStatus;
@@ -29,7 +29,7 @@ function CanvasClientShellInner({
   const [connection] = useState(initialConnection);
   const [courses, setCourses]     = useState<never[]>([]);
   const [bankItems, setBankItems] = useState<never[]>([]);
-  const [announcementItems, setAnnouncementItems] = useState<never[]>([]);
+  const [announcementItems, setAnnouncementItems] = useState<AnnouncementItem[]>([]);
 
   const searchParams = useSearchParams();
   const subjectParam = searchParams.get('subject');

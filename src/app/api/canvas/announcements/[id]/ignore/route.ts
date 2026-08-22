@@ -18,6 +18,9 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   );
   if (owned.length === 0) return Response.json({ error: 'Not found' }, { status: 404 });
 
-  await pool.execute(`UPDATE canvas_announcement_bank SET bank_status = 'ignored' WHERE id = ?`, [announcementId]);
+  await pool.execute(
+    `UPDATE canvas_announcement_bank SET bank_status = 'ignored' WHERE id = ? AND bank_status IN ('pending', 'ignored')`,
+    [announcementId],
+  );
   return Response.json({ status: 'success' });
 }

@@ -292,7 +292,8 @@ async function upsertAnnouncement(
      ON DUPLICATE KEY UPDATE
        title = VALUES(title), message = VALUES(message), html_url = VALUES(html_url),
        posted_at = VALUES(posted_at), canvas_updated_at = VALUES(canvas_updated_at),
-       last_synced_at = NOW(), last_seen_sync_run_id = VALUES(last_seen_sync_run_id)`,
+       last_synced_at = NOW(), last_seen_sync_run_id = VALUES(last_seen_sync_run_id),
+       bank_status = IF(bank_status = 'removed_upstream', 'pending', bank_status)`,
     [
       connection.id, courseRowId, a.canvasAnnouncementId, a.title, a.message, a.htmlUrl,
       a.postedAt, a.canvasUpdatedAt, runId,
@@ -320,7 +321,7 @@ export { syncCourseAnnouncements };
 async function sweepRemovedAnnouncements(courseRowId: number, runId: number): Promise<void> {
   await pool.execute(
     `UPDATE canvas_announcement_bank SET bank_status = 'removed_upstream'
-      WHERE course_id = ? AND last_seen_sync_run_id != ? AND bank_status != 'removed_upstream'`,
+      WHERE course_id = ? AND last_seen_sync_run_id != ? AND bank_status NOT IN ('removed_upstream', 'included')`,
     [courseRowId, runId],
   );
 }
@@ -376,21 +377,28 @@ export async function syncConnection(connectionId: number, trigger: 'cron' | 'ma
 
   const mappedCourses = await getMappedCourses(connectionId);
   for (const course of mappedCourses) {
+    let assignmentsOk = true;
     try {
       const result = await syncCourseAssignments(connection, course, runId);
       itemsFetched += result.fetched;
       itemsChanged += result.changed;
       await sweepRemovedAssignments(course.id, runId);
-
-      const announcementResult = await syncCourseAnnouncements(connection, course, runId);
-      itemsFetched += announcementResult.fetched;
-      await sweepRemovedAnnouncements(course.id, runId);
-
-      coursesSynced++;
     } catch (err) {
+      assignmentsOk = false;
       const message = err instanceof Error ? err.message : String(err);
       errors.push({ stage: 'syncCourseAssignments', canvas_course_id: course.canvas_course_id, message, retryable: true });
     }
+
+    try {
+      const announcementResult = await syncCourseAnnouncements(connection, course, runId);
+      itemsFetched += announcementResult.fetched;
+      await sweepRemovedAnnouncements(course.id, runId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push({ stage: 'syncCourseAnnouncements', canvas_course_id: course.canvas_course_id, message, retryable: true });
+    }
+
+    if (assignmentsOk) coursesSynced++;
   }
 
   const status: SyncResult['status'] = errors.length === 0 ? 'success' : coursesSynced > 0 ? 'partial' : 'failed';

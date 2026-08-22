@@ -2,13 +2,9 @@
 
 import { useState, useMemo } from 'react';
 import { CheckCircle2, EyeOff, Clock, Megaphone } from 'lucide-react';
+import type { SuggestedCategory } from '@/lib/canvas/classify';
 
-type SuggestedCategory =
-  | { kind: 'legacy'; target: 'activities' | 'quizzes' | 'exams' }
-  | { kind: 'custom'; categoryName: string }
-  | { kind: 'general' };
-
-interface AnnouncementItem {
+export interface AnnouncementItem {
   id: number;
   title: string;
   message: string | null;
@@ -18,6 +14,7 @@ interface AnnouncementItem {
   subject_mode?: 'legacy' | 'custom';
   bank_status: 'pending' | 'included' | 'ignored' | 'removed_upstream';
   suggested_category: SuggestedCategory;
+  html_url: string | null;
 }
 
 interface GradingCategory { cat_id: number; name: string; }
@@ -165,7 +162,19 @@ export default function CanvasAnnouncementBank({ items, onChange }: { items: Ann
     }
   };
 
-  if (items.length === 0) return null;
+  if (items.length === 0) {
+    return (
+      <div id="announcements" style={{ ...GLASS, padding: '22px 26px', marginBottom: '20px' }}>
+        <h3 style={{
+          margin: '0 0 8px', fontSize: '1.05rem', fontWeight: 800, color: '#2d3748',
+          fontFamily: "'DM Sans', 'Segoe UI', sans-serif", display: 'flex', alignItems: 'center', gap: '8px',
+        }}>
+          <Megaphone size={18} color="#74bcd9" /> Announcements
+        </h3>
+        <p style={{ color: '#8a94a6', fontSize: '0.85rem', margin: 0 }}>No announcements synced yet.</p>
+      </div>
+    );
+  }
 
   return (
     <div id="announcements" style={{ ...GLASS, padding: '22px 26px', marginBottom: '20px' }}>
@@ -208,7 +217,14 @@ export default function CanvasAnnouncementBank({ items, onChange }: { items: Ann
           }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 700, color: '#333', flexGrow: 1, fontSize: '0.92rem' }}>{item.title}</span>
+                {item.html_url ? (
+                  <a href={item.html_url} target="_blank" rel="noreferrer"
+                    style={{ fontWeight: 700, color: '#333', flexGrow: 1, fontSize: '0.92rem', textDecoration: 'none' }}>
+                    {item.title}
+                  </a>
+                ) : (
+                  <span style={{ fontWeight: 700, color: '#333', flexGrow: 1, fontSize: '0.92rem' }}>{item.title}</span>
+                )}
                 <span style={{
                   fontSize: '0.72rem', fontWeight: 700, color: '#2a7fa8',
                   background: 'rgba(116,188,217,0.16)', borderRadius: '999px', padding: '3px 10px',
