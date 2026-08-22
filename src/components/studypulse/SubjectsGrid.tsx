@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Trash2, ArrowRight, GraduationCap, Layers, Home } from 'lucide-react';
+import { Plus, Pencil, Trash2, ArrowRight, GraduationCap, Layers, Home } from 'lucide-react';
 
 export interface SubjectCard {
   user_subject_id:  number;
@@ -71,23 +71,56 @@ function GradeRing({ pct }: { pct: number }) {
   );
 }
 
+const BLANK_FORM = {
+  course_code:  '',
+  section:      '',
+  subject_name: '',
+  year_level:   '',
+  term:         '',
+  semester:     '',   // trimester
+  units:        '3',
+};
+
 export default function SubjectsGrid({ initialSubjects }: { initialSubjects: SubjectCard[] }) {
   const router = useRouter();
   const [subjects, setSubjects] = useState(initialSubjects);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
-  const [form, setForm] = useState({
-    course_code:  '',
-    section:      '',
-    subject_name: '',
-    year_level:   '',
-    term:         '',
-    semester:     '',   // trimester
-    units:        '3',
-  });
+  const [form, setForm] = useState(BLANK_FORM);
 
   const set = (k: keyof typeof form, v: string) => setForm(p => ({ ...p, [k]: v }));
+
+  const closeForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setForm(BLANK_FORM);
+    setMessage('');
+  };
+
+  const openForCreate = () => {
+    setEditingId(null);
+    setForm(BLANK_FORM);
+    setMessage('');
+    setShowForm(true);
+  };
+
+  const openForEdit = (e: React.MouseEvent, sub: SubjectCard) => {
+    e.stopPropagation();
+    setEditingId(sub.user_subject_id);
+    setForm({
+      course_code:  sub.course_code,
+      section:      sub.section ?? '',
+      subject_name: sub.subject_name,
+      year_level:   sub.year_level,
+      term:         '',
+      semester:     sub.trimester,
+      units:        String(sub.units),
+    });
+    setMessage('');
+    setShowForm(true);
+  };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,17 +131,38 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
     setSubmitting(true);
     setMessage('');
     try {
-      const res  = await fetch('/api/studypulse/subjects', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
+      const body = JSON.stringify({
+        course_code:  form.course_code,
+        section:      form.section || null,
+        subject_name: form.subject_name,
+        year_level:   form.year_level,
+        trimester:    form.semester,
+        units:        form.units,
+      });
+
+      if (editingId) {
+        const res  = await fetch(`/api/studypulse/subjects/${editingId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body,
+        });
+        const data = await res.json();
+        if (data.status !== 'success') throw new Error(data.error);
+        setSubjects(prev => prev.map(s => s.user_subject_id === editingId ? {
+          ...s,
           course_code:  form.course_code,
           section:      form.section || null,
           subject_name: form.subject_name,
           year_level:   form.year_level,
           trimester:    form.semester,
-          units:        form.units,
-        }),
+          units:        Number(form.units) || 0,
+        } : s));
+        closeForm();
+        return;
+      }
+
+      const res  = await fetch('/api/studypulse/subjects', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
       });
       const data = await res.json();
       if (data.status !== 'success') throw new Error(data.error);
@@ -128,6 +182,7 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
     if (!confirm('Delete this subject? This cannot be undone.')) return;
     await fetch(`/api/studypulse/subjects/${id}`, { method: 'DELETE' });
     setSubjects(prev => prev.filter(s => s.user_subject_id !== id));
+    if (editingId === id) closeForm();
   };
 
   return (
@@ -150,7 +205,8 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
             opacity: 1;
             transform: translateX(0);
           }
-          .subject-card:hover .card-delete {
+          .subject-card:hover .card-delete,
+          .subject-card:hover .card-edit {
             opacity: 0.7;
           }
         }
@@ -159,7 +215,7 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
           transform: translateX(-4px);
           transition: opacity 180ms ease, transform 180ms ease;
         }
-        .card-delete {
+        .card-delete, .card-edit {
           opacity: 0.45;
           transition: opacity 150ms ease, background 150ms ease, color 150ms ease, transform 100ms ease;
         }
@@ -168,7 +224,12 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
           background: rgba(254, 226, 226, 0.9) !important;
           color: #dc2626 !important;
         }
-        .card-delete:active { transform: scale(0.92); }
+        .card-edit:hover, .card-edit:focus-visible {
+          opacity: 1 !important;
+          background: rgba(116, 188, 217, 0.18) !important;
+          color: #2a7fa8 !important;
+        }
+        .card-delete:active, .card-edit:active { transform: scale(0.92); }
 
         .toggle-icon { transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1); }
         .toggle-icon.open { transform: rotate(135deg); }
@@ -196,7 +257,7 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
         .submit-btn:active:not(:disabled) { transform: scale(0.97); }
 
         @media (prefers-reduced-motion: reduce) {
-          .subject-card, .card-arrow, .card-delete, .toggle-icon, .add-toggle-btn,
+          .subject-card, .card-arrow, .card-delete, .card-edit, .toggle-icon, .add-toggle-btn,
           .add-form-shell, .add-form-content, .submit-btn {
             transition-duration: 1ms !important;
           }
@@ -244,7 +305,7 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
         {/* ── Toggle add-subject form button ── */}
         <button
           className="add-toggle-btn"
-          onClick={() => setShowForm(f => !f)}
+          onClick={() => showForm ? closeForm() : openForCreate()}
           style={{
             marginBottom: '18px',
             padding:      '11px 20px 11px 16px',
@@ -282,7 +343,7 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
                 <Layers size={20} color="#e88aa8" />
                 <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0, color: '#3a4258' }}>
-                  New Subject Details
+                  {editingId ? 'Edit Subject Details' : 'New Subject Details'}
                 </h3>
               </div>
 
@@ -340,7 +401,7 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
                 className="submit-btn vb-btn-pink"
                 style={{ width: 'auto', padding: '11px 30px', marginTop: '18px', borderRadius: '12px' }}
               >
-                {submitting ? 'Adding…' : 'Add Subject'}
+                {editingId ? (submitting ? 'Saving…' : 'Save Changes') : (submitting ? 'Adding…' : 'Add Subject')}
               </button>
             </form>
           </div>
@@ -434,6 +495,20 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
                   </span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <button
+                      className="card-edit"
+                      onClick={e => openForEdit(e, sub)}
+                      aria-label={`Edit ${sub.subject_name}`}
+                      title="Edit subject details"
+                      style={{
+                        width: '26px', height: '26px', borderRadius: '8px',
+                        background: 'transparent', border: 'none',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: '#8a94a6', cursor: 'pointer',
+                      }}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
                       className="card-delete"
                       onClick={e => handleDelete(e, sub.user_subject_id)}
                       aria-label={`Delete ${sub.subject_name}`}
@@ -482,7 +557,7 @@ export default function SubjectsGrid({ initialSubjects }: { initialSubjects: Sub
             </p>
             <button
               className="add-toggle-btn"
-              onClick={() => setShowForm(true)}
+              onClick={openForCreate}
               style={{
                 padding: '10px 24px', background: 'linear-gradient(90deg, #f0679d, #74bcd9)',
                 border: 'none', color: 'white', borderRadius: '999px', cursor: 'pointer',
