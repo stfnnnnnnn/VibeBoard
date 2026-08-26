@@ -13,7 +13,7 @@ export default async function CanvasPage() {
   const userId = parseInt(session.user.id);
 
   const [connRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT canvas_user_name, status, last_sync_at, last_sync_status FROM canvas_connections WHERE user_id = ? AND status IN ('active', 'invalid')`,
+    `SELECT canvas_user_name, status, last_sync_at, last_sync_status, token_expires_at FROM canvas_connections WHERE user_id = ? AND status IN ('active', 'invalid')`,
     [userId],
   );
 
@@ -31,6 +31,7 @@ export default async function CanvasPage() {
         status: connRows[0].status as 'active' | 'invalid' | 'disconnected',
         last_sync_at: connRows[0].last_sync_at as string | null,
         last_sync_status: connRows[0].last_sync_status as 'success' | 'partial' | 'failed' | null,
+        token_expires_at: connRows[0].token_expires_at as string | null,
       } : { connected: false }}
       existingSubjects={subjectRows.map(r => ({
         user_subject_id: r.user_subject_id as number,
