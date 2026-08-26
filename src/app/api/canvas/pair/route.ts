@@ -16,56 +16,64 @@ export async function OPTIONS() {
 }
 
 export async function POST(req: NextRequest) {
-  await ensureCanvasSchema();
-
-  const { code, base_url, access_token, expires_at } = await req.json();
-  if (!code || !base_url || !access_token) {
-    return Response.json(
-      { error: 'code, base_url, and access_token are required' },
-      { status: 400, headers: CORS_HEADERS },
-    );
-  }
-
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, user_id, expires_at FROM canvas_pairing_codes WHERE code = ? AND used_at IS NULL`,
-    [code],
-  );
-  const pairing = rows[0];
-  if (!pairing || new Date(pairing.expires_at as string).getTime() < Date.now()) {
-    return Response.json(
-      { error: 'This connect link has expired. Go back to VibeBoard and generate a new one.' },
-      { status: 400, headers: CORS_HEADERS },
-    );
-  }
-
-  let result;
   try {
-    result = await runConnectFlow(
-      pairing.user_id as number,
-      base_url,
-      access_token,
-      typeof expires_at === 'string' ? expires_at : null,
+    await ensureCanvasSchema();
+
+    const { code, base_url, access_token, expires_at } = await req.json();
+    if (!code || !base_url || !access_token) {
+      return Response.json(
+        { error: 'code, base_url, and access_token are required' },
+        { status: 400, headers: CORS_HEADERS },
+      );
+    }
+
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT id, user_id, expires_at FROM canvas_pairing_codes WHERE code = ? AND used_at IS NULL`,
+      [code],
+    );
+    const pairing = rows[0];
+    if (!pairing || new Date(pairing.expires_at as string).getTime() < Date.now()) {
+      return Response.json(
+        { error: 'This connect link has expired. Go back to VibeBoard and generate a new one.' },
+        { status: 400, headers: CORS_HEADERS },
+      );
+    }
+
+    let result;
+    try {
+      result = await runConnectFlow(
+        pairing.user_id as number,
+        base_url,
+        access_token,
+        typeof expires_at === 'string' ? expires_at : null,
+      );
+    } catch (err) {
+      const message = err instanceof InvalidBaseUrlError || err instanceof CanvasAuthError || err instanceof CanvasApiError
+        ? err.message
+        : 'Could not connect to Canvas.';
+      return Response.json({ error: message }, { status: 400, headers: CORS_HEADERS });
+    }
+
+    const [updateResult] = await pool.execute(
+      `UPDATE canvas_pairing_codes SET used_at = NOW() WHERE id = ? AND used_at IS NULL`,
+      [pairing.id],
+    );
+    if ((updateResult as { affectedRows: number }).affectedRows === 0) {
+      return Response.json(
+        { error: 'This connect link was already used.' },
+        { status: 400, headers: CORS_HEADERS },
+      );
+    }
+
+    return Response.json(
+      { status: 'success', canvas_user_name: result.canvasUserName },
+      { headers: CORS_HEADERS },
     );
   } catch (err) {
-    const message = err instanceof InvalidBaseUrlError || err instanceof CanvasAuthError || err instanceof CanvasApiError
-      ? err.message
-      : 'Could not connect to Canvas.';
-    return Response.json({ error: message }, { status: 400, headers: CORS_HEADERS });
-  }
-
-  const [updateResult] = await pool.execute(
-    `UPDATE canvas_pairing_codes SET used_at = NOW() WHERE id = ? AND used_at IS NULL`,
-    [pairing.id],
-  );
-  if ((updateResult as { affectedRows: number }).affectedRows === 0) {
+    console.error('Canvas pairing failed unexpectedly:', err);
     return Response.json(
-      { error: 'This connect link was already used.' },
-      { status: 400, headers: CORS_HEADERS },
+      { error: 'Something went wrong connecting to VibeBoard.' },
+      { status: 500, headers: CORS_HEADERS },
     );
   }
-
-  return Response.json(
-    { status: 'success', canvas_user_name: result.canvasUserName },
-    { headers: CORS_HEADERS },
-  );
 }
