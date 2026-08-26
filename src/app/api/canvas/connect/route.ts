@@ -23,6 +23,6 @@ export async function POST(req: NextRequest) {
     if (err instanceof InvalidBaseUrlError || err instanceof CanvasAuthError || err instanceof CanvasApiError) {
       return Response.json({ error: err.message }, { status: 400 });
     }
-    return Response.json({ error: 'Could not reach Canvas. Check the domain is correct.' }, { status: 400 });
+    throw err;
   }
 }
