@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { auth } from '@/auth';
 import pool from '@/lib/db';
 import { ensureCanvasSchema } from '@/lib/migrate';
+import { toMysqlUtc } from '@/lib/canvas/normalize';
 import type { RowDataPacket } from 'mysql2';
 
 const CODE_TTL_MS = 10 * 60 * 1000;
@@ -19,7 +20,7 @@ export async function POST() {
 
   await pool.execute(
     `INSERT INTO canvas_pairing_codes (user_id, code, expires_at) VALUES (?, ?, ?)`,
-    [userId, code, expiresAt],
+    [userId, code, toMysqlUtc(expiresAt.toISOString())],
   );
 
   return Response.json({ code, expires_at: expiresAt.toISOString() });

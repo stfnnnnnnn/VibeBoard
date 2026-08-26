@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
       [code],
     );
     const pairing = rows[0];
-    if (!pairing || new Date(pairing.expires_at as string).getTime() < Date.now()) {
+    if (!pairing || new Date((pairing.expires_at as string).replace(' ', 'T') + 'Z').getTime() < Date.now()) {
       return Response.json(
         { error: 'This connect link has expired. Go back to VibeBoard and generate a new one.' },
         { status: 400, headers: CORS_HEADERS },

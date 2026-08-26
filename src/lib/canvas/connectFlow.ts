@@ -2,6 +2,7 @@ import pool from '@/lib/db';
 import { canvasValidateToken } from './client';
 import { encryptToken } from './credentials';
 import { CanvasAuthError, CanvasApiError } from './errors';
+import { toMysqlUtc } from './normalize';
 
 export class InvalidBaseUrlError extends Error {}
 
@@ -70,7 +71,7 @@ export async function runConnectFlow(
   }
 
   const { enc, iv, tag } = encryptToken(accessToken);
-  const expiresAtValue = tokenExpiresAt ? new Date(tokenExpiresAt) : null;
+  const expiresAtValue = tokenExpiresAt ? toMysqlUtc(tokenExpiresAt) : null;
 
   await pool.execute(
     `INSERT INTO canvas_connections

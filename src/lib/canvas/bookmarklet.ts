@@ -15,16 +15,18 @@ export function buildBookmarkletHref(code: string, vibeboardOrigin: string): str
       };
       var listRes = await fetch('/api/v1/users/self/user_generated_tokens?per_page=100', { credentials: 'same-origin', headers: headers });
       var existing = await listRes.json();
-      var old = Array.isArray(existing) ? existing.filter(function(t){ return t.purpose === 'VibeBoard'; })[0] : null;
-      if (old) {
-        await fetch('/api/v1/users/self/tokens/' + old.id, { method: 'DELETE', credentials: 'same-origin', headers: headers });
-      }
+      var oldTokens = Array.isArray(existing) ? existing.filter(function(t){ return t.purpose === 'VibeBoard'; }) : [];
       var createRes = await fetch('/api/v1/users/self/tokens', {
         method: 'POST', credentials: 'same-origin', headers: headers,
         body: JSON.stringify({ token: { purpose: 'VibeBoard', expires_at: new Date(Date.now() + 89 * 24 * 60 * 60 * 1000).toISOString() } })
       });
       if (!createRes.ok) throw new Error('Canvas rejected the token request (status ' + createRes.status + ')');
       var created = await createRes.json();
+      for (var i = 0; i < oldTokens.length; i++) {
+        if (oldTokens[i].id !== created.id) {
+          await fetch('/api/v1/users/self/tokens/' + oldTokens[i].id, { method: 'DELETE', credentials: 'same-origin', headers: headers });
+        }
+      }
       var pairRes = await fetch(VIBEBOARD_ORIGIN + '/api/canvas/pair', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: CODE, base_url: location.origin, access_token: created.visible_token, expires_at: created.expires_at })

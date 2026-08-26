@@ -129,10 +129,10 @@ export default function CanvasConnectPanel({
   };
 
   const daysUntilExpiry = connection.token_expires_at
-    ? Math.ceil((new Date(connection.token_expires_at).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+    ? Math.ceil((new Date(connection.token_expires_at.replace(' ', 'T') + 'Z').getTime() - Date.now()) / (24 * 60 * 60 * 1000))
     : null;
   const showExpiryWarning = connection.connected && connection.status === 'active'
-    && daysUntilExpiry !== null && daysUntilExpiry <= 7;
+    && daysUntilExpiry !== null && daysUntilExpiry >= 0 && daysUntilExpiry <= 7;
 
   if (connection.connected) {
     return (
