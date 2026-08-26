@@ -104,6 +104,12 @@ export async function ensureCanvasSchema(): Promise<void> {
     )
   `);
 
+  try {
+    await pool.query(`ALTER TABLE canvas_connections ADD COLUMN token_expires_at DATETIME NULL AFTER last_error`);
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw err;
+  }
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS canvas_courses (
       id                 INT AUTO_INCREMENT PRIMARY KEY,
@@ -243,6 +249,19 @@ export async function ensureCanvasSchema(): Promise<void> {
         (activity_id IS NOT NULL) + (quiz_id IS NOT NULL) +
         (exam_id IS NOT NULL) + (grade_entry_id IS NOT NULL) = 1
       )
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS canvas_pairing_codes (
+      id          INT AUTO_INCREMENT PRIMARY KEY,
+      user_id     INT NOT NULL,
+      code        CHAR(43) NOT NULL,
+      expires_at  DATETIME NOT NULL,
+      used_at     DATETIME NULL,
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_code (code),
+      FOREIGN KEY (user_id) REFERENCES user_login(user_id) ON DELETE CASCADE
     )
   `);
 
