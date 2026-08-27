@@ -81,14 +81,14 @@ function GradeRing({ pct, color }: { pct: number; color: string }) {
   const clamped = Math.max(0, Math.min(100, Math.round(pct)));
   return (
     <div style={{
-      width: '44px', height: '44px', borderRadius: '50%', flexShrink: 0,
+      width: '38px', height: '38px', borderRadius: '50%', flexShrink: 0,
       background: `conic-gradient(from -90deg, ${color} 0%, ${color} ${clamped}%, rgba(120,130,150,0.14) ${clamped}%)`,
       boxShadow: '0 2px 8px rgba(31,38,68,0.1)',
     }}>
       <div style={{
         width: '100%', height: '100%', borderRadius: '50%', margin: 0,
         background: 'rgba(255,255,255,0.9)', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', fontSize: '0.72rem', fontWeight: 800, color: '#33465e',
+        justifyContent: 'center', fontSize: '0.68rem', fontWeight: 800, color: '#33465e',
         transform: 'scale(0.78)',
       }}>
         {clamped}%
@@ -397,13 +397,13 @@ export default function StudyPulseLanding({
         }
       `}</style>
 
-      <div style={{ maxWidth: '1280px', padding: '32px', width: '100%', margin: '0 auto' }}>
+      <div style={{ maxWidth: '1280px', padding: '22px 32px', width: '100%', margin: '0 auto' }}>
 
         {/* ── Header ── */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '18px', marginBottom: '22px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '18px', marginBottom: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <h1 className="gradient-text" style={{
-              fontSize: 'clamp(1.9rem, 4vw, 2.6rem)', fontWeight: 800, margin: 0,
+              fontSize: 'clamp(1.6rem, 3.2vw, 2.2rem)', fontWeight: 800, margin: 0,
               fontFamily: "'DM Sans', 'Segoe UI', sans-serif", letterSpacing: '-0.01em',
             }}>
               Study Pulse
@@ -436,7 +436,7 @@ export default function StudyPulseLanding({
         </div>
 
         {/* ── Filter controls ── */}
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px', alignItems: 'center' }}>
           {Object.keys(FILTER_LABELS).map(f => (
             <button key={f} className="sp-pill" onClick={() => handleFilterClick(f)} style={activeFilter === f ? PILL_ACTIVE : PILL}>
               <span>{FILTER_ICONS[f]}</span>
@@ -453,34 +453,34 @@ export default function StudyPulseLanding({
         </div>
 
         {/* ── Overview panel ── */}
-        <div style={{ ...GLASS, borderRadius: '24px', padding: '30px 32px', marginBottom: '20px' }}>
+        <div style={{ ...GLASS, borderRadius: '24px', padding: '20px 28px', marginBottom: '14px' }}>
           <h2 style={{
-            fontSize: '1.3rem', fontWeight: 800, margin: '0 0 22px', color: '#2d3748',
+            fontSize: '1.15rem', fontWeight: 800, margin: '0 0 14px', color: '#2d3748',
             fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
           }}>
             {firstName}&apos;s {trimesterLabel || 'Overview'}
           </h2>
 
           {activeFilter && filtered ? (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
               {FILTER_LABELS[activeFilter].map((lbl, i) => (
-                <div key={i} className="sp-tile" style={{ ...GLASS, borderRadius: '16px', padding: '18px', textAlign: 'center' }}>
-                  <h3 className="gradient-text" style={{ fontSize: '2rem', fontWeight: 800, margin: '0 0 4px' }}>
+                <div key={i} className="sp-tile" style={{ ...GLASS, borderRadius: '16px', padding: '14px', textAlign: 'center' }}>
+                  <h3 className="gradient-text" style={{ fontSize: '1.7rem', fontWeight: 800, margin: '0 0 2px' }}>
                     {[filtered.col1, filtered.col2, filtered.col3, filtered.col4][i]}
                   </h3>
-                  <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#5c6b80' }}>{lbl}</span>
+                  <span style={{ fontWeight: 600, fontSize: '0.8rem', color: '#5c6b80' }}>{lbl}</span>
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
               {overviewTiles.map(({ value, label: lbl, icon }) => (
-                <div key={lbl} className="sp-tile" style={{ ...GLASS, borderRadius: '16px', padding: '18px', textAlign: 'center' }}>
-                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '8px' }}>{icon}</div>
-                  <h3 className="gradient-text" style={{ fontSize: '2rem', fontWeight: 800, margin: '0 0 4px' }}>
+                <div key={lbl} className="sp-tile" style={{ ...GLASS, borderRadius: '16px', padding: '14px', textAlign: 'center' }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '6px' }}>{icon}</div>
+                  <h3 className="gradient-text" style={{ fontSize: '1.7rem', fontWeight: 800, margin: '0 0 2px' }}>
                     {value}
                   </h3>
-                  <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#5c6b80' }}>{lbl}</span>
+                  <span style={{ fontWeight: 600, fontSize: '0.8rem', color: '#5c6b80' }}>{lbl}</span>
                 </div>
               ))}
             </div>
@@ -488,10 +488,10 @@ export default function StudyPulseLanding({
         </div>
 
         {/* ── Progress + Grade rows (concept unchanged, restyled) ── */}
-        <div style={{ ...GLASS, borderRadius: '24px', padding: '26px 28px', marginBottom: '32px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+        <div style={{ ...GLASS, borderRadius: '24px', padding: '18px 24px', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {progressRows.map(([lbl, color, data]) => (
             <div key={lbl} style={{
-              background: 'rgba(255,255,255,0.55)', padding: '15px 20px', borderRadius: '16px',
+              background: 'rgba(255,255,255,0.55)', padding: '11px 18px', borderRadius: '16px',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               gap: '1.5rem', boxShadow: `0 4px 16px ${color}1a`,
             }}>
