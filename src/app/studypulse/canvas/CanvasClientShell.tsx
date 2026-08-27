@@ -111,13 +111,13 @@ function CanvasClientShellInner({
             </span>
             <button
               className="cvs-pill"
-              onClick={() => router.push('/studypulse/canvas')}
+              onClick={() => router.push(`/studypulse/${subjectId}`)}
               style={{
                 background: 'transparent', border: 'none', color: '#2a7fa8', fontSize: '0.8rem', fontWeight: 700,
                 cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 8px', borderRadius: '999px',
               }}
             >
-              <ArrowLeft size={13} /> View all subjects
+              <ArrowLeft size={13} /> Back to subject
             </button>
           </div>
         )}
