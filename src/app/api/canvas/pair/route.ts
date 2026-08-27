@@ -8,7 +8,11 @@ import type { RowDataPacket } from 'mysql2';
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  // Canvas's own page instruments window.fetch with Sentry distributed tracing, which
+  // auto-injects these two headers into every outgoing request — including the
+  // bookmarklet's, since it runs in that page's context. Without allowing them, the
+  // browser's own CORS preflight blocks the request before it's ever sent.
+  'Access-Control-Allow-Headers': 'Content-Type, sentry-trace, baggage',
 };
 
 export async function OPTIONS() {
