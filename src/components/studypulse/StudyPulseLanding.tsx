@@ -397,10 +397,10 @@ export default function StudyPulseLanding({
         }
       `}</style>
 
-      <div style={{ maxWidth: '1280px', padding: '22px 32px', width: '100%', margin: '0 auto' }}>
+      <div style={{ maxWidth: '1280px', padding: '36px 32px 28px', width: '100%', margin: '0 auto' }}>
 
         {/* ── Header ── */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '18px', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '18px', marginBottom: '22px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <h1 className="gradient-text" style={{
               fontSize: 'clamp(1.6rem, 3.2vw, 2.2rem)', fontWeight: 800, margin: 0,
@@ -436,7 +436,7 @@ export default function StudyPulseLanding({
         </div>
 
         {/* ── Filter controls ── */}
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px', alignItems: 'center' }}>
           {Object.keys(FILTER_LABELS).map(f => (
             <button key={f} className="sp-pill" onClick={() => handleFilterClick(f)} style={activeFilter === f ? PILL_ACTIVE : PILL}>
               <span>{FILTER_ICONS[f]}</span>
@@ -453,16 +453,16 @@ export default function StudyPulseLanding({
         </div>
 
         {/* ── Overview panel ── */}
-        <div style={{ ...GLASS, borderRadius: '24px', padding: '20px 28px', marginBottom: '14px' }}>
+        <div style={{ ...GLASS, borderRadius: '24px', padding: '24px 30px', marginBottom: '20px' }}>
           <h2 style={{
-            fontSize: '1.15rem', fontWeight: 800, margin: '0 0 14px', color: '#2d3748',
+            fontSize: '1.15rem', fontWeight: 800, margin: '0 0 18px', color: '#2d3748',
             fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
           }}>
             {firstName}&apos;s {trimesterLabel || 'Overview'}
           </h2>
 
           {activeFilter && filtered ? (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
               {FILTER_LABELS[activeFilter].map((lbl, i) => (
                 <div key={i} className="sp-tile" style={{ ...GLASS, borderRadius: '16px', padding: '14px', textAlign: 'center' }}>
                   <h3 className="gradient-text" style={{ fontSize: '1.7rem', fontWeight: 800, margin: '0 0 2px' }}>
@@ -473,7 +473,7 @@ export default function StudyPulseLanding({
               ))}
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
               {overviewTiles.map(({ value, label: lbl, icon }) => (
                 <div key={lbl} className="sp-tile" style={{ ...GLASS, borderRadius: '16px', padding: '14px', textAlign: 'center' }}>
                   <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '6px' }}>{icon}</div>
@@ -488,10 +488,10 @@ export default function StudyPulseLanding({
         </div>
 
         {/* ── Progress + Grade rows (concept unchanged, restyled) ── */}
-        <div style={{ ...GLASS, borderRadius: '24px', padding: '18px 24px', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div style={{ ...GLASS, borderRadius: '24px', padding: '24px 26px', marginBottom: '28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {progressRows.map(([lbl, color, data]) => (
             <div key={lbl} style={{
-              background: 'rgba(255,255,255,0.55)', padding: '11px 18px', borderRadius: '16px',
+              background: 'rgba(255,255,255,0.55)', padding: '14px 20px', borderRadius: '16px',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               gap: '1.5rem', boxShadow: `0 4px 16px ${color}1a`,
             }}>
