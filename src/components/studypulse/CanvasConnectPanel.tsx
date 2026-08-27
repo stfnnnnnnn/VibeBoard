@@ -265,14 +265,22 @@ export default function CanvasConnectPanel({
 }
 
 function BookmarkletLink({ code }: { code: string }) {
-  const href = typeof window !== 'undefined' ? buildBookmarkletHref(code, window.location.origin) : 'javascript:void(0)';
+  // React sanitizes `href` values that look like `javascript:` URLs when set through JSX
+  // (a built-in XSS mitigation) and refuses to apply them — a real bookmarklet link only
+  // works if the attribute is set directly on the DOM node, bypassing React's own diffing.
+  const anchorRef = useRef<HTMLAnchorElement>(null);
+
+  useEffect(() => {
+    anchorRef.current?.setAttribute('href', buildBookmarkletHref(code, window.location.origin));
+  }, [code]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-start' }}>
       <span style={{ fontSize: '0.8rem', color: '#8a94a6', fontWeight: 600 }}>
         Drag this to your bookmarks bar, then go to your Canvas site and click it. Expires in 10 minutes.
       </span>
       <a
-        href={href}
+        ref={anchorRef}
         onClick={e => e.preventDefault()}
         style={{
           ...pillBtn, color: 'white', background: 'linear-gradient(to right, #f2a7c0, #74bcd9)',
