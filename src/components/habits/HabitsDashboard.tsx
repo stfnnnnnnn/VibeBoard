@@ -813,14 +813,22 @@ function HabitCard({
 function ChainRow({ chain }: { chain: HabitWithComputed['chain'] }) {
   const days = chain!;
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', padding: '2px 0' }}>
-        {days.map((day, i) => {
-          const prev = days[i - 1];
-          const linked = i > 0 && prev.scheduled && prev.completed && day.scheduled && day.completed;
-          const isToday = i === days.length - 1;
-          return (
-            <div key={day.date} style={{ display: 'flex', alignItems: 'center', flex: i === days.length - 1 ? '0 0 auto' : 1 }}>
+    <div style={{ display: 'flex', alignItems: 'flex-start', padding: '2px 0' }}>
+      {days.map((day, i) => {
+        const prev = days[i - 1];
+        const linked = i > 0 && prev.scheduled && prev.completed && day.scheduled && day.completed;
+        const isToday = i === days.length - 1;
+        const isLast = i === days.length - 1;
+        return (
+          <div
+            key={day.date}
+            style={{
+              display: 'flex', flexDirection: 'column',
+              alignItems: isLast ? 'center' : 'flex-end',
+              flex: isLast ? '0 0 auto' : 1,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
               {i > 0 && (
                 <div style={{ flex: 1, height: 2, minWidth: 6, background: linked ? 'linear-gradient(90deg,#f2a7c0,#74bcd9)' : 'rgba(0,0,0,0.1)' }} />
               )}
@@ -838,16 +846,12 @@ function ChainRow({ chain }: { chain: HabitWithComputed['chain'] }) {
                 }}
               />
             </div>
-          );
-        })}
-      </div>
-      <div style={{ display: 'flex', marginTop: 2 }}>
-        {days.map((day, i) => (
-          <div key={day.date} style={{ flex: i === days.length - 1 ? '0 0 15px' : 1, textAlign: 'center', fontSize: '0.6rem', color: '#999', fontWeight: 700 }}>
-            {day.weekday[0]}
+            <div style={{ width: 15, textAlign: 'center', fontSize: '0.6rem', color: '#999', fontWeight: 700, marginTop: 2 }}>
+              {day.weekday[0]}
+            </div>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
