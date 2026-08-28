@@ -12,7 +12,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const habitId = parseInt(id);
   const weeksParam = req.nextUrl.searchParams.get('weeks');
-  const weeks = weeksParam ? Math.min(52, Math.max(1, parseInt(weeksParam))) : 12;
+  const parsedWeeks = weeksParam ? parseInt(weeksParam) : NaN;
+  const weeks = Number.isNaN(parsedWeeks) ? 12 : Math.min(52, Math.max(1, parsedWeeks));
 
   try {
     const history = await getHabitHistory(parseInt(session.user.id), habitId, weeks);
