@@ -132,3 +132,22 @@ Carried forward from earlier in this plan's review process, still genuinely open
 
 1. `AmountInput`'s displayed "remaining" text and fill bar reflect local debounced state, not the server-confirmed amount, for the ~500ms window before a pending edit commits — a fast-enough reader could see a value that hasn't actually saved yet.
 2. (Already fixed, documented for context) an earlier round of this plan surfaced that the history endpoint's `weeks` query param would throw on a non-numeric value; it now falls back to the default of 12 instead, confirmed above (`?weeks=abc` → 12-week response). This is the intended, correct behavior going forward, not an open issue — noted here only so a future reader doesn't mistake the fallback for an oversight.
+
+## Habit Tracker v4 — Rhythm as the centerpiece
+
+Builds on v3 without touching the database schema: the window-consistency bug fix (fixing off-by-one errors in weekly-expected computation), shipping Rhythm as the hero stat, reselecting `on_pace`/`needs_attention` to favor fulfillment rates and exclude habits with zero scheduled days, category consistency counts verified to no longer include an `'Overall'` row, the three-state glyph strip rendering correctly (unscheduled ○ muted, scheduled-missed ○ red, scheduled-done ● blue), day-click drill-down panel opens showing only fixed-habits-scheduled-that-day, and the fixed-card status line showing exactly three states (done today in green, scheduled-but-not-done in orange, not-scheduled-today in gray).
+
+### External auditor critique pass
+
+A third-party review raised five points against v3:
+1. Priority filtering in the filter dropdown — Already shipped in v3 and unchanged here
+2. Three-state daily chart (unscheduled/missed/done) — Already shipped in v3 and unchanged here
+3. Day-click drill-down showing only fixed habits — Already shipped in v3 and unchanged here
+4. Per-card pace text and visual — Already shipped in v3 and unchanged here
+5. A minor point about the strength of the glyph visual — no action needed
+
+Conclusion: these points confirmed the design direction is present in shipped code, not addressing missing features. No v4 work was required for any of them.
+
+### Verification
+
+No test framework in this repo; verified by hand-computing expected summary values against real local dev DB state (user 2 with 3 active household habits, none with checkins this week), then cross-referencing against the calculation logic in `src/lib/habits.ts` and component rendering logic in `src/components/habits/HabitsDashboard.tsx`. `tsc --noEmit` — zero errors.
