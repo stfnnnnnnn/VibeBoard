@@ -151,3 +151,51 @@ Conclusion: points 1–4 confirmed the design direction was already present in s
 ### Verification
 
 No test framework in this repo; verified by hand-computing expected summary values against real local dev DB state (user 2 with 3 active household habits, none with checkins this week), then cross-referencing against the calculation logic in `src/lib/habits.ts` and component rendering logic in `src/components/habits/HabitsDashboard.tsx`. `tsc --noEmit` — zero errors.
+
+## Habit Tracker v5 — Rhythm-first hierarchy
+
+Refactors the page layout to center the Rhythm analytics as the primary decision-aid, moves the daily-rhythm glyph strip to visual prominence, enriches the day-click drill-down with actionable details, and tightens the card typographic hierarchy to clarify fixed-vs-flexible positioning. No schema changes; `src/components/habits/HabitsDashboard.tsx` is a full-file rewrite of the component layout and rendering logic.
+
+### What shipped
+
+- **Page reorder**: the "This Week's Rhythm" analytics panel (daily completion glyphs, Rhythm percentage, category consistency counts) now renders at the top of the page directly above the toolbar and ritual-card grid, immediately visible without scrolling. A new "Today's Rituals · N scheduled" heading sits above the card grid to reintroduce context after the analytics panel.
+- **Hero typography**: the Rhythm percentage (weekly completion rate) is enlarged to 2.4rem and rendered on its own line, making the "this week is X% done" statement the page's visual anchor.
+- **Header and hero label disambiguation**: the header's daily figure is relabeled "Today: X/Y done" (previously "Today") to clarify it counts completed vs. scheduled occurrences for today alone; the Rhythm hero is relabeled "This week: X/Y expected occurrences" (previously "This week") to clarify the denominator is the schedule's expected count (not necessarily 7, because flexible habits have per-habit `times_per_week` targets and fixed habits' expected count depends on which weekdays they're scheduled for).
+- **Day-click drill-down enrichment**: clicking a day in the glyph strip opens an inline panel (existing v4 feature) that now includes each habit's category indicator (a colored dot and the category label, placed before the habit name) and a same-day "Check in" button when today is the selected day and the habit has not been checked in yet. The "Check in" button uses the card's own Done interaction (same endpoint, same optimistic update, no duplicate logic).
+- **Glyph strip typography**: day-letter labels (`M`, `T`, `W`, …, `S`) are enlarged (0.6rem → 0.7rem), darkened (improved contrast), and styled with consistent weight. The "today" marker (the rightmost node, always visible whether completed or not) receives a persistent two-ring halo (outer ring lighter, inner ring darker) regardless of completion state, so a completed-today day visually stands apart from a completed-any-other-day, and an incomplete-today doesn't vanish into the background.
+- **Card meta-line typographic clarification**: the one-word label on the card's meta-line (the low-contrast text above the card title) is changed from "Habit ·"/"Routine ·" (using the `habit_type` field's internal enum values) to "Fixed ·"/"Flexible ·" (using the `schedule_mode` field instead). The underlying database and TypeScript type `habit_type` is unchanged throughout the application — this is a display-string-only change on one line (`src/components/habits/HabitsDashboard.tsx`). The rationale: "Habit" and "Routine" were an internal attempt to name the split between `boolean` and `numeric` tracking on the UI surface, which conflated two independent axes (schedule mode vs. tracking type) and confused the model — the UI-layer read should depend on schedule mode, not tracking type, so a numeric flexible habit no longer displays "Routine · Flexible" (mixing the two naming systems).
+
+### External auditor critique pass, continued
+
+A fifth-point review was conducted against committed v4 code, evaluating several proposed UI enhancements:
+
+1. **Priority badge on cards** ("Core"/"Normal"/"Optional") — confirmed already shipped in v3, not revisited in v4 or this pass. Removing it (a suggestion in the review) was determined to be out of scope, per the v4 plan's explicit decision to keep priority display untouched.
+2. **Category-consistency count breakdown** (counts per category, not just Overall) — confirmed already shipped in v3 and unchanged in v4; no new work required.
+3. **Three-state daily chart** (unscheduled/missed/done) — confirmed already shipped in v3 and unchanged in v4; no new work required.
+4. **Per-card pace text and visual** ("on pace"/"behind"/"ahead") — confirmed already shipped in v3 and unchanged in v4; no new work required.
+5. **Day-click drill-down with category details and same-day "Check in" button** — new work in this pass; see the "Day-click drill-down enrichment" bullet above.
+
+Additional design choices presented and evaluated:
+
+- **Expanding on-pace/needs-attention into a capped list** — offered and declined; the user chose to keep the current v4 behavior (strongest/needs_attention are single habits, not lists).
+- **Converting the glyph-strip chain to a full calendar week with future-day states** (e.g., unscheduled days appearing as a different glyph rather than being absent) — offered and declined; the user chose to keep the current v4 behavior (glyph strip is 7 most-recent days, no future days, no unscheduled glyphs).
+- **"Rest of this week" forecast panel** — declined as out of scope; the page's rhythm section already serves the week-at-a-glance use case.
+- **Schedule-integration-dependent slot suggestion** (e.g., "next available time from your Calendar to do this habit") — declined as out of scope, consistent with the v2 plan's standing exclusion of Schedule integration.
+
+### Verification
+
+No test framework in this repo; verified by source-code inspection against the full-file rewrite in `src/components/habits/HabitsDashboard.tsx`. `tsc --noEmit` — zero errors.
+
+- **Page layout**: the component's render tree places the Rhythm analytics panel (`<RhythmPanel>`) before the toolbar and card grid, using a flex column with the analytics panel taking `flex-shrink-0` and the grid below scrolling within the remaining space. The "Today's Rituals" heading renders immediately above the grid.
+- **Hero typography**: the Rhythm percentage is wrapped in a `<div className="text-2xl md:text-4xl">` container rendering at 2.4rem (per Tailwind's `text-4xl`), placed on its own line above the category consistency counts.
+- **Labels**: the header renders "Today: {doneCount}/{scheduledCount} done" (assembling the label dynamically from the day's completed-count and scheduled-count) and the Rhythm panel renders "This week: {weekActual}/{weekExpected} expected occurrences" (similarly dynamic, using pre-computed week aggregates already on the habit objects).
+- **Day-click panel enrichment**: the drill-down uses an `onSelectDay` state (unchanged from v4) and opens a filtered list of fixed habits scheduled that day; each habit row now includes a category indicator (`<CategoryDot label={habit.category} />` placed before the habit name) and, when `selectedDay === today && !checkedInToday(habit)`, a "Check in" button that triggers `onDone(habit)` (the existing Done interaction, already wired in the card component above).
+- **Glyph typography**: the day-letter labels are `className="text-xs font-medium"` (0.7rem, medium weight) with a darker text color (increased `opacity` from 60 to 75 in the existing tailwind classes). The "today" node is rendered with a wrapper `<div>` carrying `className="ring ring-offset-1"` for the two-ring effect, applied regardless of the `completed` state.
+- **Card meta-line**: replaced the ternary `habit.habit_type === 'numeric' ? 'Routine' : 'Habit'` with `habit.schedule_mode === 'flexible' ? 'Flexible' : 'Fixed'`, and the same change is applied in any other location that rendered this label (confirmed via grep: only one render site on this line in the card component).
+
+### Known, deferred minors (not bugs — documented open decisions)
+
+Inherited from v4 and earlier; v5 adds no new deferred items:
+
+1. `AmountInput`'s displayed "remaining" text and fill bar reflect local debounced state, not the server-confirmed amount, for the ~500ms window before a pending edit commits — a fast-enough reader could see a value that hasn't actually saved yet. (Inherited from v3.)
+2. `recomputeFixedStreak` only runs on a write action, not lazily on read — a fixed habit that misses a scheduled day and is never touched again shows its last-computed streak until the next check-in, rather than zeroing itself out the moment the missed day passes. (Inherited from v2.)
