@@ -7,6 +7,7 @@ let _ranCl = false;
 let _ranCanvas = false;
 let _ranSs = false;
 let _ranHabitsV2 = false;
+let _ranHabitsV3 = false;
 
 /** Add accomplished_at column to entry tables if not already present. */
 export async function ensureAccomplishedAt(): Promise<void> {
@@ -346,4 +347,37 @@ export async function ensureHabitTrackingSchema(): Promise<void> {
   }
 
   _ranHabitsV2 = true;
+}
+
+/** Add priority + minimum_value columns to habit_tasks if not already present,
+ * backfilling priority from the legacy habit_urgency values exactly once
+ * (only on the run that actually adds the column, never on a later no-op call). */
+export async function ensureHabitPriorityAndMinimumSchema(): Promise<void> {
+  if (_ranHabitsV3) return;
+
+  let priorityColumnAdded = false;
+  try {
+    await pool.query(`ALTER TABLE habit_tasks ADD COLUMN priority ENUM('core','normal','optional') NOT NULL DEFAULT 'normal'`);
+    priorityColumnAdded = true;
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw err;
+  }
+
+  try {
+    await pool.query(`ALTER TABLE habit_tasks ADD COLUMN minimum_value DECIMAL(6,1) NULL`);
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw err;
+  }
+
+  if (priorityColumnAdded) {
+    await pool.query(`
+      UPDATE habit_tasks SET priority = CASE
+        WHEN habit_urgency IN ('Urgent','Priority') THEN 'core'
+        WHEN habit_urgency = 'Important' THEN 'normal'
+        ELSE 'optional'
+      END
+    `);
+  }
+
+  _ranHabitsV3 = true;
 }
