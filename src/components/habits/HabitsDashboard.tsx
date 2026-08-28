@@ -113,7 +113,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
       return;
     }
     const hData = await hRes.json();
-    const sData = await sRes.json();
+    const sData = await hRes.json();
     setLoadError(false);
     setHabits(hData.habits ?? []);
     setSummary(sData);
@@ -248,7 +248,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
             <p style={{ margin: '8px 0 0', fontSize: '0.95rem', color: '#555' }}>
               {summary.today_total === 0
                 ? 'Nothing scheduled today.'
-                : <><strong>{summary.today_completed} of {summary.today_total}</strong> today&apos;s rituals done.</>}
+                : <><strong>Today:</strong> {summary.today_completed}/{summary.today_total} done</>}
             </p>
           )}
         </div>
@@ -257,78 +257,16 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
         </Link>
       </div>
 
-      {/* ── Toolbar ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap', margin: '22px 0 20px' }}>
-        <select
-          className="ht-select"
-          value={filter}
-          onChange={e => setFilter(e.target.value)}
-          aria-label="Filter rituals"
-        >
-          <optgroup label="View">
-            <option value="today">Today</option>
-            <option value="all">All rituals</option>
-          </optgroup>
-          <optgroup label="Category">
-            {CATEGORY_OPTIONS.map(c => <option key={c} value={`category:${c}`}>{CATEGORY_LABELS[c]}</option>)}
-          </optgroup>
-          <optgroup label="Priority">
-            {PRIORITY_OPTIONS.map(p => <option key={p} value={`priority:${p}`}>{PRIORITY_LABELS[p]}</option>)}
-          </optgroup>
-          <optgroup label="Day">
-            {WEEKDAYS.map(d => <option key={d} value={`day:${d}`}>{d}</option>)}
-          </optgroup>
-        </select>
-
-        <button className="vb-btn-pink" style={{ width: 'auto', display: 'flex', alignItems: 'center', gap: 8 }} onClick={openAdd}>
-          <Plus size={16} /> New Ritual
-        </button>
-      </div>
-
-      {/* ── Habit grid ── */}
-      {loadError ? (
-        <div className="glass" style={{ borderRadius: 20, padding: '36px 28px', textAlign: 'center', color: '#555' }}>
-          <AlertTriangle size={22} style={{ marginBottom: 8, opacity: 0.7 }} />
-          <p style={{ margin: 0, fontWeight: 600 }}>Couldn&apos;t load your rituals. Try refreshing.</p>
-        </div>
-      ) : loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}><Loader2 className="ht-spin" size={28} /></div>
-      ) : filtered.length === 0 ? (
-        <div className="glass" style={{ borderRadius: 20, padding: '36px 28px', textAlign: 'center', color: '#555' }}>
-          <Sparkles size={22} style={{ marginBottom: 8, opacity: 0.7 }} />
-          <p style={{ margin: 0, fontWeight: 600 }}>No rituals match this filter.</p>
-          <p style={{ margin: '4px 0 0', fontSize: '0.9rem' }}>Try &quot;Today&quot; or &quot;All rituals&quot;, or add a new one.</p>
-        </div>
-      ) : (
-        <div className="ht-grid">
-          {filtered.map(h => (
-            <HabitCard
-              key={h.habit_id}
-              habit={h}
-              busy={busyId === h.habit_id}
-              onCheckin={() => doCheckin(h.habit_id)}
-              onUndo={() => doUndo(h.habit_id)}
-              onEdit={() => openEdit(h)}
-              onDelete={() => doDelete(h.habit_id)}
-              onAmountCommitted={load}
-              onOpenDetail={() => setDetailHabit(h)}
-            />
-          ))}
-        </div>
-      )}
-
       {/* ── Analytics ── */}
       {summary && summary.total_habits > 0 && (
-        <div style={{ marginTop: 44 }}>
+        <div style={{ marginTop: 28 }}>
           <div className="glass" style={{ borderRadius: 20, padding: '24px 26px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-              <h2 className="gradient-text" style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0 }}>This Week&apos;s Rhythm</h2>
-              <span style={{ fontSize: '1.6rem', fontWeight: 800, color: '#74bcd9' }}>
-                {summary.weekly_expected.expected > 0
-                  ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100))
-                  : '—'}
-                {summary.weekly_expected.expected > 0 ? '%' : ''}
-              </span>
+            <h2 className="gradient-text" style={{ fontSize: '1.2rem', fontWeight: 800, margin: '0 0 4px' }}>This Week&apos;s Rhythm</h2>
+            <div style={{ fontSize: '2.4rem', fontWeight: 800, color: '#74bcd9', lineHeight: 1.1, marginBottom: 10 }}>
+              {summary.weekly_expected.expected > 0
+                ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100))
+                : '—'}
+              {summary.weekly_expected.expected > 0 ? '%' : ''}
             </div>
             <div style={{ height: 10, borderRadius: 6, background: 'rgba(0,0,0,0.07)', overflow: 'hidden', marginBottom: 10 }}>
               <div style={{
@@ -338,7 +276,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
             </div>
             <p style={{ margin: '0 0 14px', fontSize: '0.88rem', color: '#555' }}>
               {summary.weekly_expected.expected > 0
-                ? `${summary.weekly_expected.actual} of ${Math.max(summary.weekly_expected.actual, Math.round(summary.weekly_expected.expected))} expected occurrences this week`
+                ? <><strong>This week:</strong> {summary.weekly_expected.actual}/{Math.max(summary.weekly_expected.actual, Math.round(summary.weekly_expected.expected))} expected occurrences</>
                 : 'Nothing due yet this week'}
             </p>
 
@@ -391,12 +329,18 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
                   : d.percent > 0
                     ? '#74bcd9'
                     : '#f75b67';
+                const isSelected = selectedDay === d.date;
                 return (
                   <div
                     key={d.date}
                     onClick={() => setSelectedDay(prev => prev === d.date ? null : d.date)}
                     title={`${d.weekday} ${d.date}: ${d.scheduled > 0 ? `${d.percent}% fulfilled` : 'nothing scheduled'}`}
-                    style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer', padding: '4px 0' }}
+                    style={{
+                      flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer', padding: '4px 0',
+                      borderRadius: 10,
+                      background: isSelected ? 'rgba(116,188,217,0.14)' : 'transparent',
+                      boxShadow: isSelected ? 'inset 0 0 0 1.5px rgba(116,188,217,0.55)' : 'none',
+                    }}
                   >
                     <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#777', minHeight: 12 }}>
                       {d.scheduled > 0 ? `${d.percent}%` : '—'}
@@ -408,30 +352,44 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
               })}
             </div>
 
-            {selectedDay && habits && (
-              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
-                <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 8 }}>
-                  {new Date(selectedDay + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
-                </div>
-                {(() => {
-                  const dayHabits = habits
-                    .filter(h => h.schedule_mode === 'fixed')
-                    .map(h => ({ habit: h, day: h.chain?.find(c => c.date === selectedDay) }))
-                    .filter((x): x is { habit: HabitWithComputed; day: NonNullable<HabitWithComputed['chain']>[number] } => !!x.day?.scheduled);
-                  if (!dayHabits.length) return <div style={{ fontSize: '0.82rem', color: '#888' }}>Nothing scheduled this day.</div>;
-                  return (
+            {selectedDay && habits && (() => {
+              const todayStr = summary.weekly_rhythm[summary.weekly_rhythm.length - 1]?.date;
+              const isToday = selectedDay === todayStr;
+              const dayHabits = habits
+                .filter(h => h.schedule_mode === 'fixed')
+                .map(h => ({ habit: h, day: h.chain?.find(c => c.date === selectedDay) }))
+                .filter((x): x is { habit: HabitWithComputed; day: NonNullable<HabitWithComputed['chain']>[number] } => !!x.day?.scheduled);
+              return (
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 8 }}>
+                    {new Date(selectedDay + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+                  </div>
+                  {!dayHabits.length ? (
+                    <div style={{ fontSize: '0.82rem', color: '#888' }}>Nothing scheduled this day.</div>
+                  ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {dayHabits.map(({ habit, day }) => (
                         <div key={habit.habit_id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
                           <span style={{ color: day.completed ? '#42c38b' : '#c0392b' }}>{day.completed ? '✓' : '○'}</span>
-                          <span>{habit.task_name}</span>
+                          <span style={{ flex: 1 }}>{habit.task_name}</span>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: CATEGORY_COLORS[habit.task_category], display: 'inline-block' }} />
+                          <span style={{ fontSize: '0.72rem', color: '#888' }}>{CATEGORY_LABELS[habit.task_category]}</span>
+                          {isToday && !day.completed && (
+                            <button
+                              type="button"
+                              onClick={() => doCheckin(habit.habit_id)}
+                              style={{ fontSize: '0.7rem', fontWeight: 700, padding: '3px 9px', borderRadius: 8, border: 'none', background: '#74bcd9', color: '#fff', cursor: 'pointer' }}
+                            >
+                              Check in
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
-                  );
-                })()}
-              </div>
-            )}
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {summary.category_consistency.length > 0 && (
@@ -451,6 +409,71 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Toolbar ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap', margin: '32px 0 20px' }}>
+        <select
+          className="ht-select"
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+          aria-label="Filter rituals"
+        >
+          <optgroup label="View">
+            <option value="today">Today</option>
+            <option value="all">All rituals</option>
+          </optgroup>
+          <optgroup label="Category">
+            {CATEGORY_OPTIONS.map(c => <option key={c} value={`category:${c}`}>{CATEGORY_LABELS[c]}</option>)}
+          </optgroup>
+          <optgroup label="Priority">
+            {PRIORITY_OPTIONS.map(p => <option key={p} value={`priority:${p}`}>{PRIORITY_LABELS[p]}</option>)}
+          </optgroup>
+          <optgroup label="Day">
+            {WEEKDAYS.map(d => <option key={d} value={`day:${d}`}>{d}</option>)}
+          </optgroup>
+        </select>
+
+        <button className="vb-btn-pink" style={{ width: 'auto', display: 'flex', alignItems: 'center', gap: 8 }} onClick={openAdd}>
+          <Plus size={16} /> New Ritual
+        </button>
+      </div>
+
+      {/* ── Today's Rituals heading ── */}
+      <h2 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#333', margin: '0 0 14px' }}>
+        Today&apos;s Rituals{filter === 'today' && !loading && !loadError ? ` · ${filtered.length} scheduled` : ''}
+      </h2>
+
+      {/* ── Habit grid ── */}
+      {loadError ? (
+        <div className="glass" style={{ borderRadius: 20, padding: '36px 28px', textAlign: 'center', color: '#555' }}>
+          <AlertTriangle size={22} style={{ marginBottom: 8, opacity: 0.7 }} />
+          <p style={{ margin: 0, fontWeight: 600 }}>Couldn&apos;t load your rituals. Try refreshing.</p>
+        </div>
+      ) : loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}><Loader2 className="ht-spin" size={28} /></div>
+      ) : filtered.length === 0 ? (
+        <div className="glass" style={{ borderRadius: 20, padding: '36px 28px', textAlign: 'center', color: '#555' }}>
+          <Sparkles size={22} style={{ marginBottom: 8, opacity: 0.7 }} />
+          <p style={{ margin: 0, fontWeight: 600 }}>No rituals match this filter.</p>
+          <p style={{ margin: '4px 0 0', fontSize: '0.9rem' }}>Try &quot;Today&quot; or &quot;All rituals&quot;, or add a new one.</p>
+        </div>
+      ) : (
+        <div className="ht-grid">
+          {filtered.map(h => (
+            <HabitCard
+              key={h.habit_id}
+              habit={h}
+              busy={busyId === h.habit_id}
+              onCheckin={() => doCheckin(h.habit_id)}
+              onUndo={() => doUndo(h.habit_id)}
+              onEdit={() => openEdit(h)}
+              onDelete={() => doDelete(h.habit_id)}
+              onAmountCommitted={load}
+              onOpenDetail={() => setDetailHabit(h)}
+            />
+          ))}
         </div>
       )}
 
@@ -745,7 +768,7 @@ function HabitCard({
       </p>
 
       <div style={{ fontSize: '0.74rem', color: '#888' }}>
-        {habit.habit_type === 'habit' ? 'Habit' : 'Routine'} ·{' '}
+        {isFlexible ? 'Flexible' : 'Fixed'} ·{' '}
         {isFlexible ? `${habit.times_per_week}× weekly` : habit.days_of_week.map(d => WEEKDAY_SHORT[d]).join(', ')}
         {isNumeric && habit.target_value != null && (
           habit.minimum_value != null
@@ -848,14 +871,19 @@ function ChainRow({ chain }: { chain: HabitWithComputed['chain'] }) {
                   ...(!day.scheduled
                     ? { border: '1px solid rgba(0,0,0,0.15)', background: 'transparent', opacity: 0.5 }
                     : day.completed
-                      ? { background: 'linear-gradient(135deg,#f2a7c0,#74bcd9)', boxShadow: '0 0 0 2px rgba(255,255,255,0.6)' }
+                      ? { background: 'linear-gradient(135deg,#f2a7c0,#74bcd9)' }
                       : isToday
                         ? { border: '2px dashed #74bcd9', background: 'rgba(255,255,255,0.6)' }
                         : { border: '2px solid rgba(247,91,103,0.55)', background: 'transparent' }),
+                  boxShadow: isToday
+                    ? '0 0 0 2px #fff, 0 0 0 4px rgba(116,188,217,0.55)'
+                    : day.scheduled && day.completed
+                      ? '0 0 0 2px rgba(255,255,255,0.6)'
+                      : 'none',
                 }}
               />
             </div>
-            <div style={{ width: 15, textAlign: 'center', fontSize: '0.6rem', color: '#999', fontWeight: 700, marginTop: 2 }}>
+            <div style={{ width: 15, textAlign: 'center', fontSize: '0.7rem', color: '#777', fontWeight: 700, marginTop: 2 }}>
               {day.weekday[0]}
             </div>
           </div>
