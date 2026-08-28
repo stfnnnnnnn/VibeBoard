@@ -1,18 +1,19 @@
 import pool from '@/lib/db';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import {
-  Weekday, WEEKDAYS, todayInManila, lastNDays,
-  computeConsecutiveScheduledStreak, URGENCY_RANK, weekdayOfDateStr,
+  Weekday, WEEKDAYS, todayInManila, lastNDays, addDaysToDateStr,
+  computeConsecutiveScheduledStreak, weekdayOfDateStr,
 } from '@/lib/habitDate';
 import { occurrenceFulfillment, occurrenceCompleted } from '@/lib/habitFulfillment';
 
-export type HabitUrgency = 'Urgent' | 'Priority' | 'Important' | 'Not Important' | 'Not Urgent';
+export type HabitPriority = 'core' | 'normal' | 'optional';
 export type HabitCategory = 'academic' | 'household' | 'health' | 'social' | 'organizational' | 'life goals';
 export type HabitType = 'routine' | 'habit';
 export type ScheduleMode = 'fixed' | 'flexible';
 export type TrackingType = 'boolean' | 'numeric';
+export type Pace = 'ahead' | 'on_pace' | 'behind';
 
-export const URGENCY_OPTIONS: HabitUrgency[] = ['Urgent', 'Priority', 'Important', 'Not Important', 'Not Urgent'];
+export const PRIORITY_OPTIONS: HabitPriority[] = ['core', 'normal', 'optional'];
 export const CATEGORY_OPTIONS: HabitCategory[] = ['academic', 'household', 'health', 'social', 'organizational', 'life goals'];
 export const TYPE_OPTIONS: HabitType[] = ['habit', 'routine'];
 export const SCHEDULE_MODE_OPTIONS: ScheduleMode[] = ['fixed', 'flexible'];
@@ -25,12 +26,13 @@ export interface HabitWithComputed {
   habit_id: number;
   task_name: string;
   purpose: string;
-  habit_urgency: HabitUrgency;
+  priority: HabitPriority;
   task_category: HabitCategory;
   habit_type: HabitType;
   schedule_mode: ScheduleMode;
   tracking_type: TrackingType;
   target_value: number | null;
+  minimum_value: number | null;
   unit_label: string | null;
   step_value: number;
   days_of_week: Weekday[];
@@ -43,12 +45,16 @@ export interface HabitWithComputed {
   streak_percent: number | null;
   chain: ChainDay[] | null;
   week_progress: WeekProgress | null;
+  week_expected: number;
+  week_actual: number;
+  pace: Pace;
+  week_days_remaining: number;
 }
 
 export interface HabitInput {
   task_name: string;
   purpose: string;
-  habit_urgency: HabitUrgency;
+  priority?: HabitPriority;
   task_category: HabitCategory;
   habit_type: HabitType;
   schedule_mode?: ScheduleMode;
@@ -56,16 +62,18 @@ export interface HabitInput {
   weekly_target?: number;
   tracking_type?: TrackingType;
   target_value?: number | null;
+  minimum_value?: number | null;
   unit_label?: string | null;
   step_value?: number | null;
 }
 
 interface HabitRow extends RowDataPacket {
   habit_id: number; user_id: number; task_name: string; purpose: string;
-  habit_urgency: HabitUrgency; task_category: HabitCategory; habit_type: HabitType;
+  priority: HabitPriority; task_category: HabitCategory; habit_type: HabitType;
   days_of_week: string; times_per_week: number; date_created: string;
   schedule_mode: ScheduleMode; tracking_type: TrackingType;
-  target_value: string | number | null; unit_label: string | null; step_value: string | number | null;
+  target_value: string | number | null; minimum_value: string | number | null;
+  unit_label: string | null; step_value: string | number | null;
 }
 interface StreakRow extends RowDataPacket {
   streak_id: number; user_id: number; habit_id: number; streak_start: string;
@@ -88,15 +96,17 @@ function toNum(v: string | number | null | undefined): number | null {
 }
 
 interface ValidatedHabitInput {
+  priority: HabitPriority;
   scheduleMode: ScheduleMode; trackingType: TrackingType;
   daysStr: string; weeklyTarget: number;
-  targetValue: number | null; unitLabel: string | null; stepValue: number;
+  targetValue: number | null; minimumValue: number | null; unitLabel: string | null; stepValue: number;
 }
 
 function validateInput(input: HabitInput): ValidatedHabitInput {
   if (!input.task_name?.trim()) throw new Error('Habit name is required.');
   if (!input.purpose?.trim()) throw new Error('Purpose is required.');
-  if (!URGENCY_OPTIONS.includes(input.habit_urgency)) throw new Error('Invalid urgency.');
+  const priority: HabitPriority = input.priority ?? 'normal';
+  if (!PRIORITY_OPTIONS.includes(priority)) throw new Error('Invalid priority.');
   if (!CATEGORY_OPTIONS.includes(input.task_category)) throw new Error('Invalid category.');
   if (!TYPE_OPTIONS.includes(input.habit_type)) throw new Error('Invalid type.');
 
@@ -113,13 +123,14 @@ function validateInput(input: HabitInput): ValidatedHabitInput {
   } else {
     weeklyTarget = Math.floor(Number(input.weekly_target));
     if (!weeklyTarget || weeklyTarget < 1) throw new Error('Set how many times per week.');
-    if (weeklyTarget > 7) throw new Error('Times per week can\'t be more than 7.');
+    if (weeklyTarget > 7) throw new Error("Times per week can't be more than 7.");
   }
 
   const trackingType: TrackingType = input.tracking_type ?? 'boolean';
   if (!TRACKING_TYPE_OPTIONS.includes(trackingType)) throw new Error('Invalid tracking type.');
 
   let targetValue: number | null = null;
+  let minimumValue: number | null = null;
   let unitLabel: string | null = null;
   let stepValue = 1;
   if (trackingType === 'numeric') {
@@ -131,9 +142,14 @@ function validateInput(input: HabitInput): ValidatedHabitInput {
       stepValue = Number(input.step_value);
       if (!stepValue || stepValue <= 0) throw new Error('Increment must be greater than 0.');
     }
+    if (input.minimum_value != null) {
+      minimumValue = Number(input.minimum_value);
+      if (!minimumValue || minimumValue <= 0) throw new Error('Minimum must be greater than 0.');
+      if (minimumValue > targetValue) throw new Error("Minimum can't be greater than the target.");
+    }
   }
 
-  return { scheduleMode, trackingType, daysStr, weeklyTarget, targetValue, unitLabel, stepValue };
+  return { priority, scheduleMode, trackingType, daysStr, weeklyTarget, targetValue, minimumValue, unitLabel, stepValue };
 }
 
 async function getOwnedHabitRow(habitId: number, userId: number): Promise<HabitRow> {
@@ -152,6 +168,14 @@ async function getLatestStreakRow(habitId: number, userId: number): Promise<Stre
   return rows[0] ?? null;
 }
 
+function habitCoreOf(habit: HabitRow) {
+  return {
+    tracking_type: habit.tracking_type,
+    target_value: toNum(habit.target_value),
+    minimum_value: toNum(habit.minimum_value),
+  };
+}
+
 /** Recomputes and persists the fixed-schedule streak for a habit from its full check-in
  * history, anchored at `today`. Shared by checkin/undo/setAmount so all three agree. */
 async function recomputeFixedStreak(userId: number, habitId: number, habit: HabitRow): Promise<{ current_streak: number; longest_streak: number }> {
@@ -160,7 +184,7 @@ async function recomputeFixedStreak(userId: number, habitId: number, habit: Habi
   const [rows] = await pool.execute<CheckinRow[]>(
     `SELECT checkin_date, is_completed, amount FROM habit_checkins WHERE habit_id = ?`, [habitId]
   );
-  const habitCore = { tracking_type: habit.tracking_type, target_value: toNum(habit.target_value) };
+  const habitCore = habitCoreOf(habit);
   const completedDates = new Set(
     rows.filter(r => occurrenceCompleted(habitCore, { is_completed: r.is_completed, amount: toNum(r.amount) }))
         .map(r => r.checkin_date)
@@ -205,10 +229,28 @@ function mondayOfWeek(dateStr: string): string {
   return dt.toISOString().slice(0, 10);
 }
 
+/** Today's 1-based position within its Mon–Sun week (Monday -> 1, Sunday -> 7). */
+function daysElapsedInWeek(dateStr: string): number {
+  const weekStart = mondayOfWeek(dateStr);
+  const [y1, m1, d1] = weekStart.split('-').map(Number);
+  const [y2, m2, d2] = dateStr.split('-').map(Number);
+  const start = Date.UTC(y1, m1 - 1, d1);
+  const end = Date.UTC(y2, m2 - 1, d2);
+  return Math.round((end - start) / 86400000) + 1;
+}
+
+function computePace(actual: number, expected: number): Pace {
+  if (actual < expected - 0.5) return 'behind';
+  if (actual > expected + 0.5) return 'ahead';
+  return 'on_pace';
+}
+
 export async function getHabitsForUser(userId: number): Promise<HabitWithComputed[]> {
   const { dateStr: today, weekday: todayWeekday } = todayInManila();
   const days = lastNDays(today, 7);
   const weekStart = mondayOfWeek(today);
+  const daysElapsed = daysElapsedInWeek(today);
+  const weekDaysRemaining = 7 - daysElapsed;
 
   const [taskRows] = await pool.execute<HabitRow[]>(
     `SELECT * FROM habit_tasks WHERE user_id = ? ORDER BY date_created DESC`, [userId]
@@ -237,7 +279,7 @@ export async function getHabitsForUser(userId: number): Promise<HabitWithCompute
   }
 
   const result: HabitWithComputed[] = taskRows.map(row => {
-    const habitCore = { tracking_type: row.tracking_type, target_value: toNum(row.target_value) };
+    const habitCore = habitCoreOf(row);
     const scheduled = parseDays(row.days_of_week);
     const checkinsByDate = rowsByHabit.get(row.habit_id) ?? new Map();
 
@@ -245,16 +287,18 @@ export async function getHabitsForUser(userId: number): Promise<HabitWithCompute
       habit_id: row.habit_id,
       task_name: row.task_name,
       purpose: row.purpose,
-      habit_urgency: row.habit_urgency,
+      priority: row.priority,
       task_category: row.task_category,
       habit_type: row.habit_type,
       schedule_mode: row.schedule_mode,
       tracking_type: row.tracking_type,
       target_value: habitCore.target_value,
+      minimum_value: habitCore.minimum_value,
       unit_label: row.unit_label,
       step_value: toNum(row.step_value) ?? 1,
       times_per_week: row.times_per_week,
       today_amount: row.tracking_type === 'numeric' ? (checkinsByDate.get(today)?.amount ?? null) : null,
+      week_days_remaining: weekDaysRemaining,
     };
 
     if (row.schedule_mode === 'flexible') {
@@ -263,6 +307,7 @@ export async function getHabitsForUser(userId: number): Promise<HabitWithCompute
         if (date >= weekStart && date <= today && occurrenceCompleted(habitCore, r)) completedThisWeek++;
       }
       const target = Math.max(1, row.times_per_week);
+      const week_expected = (daysElapsed / 7) * target;
       return {
         ...base,
         days_of_week: [],
@@ -273,6 +318,9 @@ export async function getHabitsForUser(userId: number): Promise<HabitWithCompute
         streak_percent: null,
         chain: null,
         week_progress: { completed: completedThisWeek, target },
+        week_expected,
+        week_actual: completedThisWeek,
+        pace: computePace(completedThisWeek, week_expected),
       };
     }
 
@@ -283,8 +331,18 @@ export async function getHabitsForUser(userId: number): Promise<HabitWithCompute
       const weekday = weekdayOfDateStr(date);
       const r = checkinsByDate.get(date);
       const fulfillment = r ? occurrenceFulfillment(habitCore, r) : 0;
-      return { date, weekday, scheduled: scheduled.has(weekday), completed: fulfillment >= 1, fulfillment };
+      const completed = r ? occurrenceCompleted(habitCore, r) : false;
+      return { date, weekday, scheduled: scheduled.has(weekday), completed, fulfillment };
     });
+
+    let weekExpectedCount = 0;
+    let weekActualCount = 0;
+    for (const day of chain) {
+      if (day.date >= weekStart && day.date <= today && day.scheduled) {
+        weekExpectedCount++;
+        if (day.completed) weekActualCount++;
+      }
+    }
 
     return {
       ...base,
@@ -296,6 +354,9 @@ export async function getHabitsForUser(userId: number): Promise<HabitWithCompute
       streak_percent: Math.min(100, Math.round((current / timesPerWeek) * 100)),
       chain,
       week_progress: null,
+      week_expected: weekExpectedCount,
+      week_actual: weekActualCount,
+      pace: computePace(weekActualCount, weekExpectedCount),
     };
   });
 
@@ -312,7 +373,8 @@ export interface HabitsSummary {
   today_total: number;
   today_completed: number;
   longest_streak: number;
-  most_urgent: { habit_id: number; task_name: string; habit_urgency: HabitUrgency } | null;
+  weekly_targets: { completed: number; target: number };
+  at_risk: number;
   weekly_rhythm: WeeklyRhythmDay[];
   category_consistency: CategoryConsistency[];
   strongest: RankedHabit | null;
@@ -339,14 +401,11 @@ export async function getSummaryForUser(userId: number): Promise<HabitsSummary> 
   const today_completed = habits.filter(h => h.is_today && h.checked_in_today).length;
   const longest_streak = habits.reduce((max, h) => Math.max(max, h.longest_streak ?? 0), 0);
 
-  let most_urgent: HabitsSummary['most_urgent'] = null;
-  for (const h of habits) {
-    const rank = URGENCY_RANK[h.habit_urgency] ?? 0;
-    const bestRank = most_urgent ? URGENCY_RANK[most_urgent.habit_urgency] ?? 0 : -1;
-    if (rank > bestRank || (rank === bestRank && most_urgent && h.task_name < most_urgent.task_name)) {
-      most_urgent = { habit_id: h.habit_id, task_name: h.task_name, habit_urgency: h.habit_urgency };
-    }
-  }
+  const weekly_targets = habits.reduce(
+    (acc, h) => ({ completed: acc.completed + h.week_actual, target: acc.target + Math.max(1, h.times_per_week) }),
+    { completed: 0, target: 0 }
+  );
+  const at_risk = habits.filter(h => h.pace === 'behind').length;
 
   const fixedHabits = habits.filter(h => h.schedule_mode === 'fixed' && h.chain !== null);
   const weekly_rhythm: WeeklyRhythmDay[] = days.map((date, i) => {
@@ -400,9 +459,83 @@ export async function getSummaryForUser(userId: number): Promise<HabitsSummary> 
 
   return {
     total_habits: habits.length,
-    today_total, today_completed, longest_streak, most_urgent,
+    today_total, today_completed, longest_streak,
+    weekly_targets, at_risk,
     weekly_rhythm, category_consistency, strongest, needs_attention,
   };
+}
+
+export async function getHabitHistory(userId: number, habitId: number, weeks: number = 12): Promise<HabitHistoryResponse> {
+  const habit = await getOwnedHabitRow(habitId, userId);
+  const { dateStr: today } = todayInManila();
+  const habitCore = habitCoreOf(habit);
+
+  const currentWeekStart = mondayOfWeek(today);
+  const weekStarts: string[] = [];
+  for (let i = weeks - 1; i >= 0; i--) weekStarts.push(addDaysToDateStr(currentWeekStart, -7 * i));
+  const earliestDate = weekStarts[0];
+
+  const [rows] = await pool.execute<CheckinRow[]>(
+    `SELECT checkin_date, is_completed, amount FROM habit_checkins WHERE habit_id = ? AND checkin_date >= ? ORDER BY checkin_date ASC`,
+    [habitId, earliestDate]
+  );
+  const perDate = new Map<string, { is_completed: number; amount: number | null }>();
+  for (const r of rows) perDate.set(r.checkin_date, { is_completed: r.is_completed, amount: toNum(r.amount) });
+
+  const scheduled = parseDays(habit.days_of_week);
+  const weeklyTarget = Math.max(1, habit.times_per_week);
+
+  const weeksData: HabitHistoryWeek[] = weekStarts.map(weekStart => {
+    let completed = 0;
+    for (let i = 0; i < 7; i++) {
+      const date = addDaysToDateStr(weekStart, i);
+      if (date > today) break;
+      if (habit.schedule_mode === 'fixed' && !scheduled.has(weekdayOfDateStr(date))) continue;
+      const r = perDate.get(date);
+      if (r && occurrenceCompleted(habitCore, r)) completed++;
+    }
+    const percent = weeklyTarget > 0 ? Math.min(100, Math.round((completed / weeklyTarget) * 100)) : 0;
+    return { week_start: weekStart, completed, target: weeklyTarget, percent };
+  });
+
+  let best_week: HabitHistoryWeek | null = null;
+  for (const w of weeksData) if (!best_week || w.completed > best_week.completed) best_week = w;
+
+  let weekly_streak: number | null = null;
+  if (habit.schedule_mode === 'flexible') {
+    let count = 0;
+    for (let i = weeksData.length - 1; i >= 0; i--) {
+      if (weeksData[i].completed >= weeksData[i].target) count++;
+      else break;
+    }
+    weekly_streak = count;
+  }
+
+  const [countRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT COUNT(*) as cnt FROM habit_checkins WHERE habit_id = ?`, [habitId]
+  );
+  const total_checkins = Number(countRows[0].cnt);
+
+  const [recentRows] = await pool.execute<CheckinRow[]>(
+    `SELECT checkin_date, is_completed, amount FROM habit_checkins WHERE habit_id = ? ORDER BY checkin_date DESC LIMIT 10`,
+    [habitId]
+  );
+  const recent = recentRows.map(r => ({
+    date: r.checkin_date,
+    completed: occurrenceCompleted(habitCore, { is_completed: r.is_completed, amount: toNum(r.amount) }),
+  }));
+
+  return { weeks: weeksData, best_week, weekly_streak, total_checkins, started_at: habit.date_created, recent };
+}
+
+export interface HabitHistoryWeek { week_start: string; completed: number; target: number; percent: number }
+export interface HabitHistoryResponse {
+  weeks: HabitHistoryWeek[];
+  best_week: HabitHistoryWeek | null;
+  weekly_streak: number | null;
+  total_checkins: number;
+  started_at: string;
+  recent: { date: string; completed: boolean }[];
 }
 
 /* ─────────────────────────── Writes ─────────────────────────── */
@@ -411,11 +544,11 @@ export async function createHabit(userId: number, input: HabitInput) {
   const v = validateInput(input);
   const [res] = await pool.execute<ResultSetHeader>(
     `INSERT INTO habit_tasks
-       (user_id, task_name, purpose, habit_urgency, task_category, habit_type,
-        days_of_week, times_per_week, schedule_mode, tracking_type, target_value, unit_label, step_value)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [userId, input.task_name.trim(), input.purpose.trim(), input.habit_urgency, input.task_category,
-     input.habit_type, v.daysStr, v.weeklyTarget, v.scheduleMode, v.trackingType, v.targetValue, v.unitLabel, v.stepValue]
+       (user_id, task_name, purpose, priority, task_category, habit_type,
+        days_of_week, times_per_week, schedule_mode, tracking_type, target_value, minimum_value, unit_label, step_value)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [userId, input.task_name.trim(), input.purpose.trim(), v.priority, input.task_category,
+     input.habit_type, v.daysStr, v.weeklyTarget, v.scheduleMode, v.trackingType, v.targetValue, v.minimumValue, v.unitLabel, v.stepValue]
   );
   return res.insertId;
 }
@@ -435,11 +568,11 @@ export async function updateHabit(userId: number, habitId: number, input: HabitI
 
   await pool.execute(
     `UPDATE habit_tasks
-     SET task_name=?, purpose=?, habit_urgency=?, task_category=?, habit_type=?, days_of_week=?, times_per_week=?,
-         schedule_mode=?, tracking_type=?, target_value=?, unit_label=?, step_value=?
+     SET task_name=?, purpose=?, priority=?, task_category=?, habit_type=?, days_of_week=?, times_per_week=?,
+         schedule_mode=?, tracking_type=?, target_value=?, minimum_value=?, unit_label=?, step_value=?
      WHERE habit_id=? AND user_id=?`,
-    [input.task_name.trim(), input.purpose.trim(), input.habit_urgency, input.task_category,
-     input.habit_type, v.daysStr, v.weeklyTarget, v.scheduleMode, v.trackingType, v.targetValue, v.unitLabel, v.stepValue,
+    [input.task_name.trim(), input.purpose.trim(), v.priority, input.task_category,
+     input.habit_type, v.daysStr, v.weeklyTarget, v.scheduleMode, v.trackingType, v.targetValue, v.minimumValue, v.unitLabel, v.stepValue,
      habitId, userId]
   );
 
@@ -497,8 +630,8 @@ export async function setAmount(userId: number, habitId: number, amount: number,
     [habitId, targetDate, amount]
   );
 
-  const targetValue = toNum(habit.target_value);
-  const completed = targetValue != null && amount >= targetValue;
+  const habitCore = habitCoreOf(habit);
+  const completed = occurrenceCompleted(habitCore, { amount });
 
   if (habit.schedule_mode === 'fixed') {
     await recomputeFixedStreak(userId, habitId, habit);
