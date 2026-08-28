@@ -1,12 +1,13 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
-import { ensureHabitTrackingSchema } from '@/lib/migrate';
+import { ensureHabitTrackingSchema, ensureHabitPriorityAndMinimumSchema } from '@/lib/migrate';
 import { checkinHabit, undoCheckinHabit, HabitNotFoundError } from '@/lib/habits';
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   await ensureHabitTrackingSchema();
+  await ensureHabitPriorityAndMinimumSchema();
   const { id } = await params;
   const habitId = parseInt(id);
 
@@ -23,6 +24,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   await ensureHabitTrackingSchema();
+  await ensureHabitPriorityAndMinimumSchema();
   const { id } = await params;
   const habitId = parseInt(id);
 
