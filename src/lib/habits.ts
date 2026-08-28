@@ -420,8 +420,18 @@ export async function createHabit(userId: number, input: HabitInput) {
 }
 
 export async function updateHabit(userId: number, habitId: number, input: HabitInput) {
+  const existingRow = await getOwnedHabitRow(habitId, userId);
   const v = validateInput(input);
-  await getOwnedHabitRow(habitId, userId);
+
+  if (v.trackingType !== existingRow.tracking_type) {
+    const [countRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) as cnt FROM habit_checkins WHERE habit_id = ?`, [habitId]
+    );
+    if (Number(countRows[0].cnt) > 0) {
+      throw new Error("Can't change how this ritual is tracked once it has check-in history. Delete it and create a new one instead.");
+    }
+  }
+
   await pool.execute(
     `UPDATE habit_tasks
      SET task_name=?, purpose=?, habit_urgency=?, task_category=?, habit_type=?, days_of_week=?, times_per_week=?,
@@ -431,6 +441,11 @@ export async function updateHabit(userId: number, habitId: number, input: HabitI
      input.habit_type, v.daysStr, v.weeklyTarget, v.scheduleMode, v.trackingType, v.targetValue, v.unitLabel, v.stepValue,
      habitId, userId]
   );
+
+  if (v.scheduleMode === 'fixed') {
+    const updatedRow = await getOwnedHabitRow(habitId, userId);
+    await recomputeFixedStreak(userId, habitId, updatedRow);
+  }
 }
 
 export async function deleteHabit(userId: number, habitId: number) {
