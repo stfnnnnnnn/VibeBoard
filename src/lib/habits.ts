@@ -402,7 +402,10 @@ export async function getSummaryForUser(userId: number): Promise<HabitsSummary> 
   const longest_streak = habits.reduce((max, h) => Math.max(max, h.longest_streak ?? 0), 0);
 
   const weekly_targets = habits.reduce(
-    (acc, h) => ({ completed: acc.completed + h.week_actual, target: acc.target + Math.max(1, h.times_per_week) }),
+    (acc, h) => {
+      const target = Math.max(1, h.times_per_week);
+      return { completed: acc.completed + Math.min(h.week_actual, target), target: acc.target + target };
+    },
     { completed: 0, target: 0 }
   );
   const at_risk = habits.filter(h => h.pace === 'behind').length;
