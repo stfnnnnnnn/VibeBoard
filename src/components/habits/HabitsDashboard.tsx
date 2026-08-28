@@ -113,7 +113,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
       return;
     }
     const hData = await hRes.json();
-    const sData = await hRes.json();
+    const sData = await sRes.json();
     setLoadError(false);
     setHabits(hData.habits ?? []);
     setSummary(sData);
