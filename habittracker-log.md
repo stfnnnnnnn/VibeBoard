@@ -135,7 +135,7 @@ Carried forward from earlier in this plan's review process, still genuinely open
 
 ## Habit Tracker v4 — Rhythm as the centerpiece
 
-Builds on v3 without touching the database schema: the window-consistency bug fix (fixing off-by-one errors in weekly-expected computation), shipping Rhythm as the hero stat, reselecting `on_pace`/`needs_attention` to favor fulfillment rates and exclude habits with zero scheduled days, category consistency counts verified to no longer include an `'Overall'` row, the three-state glyph strip rendering correctly (unscheduled ○ muted, scheduled-missed ○ red, scheduled-done ● blue), day-click drill-down panel opens showing only fixed-habits-scheduled-that-day, and the fixed-card status line showing exactly three states (done today in green, scheduled-but-not-done in orange, not-scheduled-today in gray).
+Builds on v3 without touching the database schema: a window-consistency bug fix in `habitFulfillmentRate` (the fixed-habit branch was averaging fulfillment over a trailing 7-*calendar*-day window, which can span two different ISO weeks, while the flexible-habit branch already used the current ISO week — a genuine window mismatch, not an off-by-one; the fixed branch now filters to `d.scheduled && d.date >= weekStart`, matching the flexible branch's window exactly), shipping Rhythm as the hero stat, reselecting `on_pace`/`needs_attention` via a pace partition — habits are split into `pace === 'behind'` vs. everything else before ranking, `on_pace` is the highest-rate habit among non-behind habits and `needs_attention` is the lowest-rate habit among behind habits, so a habit that's numerically low but merely early in its week (not yet behind) can no longer be misidentified as needing attention — category consistency counts verified to no longer include an `'Overall'` row, the four-state glyph strip rendering correctly (unscheduled ○ muted, scheduled-and-missed ○ red, scheduled-and-partially-done ◐ blue, scheduled-and-fully-done ● blue), day-click drill-down panel opens showing only fixed-habits-scheduled-that-day, and the fixed-card status line showing exactly three states (done today in green, scheduled-but-not-done in orange, not-scheduled-today in gray).
 
 ### External auditor critique pass
 
@@ -144,9 +144,9 @@ A third-party review raised five points against v3:
 2. Three-state daily chart (unscheduled/missed/done) — Already shipped in v3 and unchanged here
 3. Day-click drill-down showing only fixed habits — Already shipped in v3 and unchanged here
 4. Per-card pace text and visual — Already shipped in v3 and unchanged here
-5. A minor point about the strength of the glyph visual — no action needed
+5. The daily chart's visual density/compactness — genuinely v4 work: the glyph strip described above (replacing the old 7-bar chart) is one of this pass's own deliverables
 
-Conclusion: these points confirmed the design direction is present in shipped code, not addressing missing features. No v4 work was required for any of them.
+Conclusion: points 1–4 confirmed the design direction was already present in shipped v3 code, not addressing missing features — no v4 work was required for those four. Point 5 is different: it's addressed by this pass's own glyph-strip work, not by anything already shipped.
 
 ### Verification
 
