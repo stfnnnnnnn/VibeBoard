@@ -7,8 +7,8 @@ import {
   ListChecks, AlertTriangle, X, RotateCcw, Loader2, Sparkles,
 } from 'lucide-react';
 import type {
-  HabitWithComputed, HabitsSummary, HabitCategory, HabitUrgency, HabitType,
-  ScheduleMode, TrackingType, WeekProgress,
+  HabitWithComputed, HabitsSummary, HabitCategory, HabitPriority, HabitType,
+  ScheduleMode, TrackingType, WeekProgress, HabitHistoryResponse, HabitHistoryWeek,
 } from '@/lib/habits';
 
 /* ─── Static vocab (mirrors the DB enums / SET column) ─── */
@@ -28,20 +28,43 @@ const CATEGORY_LABELS: Record<HabitCategory, string> = {
   'life goals': 'Life Goals', organizational: 'Organizational', social: 'Social',
 };
 
-const URGENCY_OPTIONS: HabitUrgency[] = ['Urgent', 'Priority', 'Important', 'Not Important', 'Not Urgent'];
-const URGENCY_STYLES: Record<HabitUrgency, { bg: string; fg: string }> = {
-  Urgent: { bg: '#f75b67', fg: '#fff' },
-  Priority: { bg: '#f79f24', fg: '#fff' },
-  Important: { bg: '#f7d324', fg: '#3a3200' },
-  'Not Important': { bg: '#91cfff', fg: '#003366' },
-  'Not Urgent': { bg: '#b28eff', fg: '#fff' },
-};
+const PRIORITY_OPTIONS: HabitPriority[] = ['core', 'normal', 'optional'];
+const PRIORITY_LABELS: Record<HabitPriority, string> = { core: 'Core', normal: 'Normal', optional: 'Optional' };
 
 const TYPE_OPTIONS: HabitType[] = ['habit', 'routine'];
 
 const ACTIVE_TOGGLE_STYLE = { background: '#74bcd9', color: '#fff', borderColor: '#74bcd9' };
 
-type FilterValue = 'today' | 'all' | string; // 'category:x' | 'urgency:x' | 'day:x'
+type FilterValue = 'today' | 'all' | string; // 'category:x' | 'priority:x' | 'day:x'
+
+/* ─── Priority badge — three tiers of visual weight, not one loud badge for all ─── */
+function PriorityBadge({ priority }: { priority: HabitPriority }) {
+  if (priority === 'core') {
+    return (
+      <span style={{
+        fontSize: '0.64rem', fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase',
+        padding: '4px 9px', borderRadius: 999, background: '#74bcd9', color: '#fff', whiteSpace: 'nowrap',
+      }}>
+        Core
+      </span>
+    );
+  }
+  if (priority === 'normal') {
+    return (
+      <span style={{
+        fontSize: '0.64rem', fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase',
+        padding: '3px 8px', borderRadius: 999, border: '1px solid rgba(0,0,0,0.15)', color: '#777', whiteSpace: 'nowrap',
+      }}>
+        Normal
+      </span>
+    );
+  }
+  return (
+    <span style={{ fontSize: '0.64rem', fontWeight: 600, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#aaa', whiteSpace: 'nowrap' }}>
+      Optional
+    </span>
+  );
+}
 
 /* ─── Form state ─── */
 
@@ -49,7 +72,7 @@ interface FormState {
   habit_id: number | null;
   task_name: string;
   purpose: string;
-  habit_urgency: HabitUrgency | '';
+  priority: HabitPriority;
   task_category: HabitCategory | '';
   habit_type: HabitType | '';
   schedule_mode: ScheduleMode;
@@ -57,13 +80,14 @@ interface FormState {
   weekly_target: string;
   tracking_type: TrackingType;
   target_value: string;
+  minimum_value: string;
   unit_label: string;
   step_value: string;
 }
 const EMPTY_FORM: FormState = {
-  habit_id: null, task_name: '', purpose: '', habit_urgency: '', task_category: '', habit_type: '',
+  habit_id: null, task_name: '', purpose: '', priority: 'normal', task_category: '', habit_type: '',
   schedule_mode: 'fixed', days_of_week: [], weekly_target: '3',
-  tracking_type: 'boolean', target_value: '', unit_label: '', step_value: '1',
+  tracking_type: 'boolean', target_value: '', minimum_value: '', unit_label: '', step_value: '1',
 };
 
 /* ─── Component ─── */
@@ -72,6 +96,8 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
   const [habits, setHabits] = useState<HabitWithComputed[] | null>(null);
   const [summary, setSummary] = useState<HabitsSummary | null>(null);
   const [filter, setFilter] = useState<FilterValue>('today');
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [detailHabit, setDetailHabit] = useState<HabitWithComputed | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -95,14 +121,14 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
 
   useEffect(() => { load(); }, [load]);
 
-  /* ── Filtering (client-side, same shape of facets as the legacy dropdown) ── */
+  /* ── Filtering (client-side) ── */
   const filtered = useMemo(() => {
     if (!habits) return [];
     if (filter === 'all') return habits;
     if (filter === 'today') return habits.filter(h => h.is_today);
     const [kind, value] = filter.split(':');
     if (kind === 'category') return habits.filter(h => h.task_category === value);
-    if (kind === 'urgency') return habits.filter(h => h.habit_urgency === value);
+    if (kind === 'priority') return habits.filter(h => h.priority === value);
     if (kind === 'day') return habits.filter(h => h.days_of_week.includes(value as typeof WEEKDAYS[number]));
     return habits;
   }, [habits, filter]);
@@ -112,10 +138,11 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
   const openEdit = (h: HabitWithComputed) => {
     setForm({
       habit_id: h.habit_id, task_name: h.task_name, purpose: h.purpose,
-      habit_urgency: h.habit_urgency, task_category: h.task_category, habit_type: h.habit_type,
+      priority: h.priority, task_category: h.task_category, habit_type: h.habit_type,
       schedule_mode: h.schedule_mode, days_of_week: h.days_of_week, weekly_target: String(h.times_per_week),
       tracking_type: h.tracking_type,
       target_value: h.target_value != null ? String(h.target_value) : '',
+      minimum_value: h.minimum_value != null ? String(h.minimum_value) : '',
       unit_label: h.unit_label ?? '',
       step_value: String(h.step_value ?? 1),
     });
@@ -131,7 +158,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
   };
 
   const submitForm = async () => {
-    if (!form.task_name.trim() || !form.purpose.trim() || !form.habit_urgency || !form.task_category || !form.habit_type) {
+    if (!form.task_name.trim() || !form.purpose.trim() || !form.task_category || !form.habit_type) {
       setFormError('Fill in every field before saving.');
       return;
     }
@@ -147,10 +174,14 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
       setFormError('Set a target amount and a unit.');
       return;
     }
+    if (form.tracking_type === 'numeric' && form.minimum_value && Number(form.minimum_value) > Number(form.target_value)) {
+      setFormError("Minimum can't be greater than the target.");
+      return;
+    }
     setSaving(true);
     setFormError(null);
     const body: Record<string, unknown> = {
-      task_name: form.task_name, purpose: form.purpose, habit_urgency: form.habit_urgency,
+      task_name: form.task_name, purpose: form.purpose, priority: form.priority,
       task_category: form.task_category, habit_type: form.habit_type,
       schedule_mode: form.schedule_mode, tracking_type: form.tracking_type,
     };
@@ -160,6 +191,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
       body.target_value = Number(form.target_value);
       body.unit_label = form.unit_label.trim();
       body.step_value = form.step_value ? Number(form.step_value) : 1;
+      if (form.minimum_value) body.minimum_value = Number(form.minimum_value);
     }
     const res = await fetch(form.habit_id ? `/api/habits/${form.habit_id}` : '/api/habits', {
       method: form.habit_id ? 'PATCH' : 'POST',
@@ -240,8 +272,8 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           <optgroup label="Category">
             {CATEGORY_OPTIONS.map(c => <option key={c} value={`category:${c}`}>{CATEGORY_LABELS[c]}</option>)}
           </optgroup>
-          <optgroup label="Urgency">
-            {URGENCY_OPTIONS.map(u => <option key={u} value={`urgency:${u}`}>{u}</option>)}
+          <optgroup label="Priority">
+            {PRIORITY_OPTIONS.map(p => <option key={p} value={`priority:${p}`}>{PRIORITY_LABELS[p]}</option>)}
           </optgroup>
           <optgroup label="Day">
             {WEEKDAYS.map(d => <option key={d} value={`day:${d}`}>{d}</option>)}
@@ -279,6 +311,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
               onEdit={() => openEdit(h)}
               onDelete={() => doDelete(h.habit_id)}
               onAmountCommitted={load}
+              onOpenDetail={() => setDetailHabit(h)}
             />
           ))}
         </div>
@@ -307,14 +340,18 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           )}
 
           <div className="ht-stat-rail">
-            <StatTile icon={<ListChecks size={16} />} label="Total Rituals" value={String(summary.total_habits)} />
-            <StatTile icon={<Check size={16} />} label="Done Today" value={`${summary.today_completed}/${summary.today_total}`} />
-            <StatTile icon={<Trophy size={16} />} label="Longest Streak" value={`${summary.longest_streak}d`} />
+            <StatTile icon={<ListChecks size={16} />} label="Weekly Targets" value={`${summary.weekly_targets.completed}/${summary.weekly_targets.target}`} />
             <StatTile
               icon={<AlertTriangle size={16} />}
-              label="Most Urgent"
-              value={summary.most_urgent ? summary.most_urgent.task_name : 'None'}
-              accent={summary.most_urgent ? URGENCY_STYLES[summary.most_urgent.habit_urgency].bg : undefined}
+              label="At Risk"
+              value={summary.at_risk > 0 ? String(summary.at_risk) : 'None'}
+              accent={summary.at_risk > 0 ? '#f75b67' : undefined}
+            />
+            <StatTile icon={<Trophy size={16} />} label="Longest Streak" value={`${summary.longest_streak}d`} />
+            <StatTile
+              icon={<Check size={16} />}
+              label="Best Rhythm"
+              value={summary.strongest ? `${summary.strongest.task_name} · ${summary.strongest.percent}%` : 'None yet'}
             />
           </div>
 
@@ -322,23 +359,60 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
             <h3 style={{ margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 700, color: '#444' }}>Daily completion, last 7 days</h3>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 96 }}>
               {summary.weekly_rhythm.map(d => (
-                <div key={d.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end' }}>
+                <div
+                  key={d.date}
+                  onClick={() => setSelectedDay(prev => prev === d.date ? null : d.date)}
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end', cursor: 'pointer' }}
+                >
                   <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#555', minHeight: 12 }}>
                     {d.scheduled > 0 ? `${d.percent}%` : ''}
                   </div>
-                  <div
-                    title={`${d.weekday} ${d.date}: ${d.scheduled > 0 ? `${d.percent}% fulfilled` : 'nothing scheduled'}`}
-                    style={{
-                      width: '100%', maxWidth: 34, height: Math.max(6, d.percent * 0.6),
-                      borderRadius: 8,
-                      background: d.scheduled > 0 ? 'linear-gradient(180deg, #f2a7c0, #74bcd9)' : 'rgba(0,0,0,0.08)',
-                      boxShadow: d.scheduled > 0 ? '0 4px 10px rgba(116,188,217,0.35)' : 'none',
-                    }}
-                  />
+                  {d.scheduled === 0 ? (
+                    <div
+                      title={`${d.weekday} ${d.date}: Nothing scheduled`}
+                      style={{ width: '100%', maxWidth: 34, height: 3, borderRadius: 2, background: 'rgba(0,0,0,0.15)', marginBottom: 3 }}
+                    />
+                  ) : (
+                    <div
+                      title={`${d.weekday} ${d.date}: ${d.percent}% fulfilled`}
+                      style={{
+                        width: '100%', maxWidth: 34,
+                        height: Math.max(d.percent > 0 ? d.percent * 0.6 : 8, 8),
+                        borderRadius: 8,
+                        background: d.percent > 0 ? 'linear-gradient(180deg, #f2a7c0, #74bcd9)' : 'rgba(247,91,103,0.55)',
+                        boxShadow: d.percent > 0 ? '0 4px 10px rgba(116,188,217,0.35)' : 'none',
+                      }}
+                    />
+                  )}
                   <div style={{ fontSize: '0.7rem', fontWeight: 600, color: '#777' }}>{WEEKDAY_SHORT[d.weekday]}</div>
                 </div>
               ))}
             </div>
+
+            {selectedDay && habits && (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+                <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 8 }}>
+                  {new Date(selectedDay + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+                </div>
+                {(() => {
+                  const dayHabits = habits
+                    .filter(h => h.schedule_mode === 'fixed')
+                    .map(h => ({ habit: h, day: h.chain?.find(c => c.date === selectedDay) }))
+                    .filter((x): x is { habit: HabitWithComputed; day: NonNullable<HabitWithComputed['chain']>[number] } => !!x.day?.scheduled);
+                  if (!dayHabits.length) return <div style={{ fontSize: '0.82rem', color: '#888' }}>Nothing scheduled this day.</div>;
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {dayHabits.map(({ habit, day }) => (
+                        <div key={habit.habit_id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
+                          <span style={{ color: day.completed ? '#42c38b' : '#c0392b' }}>{day.completed ? '✓' : '○'}</span>
+                          <span>{habit.task_name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
           </div>
 
           {summary.category_consistency.length > 0 && (
@@ -382,10 +456,9 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
 
             <div style={{ display: 'flex', gap: 10 }}>
               <div style={{ flex: 1 }}>
-                <label className="ht-label">Urgency</label>
-                <select className="vb-input" value={form.habit_urgency} onChange={e => setForm(f => ({ ...f, habit_urgency: e.target.value as HabitUrgency }))}>
-                  <option value="" disabled>Choose</option>
-                  {URGENCY_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
+                <label className="ht-label">Priority</label>
+                <select className="vb-input" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: e.target.value as HabitPriority }))}>
+                  {PRIORITY_OPTIONS.map(p => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
                 </select>
               </div>
               <div style={{ flex: 1 }}>
@@ -454,6 +527,9 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
                       onChange={e => setForm(f => ({ ...f, unit_label: e.target.value }))} placeholder="e.g. minutes" />
                   </div>
                 </div>
+                <label className="ht-label">Minimum (optional)</label>
+                <input type="number" min={0} step="any" className="vb-input" value={form.minimum_value}
+                  onChange={e => setForm(f => ({ ...f, minimum_value: e.target.value }))} placeholder="A lower, forgiving bar" />
                 <details style={{ marginTop: 8 }}>
                   <summary className="ht-disclosure">Increment</summary>
                   <input type="number" min={0} step="any" className="vb-input" style={{ marginTop: 8 }} value={form.step_value}
@@ -485,6 +561,8 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           </div>
         </div>
       )}
+
+      {detailHabit && <HabitDetailModal habit={detailHabit} onClose={() => setDetailHabit(null)} />}
 
       <style jsx global>{`
         .ht-home-btn {
@@ -520,6 +598,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           padding: 18px 18px 16px;
           box-shadow: 0 6px 18px rgba(0,0,0,0.08);
           transition: transform 0.2s ease, box-shadow 0.2s ease;
+          cursor: pointer;
         }
         .ht-card:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(0,0,0,0.12); }
 
@@ -567,6 +646,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           border-radius: 20px; padding: 26px 28px; width: 100%; max-width: 420px;
           max-height: 90vh; overflow-y: auto;
           box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+          cursor: default;
         }
         .ht-label {
           display: block; font-size: 0.78rem; font-weight: 700; color: #666;
@@ -589,8 +669,10 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
         .ht-amount-wrap {
           display: flex; flex-direction: column; gap: 6px;
           padding: 8px 10px; border-radius: 12px; background: rgba(0,0,0,0.03);
+          cursor: default;
         }
         .ht-amount-wrap.met { background: rgba(66,195,139,0.15); }
+        .ht-amount-wrap.minimum-met { background: rgba(247,159,36,0.12); }
         .ht-step-btn {
           width: 26px; height: 26px; border-radius: 8px; border: 1px solid #ddd;
           background: #fff; color: #555; display: flex; align-items: center; justify-content: center;
@@ -607,6 +689,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           height: 100%; border-radius: 4px; background: #b7c3cc; transition: width 0.3s ease, background 0.3s ease;
         }
         .ht-amount-wrap.met .ht-amount-fill { background: linear-gradient(90deg,#f2a7c0,#74bcd9); }
+        .ht-amount-wrap.minimum-met .ht-amount-fill { background: #f79f24; }
 
         .ht-spin { animation: ht-spin 0.8s linear infinite; }
         @keyframes ht-spin { to { transform: rotate(360deg); } }
@@ -623,19 +706,18 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
 /* ─── Habit card ─── */
 
 function HabitCard({
-  habit, busy, onCheckin, onUndo, onEdit, onDelete, onAmountCommitted,
+  habit, busy, onCheckin, onUndo, onEdit, onDelete, onAmountCommitted, onOpenDetail,
 }: {
   habit: HabitWithComputed; busy: boolean;
   onCheckin: () => void; onUndo: () => void; onEdit: () => void; onDelete: () => void;
-  onAmountCommitted: () => void;
+  onAmountCommitted: () => void; onOpenDetail: () => void;
 }) {
   const canAct = habit.is_today || habit.checked_in_today;
-  const urgency = URGENCY_STYLES[habit.habit_urgency];
   const isFlexible = habit.schedule_mode === 'flexible';
   const isNumeric = habit.tracking_type === 'numeric';
 
   return (
-    <div className="ht-card" style={{ borderTop: `4px solid ${CATEGORY_COLORS[habit.task_category]}` }}>
+    <div className="ht-card" style={{ borderTop: `4px solid ${CATEGORY_COLORS[habit.task_category]}` }} onClick={onOpenDetail}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
         <div>
           <div style={{ fontWeight: 800, fontSize: '1.02rem', color: '#333' }}>{habit.task_name}</div>
@@ -646,12 +728,7 @@ function HabitCard({
             </span>
           </div>
         </div>
-        <span style={{
-          fontSize: '0.64rem', fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase',
-          padding: '4px 9px', borderRadius: 999, background: urgency.bg, color: urgency.fg, whiteSpace: 'nowrap',
-        }}>
-          {habit.habit_urgency}
-        </span>
+        <PriorityBadge priority={habit.priority} />
       </div>
 
       <p style={{
@@ -664,10 +741,26 @@ function HabitCard({
       <div style={{ fontSize: '0.74rem', color: '#888' }}>
         {habit.habit_type === 'habit' ? 'Habit' : 'Routine'} ·{' '}
         {isFlexible ? `${habit.times_per_week}× weekly` : habit.days_of_week.map(d => WEEKDAY_SHORT[d]).join(', ')}
-        {isNumeric && habit.target_value != null && ` · ${habit.target_value} ${habit.unit_label} each`}
+        {isNumeric && habit.target_value != null && (
+          habit.minimum_value != null
+            ? ` · Target ${habit.target_value} ${habit.unit_label} · Minimum ${habit.minimum_value} ${habit.unit_label}`
+            : ` · ${habit.target_value} ${habit.unit_label} each`
+        )}
       </div>
 
       {isFlexible ? <WeekDots progress={habit.week_progress!} /> : <ChainRow chain={habit.chain!} />}
+
+      {isFlexible && (
+        <div style={{ fontSize: '0.74rem', color: '#666' }}>
+          {Math.max(0, habit.week_progress!.target - habit.week_progress!.completed)} remaining · {habit.week_days_remaining} day{habit.week_days_remaining === 1 ? '' : 's'} left this week
+          {habit.week_progress!.completed < habit.week_progress!.target && habit.pace === 'behind' && (
+            <span style={{ color: '#c0392b', fontWeight: 700, marginLeft: 6 }}>⚠ Behind pace</span>
+          )}
+          {habit.week_progress!.completed < habit.week_progress!.target && habit.pace === 'ahead' && (
+            <span style={{ color: '#42c38b', fontWeight: 700, marginLeft: 6 }}>Ahead of pace</span>
+          )}
+        </div>
+      )}
 
       {!isFlexible && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: '#555' }}>
@@ -680,20 +773,23 @@ function HabitCard({
       )}
 
       {isNumeric && canAct && (
-        <AmountInput
-          habitId={habit.habit_id}
-          amount={habit.today_amount ?? 0}
-          target={habit.target_value ?? 0}
-          unit={habit.unit_label ?? ''}
-          step={habit.step_value}
-          onCommitted={onAmountCommitted}
-        />
+        <div onClick={e => e.stopPropagation()}>
+          <AmountInput
+            habitId={habit.habit_id}
+            amount={habit.today_amount ?? 0}
+            target={habit.target_value ?? 0}
+            minimum={habit.minimum_value}
+            unit={habit.unit_label ?? ''}
+            step={habit.step_value}
+            onCommitted={onAmountCommitted}
+          />
+        </div>
       )}
       {isNumeric && !canAct && (
         <div style={{ fontSize: '0.74rem', color: '#999', fontStyle: 'italic' }}>Not scheduled today</div>
       )}
 
-      <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+      <div style={{ display: 'flex', gap: 6, marginTop: 4 }} onClick={e => e.stopPropagation()}>
         {!isNumeric && (
           <button
             className={`ht-btn ht-btn-check${habit.checked_in_today ? ' checked' : ''}`}
@@ -717,39 +813,46 @@ function HabitCard({
 function ChainRow({ chain }: { chain: HabitWithComputed['chain'] }) {
   const days = chain!;
   return (
-    <div style={{ display: 'flex', alignItems: 'center', padding: '2px 0' }}>
-      {days.map((day, i) => {
-        const prev = days[i - 1];
-        const linked = i > 0 && prev.scheduled && prev.completed && day.scheduled && day.completed;
-        const isToday = i === days.length - 1;
-        return (
-          <div key={day.date} style={{ display: 'flex', alignItems: 'center', flex: i === days.length - 1 ? '0 0 auto' : 1 }}>
-            {i > 0 && (
-              <div style={{ flex: 1, height: 2, minWidth: 6, background: linked ? 'linear-gradient(90deg,#f2a7c0,#74bcd9)' : 'rgba(0,0,0,0.1)' }} />
-            )}
-            <div
-              title={`${day.weekday} ${day.date}${!day.scheduled ? ' — not scheduled' : day.completed ? ' — done' : isToday ? ' — not done yet' : ' — missed'}`}
-              style={{
-                width: 15, height: 15, borderRadius: '50%', flexShrink: 0,
-                ...(!day.scheduled
-                  ? { border: '1px solid rgba(0,0,0,0.15)', background: 'transparent', opacity: 0.5 }
-                  : day.completed
-                    ? { background: 'linear-gradient(135deg,#f2a7c0,#74bcd9)', boxShadow: '0 0 0 2px rgba(255,255,255,0.6)' }
-                    : isToday
-                      ? { border: '2px dashed #74bcd9', background: 'rgba(255,255,255,0.6)' }
-                      : { border: '2px solid rgba(247,91,103,0.55)', background: 'transparent' }),
-              }}
-            />
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '2px 0' }}>
+        {days.map((day, i) => {
+          const prev = days[i - 1];
+          const linked = i > 0 && prev.scheduled && prev.completed && day.scheduled && day.completed;
+          const isToday = i === days.length - 1;
+          return (
+            <div key={day.date} style={{ display: 'flex', alignItems: 'center', flex: i === days.length - 1 ? '0 0 auto' : 1 }}>
+              {i > 0 && (
+                <div style={{ flex: 1, height: 2, minWidth: 6, background: linked ? 'linear-gradient(90deg,#f2a7c0,#74bcd9)' : 'rgba(0,0,0,0.1)' }} />
+              )}
+              <div
+                title={`${day.weekday} ${day.date}${!day.scheduled ? ' — not scheduled' : day.completed ? ' — done' : isToday ? ' — not done yet' : ' — missed'}`}
+                style={{
+                  width: 15, height: 15, borderRadius: '50%', flexShrink: 0,
+                  ...(!day.scheduled
+                    ? { border: '1px solid rgba(0,0,0,0.15)', background: 'transparent', opacity: 0.5 }
+                    : day.completed
+                      ? { background: 'linear-gradient(135deg,#f2a7c0,#74bcd9)', boxShadow: '0 0 0 2px rgba(255,255,255,0.6)' }
+                      : isToday
+                        ? { border: '2px dashed #74bcd9', background: 'rgba(255,255,255,0.6)' }
+                        : { border: '2px solid rgba(247,91,103,0.55)', background: 'transparent' }),
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', marginTop: 2 }}>
+        {days.map((day, i) => (
+          <div key={day.date} style={{ flex: i === days.length - 1 ? '0 0 15px' : 1, textAlign: 'center', fontSize: '0.6rem', color: '#999', fontWeight: 700 }}>
+            {day.weekday[0]}
           </div>
-        );
-      })}
+        ))}
+      </div>
     </div>
   );
 }
 
-/* ─── Week dots — flexible-schedule habits. Tightly grouped, centered, no
-   connecting line: both the missing line and the different layout signal
-   "this is a count, not a timeline," distinct from the chain above. ─── */
+/* ─── Week dots — flexible-schedule habits ─── */
 function WeekDots({ progress }: { progress: WeekProgress }) {
   const dots = Array.from({ length: progress.target }, (_, i) => i < progress.completed);
   return (
@@ -770,12 +873,12 @@ function WeekDots({ progress }: { progress: WeekProgress }) {
   );
 }
 
-/* ─── Amount input — numeric-tracking habits. Auto-saves ~500ms after each
-   change so rapid ± clicks don't spam the endpoint. ─── */
+/* ─── Amount input — numeric-tracking habits, with an optional minimum
+   giving the fill bar a third zone (below-minimum / at-minimum / at-target). ─── */
 function AmountInput({
-  habitId, amount, target, unit, step, onCommitted,
+  habitId, amount, target, minimum, unit, step, onCommitted,
 }: {
-  habitId: number; amount: number; target: number; unit: string; step: number; onCommitted: () => void;
+  habitId: number; amount: number; target: number; minimum: number | null; unit: string; step: number; onCommitted: () => void;
 }) {
   const [value, setValue] = useState(amount);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -798,9 +901,11 @@ function AmountInput({
 
   const pct = target > 0 ? Math.min(100, Math.round((value / target) * 100)) : 0;
   const met = target > 0 && value >= target;
+  const minimumMet = !met && minimum != null && value >= minimum;
+  const remaining = Math.max(0, target - value);
 
   return (
-    <div className={`ht-amount-wrap${met ? ' met' : ''}`}>
+    <div className={`ht-amount-wrap${met ? ' met' : minimumMet ? ' minimum-met' : ''}`}>
       <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
         Today
       </div>
@@ -822,6 +927,101 @@ function AmountInput({
         </button>
       </div>
       <div className="ht-amount-bar"><div className="ht-amount-fill" style={{ width: `${pct}%` }} /></div>
+      <div style={{ fontSize: '0.72rem', color: '#777' }}>
+        {met ? 'Target reached ✓' : `${remaining} ${unit} remaining`}
+      </div>
+    </div>
+  );
+}
+
+/* ─── History mini chart — 12 weeks, one bar per week ─── */
+function HistoryChart({ weeks }: { weeks: HabitHistoryWeek[] }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 70 }}>
+      {weeks.map(w => (
+        <div key={w.week_start} title={`Week of ${w.week_start}: ${w.completed}/${w.target}`} style={{ flex: 1, height: '100%', display: 'flex', alignItems: 'flex-end' }}>
+          <div style={{
+            width: '100%', height: `${Math.max(4, w.percent)}%`, borderRadius: 3,
+            background: w.percent >= 100 ? 'linear-gradient(180deg,#f2a7c0,#74bcd9)' : 'rgba(116,188,217,0.4)',
+          }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DetailStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ background: 'rgba(0,0,0,0.03)', borderRadius: 10, padding: '8px 10px' }}>
+      <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#999', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#333' }}>{value}</div>
+    </div>
+  );
+}
+
+/* ─── Read-only habit detail view — 12-week history, best week, streak,
+   total check-ins, start date, recent check-ins. No editing surface. ─── */
+function HabitDetailModal({ habit, onClose }: { habit: HabitWithComputed; onClose: () => void }) {
+  const [history, setHistory] = useState<HabitHistoryResponse | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/habits/${habit.habit_id}/history?weeks=12`)
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => { if (!cancelled) setHistory(data); });
+    return () => { cancelled = true; };
+  }, [habit.habit_id]);
+
+  return (
+    <div className="ht-modal-backdrop" onClick={onClose}>
+      <div className="ht-modal" onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>{habit.task_name}</h3>
+            <div style={{ fontSize: '0.78rem', color: '#888', marginTop: 2 }}>
+              {CATEGORY_LABELS[habit.task_category]} · {habit.schedule_mode === 'flexible' ? `${habit.times_per_week}× weekly` : 'Fixed days'}
+            </div>
+          </div>
+          <button className="ht-icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          {habit.schedule_mode === 'flexible' ? <WeekDots progress={habit.week_progress!} /> : <ChainRow chain={habit.chain!} />}
+        </div>
+
+        {!history ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '30px 0' }}><Loader2 className="ht-spin" size={22} /></div>
+        ) : (
+          <>
+            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#666', margin: '0 0 8px' }}>Last 12 weeks</div>
+            <HistoryChart weeks={history.weeks} />
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, margin: '16px 0' }}>
+              <DetailStat label="Best week" value={history.best_week ? `${history.best_week.completed}/${history.best_week.target}` : '—'} />
+              <DetailStat
+                label={habit.schedule_mode === 'flexible' ? 'Current streak' : 'Streak'}
+                value={habit.schedule_mode === 'flexible'
+                  ? `${history.weekly_streak ?? 0} week${history.weekly_streak === 1 ? '' : 's'}`
+                  : `${habit.current_streak ?? 0} day${habit.current_streak === 1 ? '' : 's'}`}
+              />
+              <DetailStat label="Total check-ins" value={String(history.total_checkins)} />
+              <DetailStat label="Started" value={new Date(history.started_at).toLocaleDateString()} />
+            </div>
+
+            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#666', margin: '0 0 8px' }}>Recent check-ins</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {history.recent.length === 0 ? (
+                <div style={{ fontSize: '0.82rem', color: '#999' }}>No check-ins yet.</div>
+              ) : history.recent.map(r => (
+                <div key={r.date} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: '#555' }}>
+                  <span>{r.date}</span>
+                  <span>{r.completed ? '✓' : '○'}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
