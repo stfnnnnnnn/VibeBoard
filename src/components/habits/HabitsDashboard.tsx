@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   Home, Plus, Minus, Check, Undo2, Pencil, Trash2, Flame, Trophy,
-  ListChecks, AlertTriangle, X, RotateCcw, Loader2, Sparkles,
+  AlertTriangle, X, RotateCcw, Loader2, Sparkles,
 } from 'lucide-react';
 import type {
   HabitWithComputed, HabitsSummary, HabitCategory, HabitPriority, HabitType,
@@ -320,73 +320,89 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
       {/* ── Analytics ── */}
       {summary && summary.total_habits > 0 && (
         <div style={{ marginTop: 44 }}>
-          <h2 className="gradient-text" style={{ fontSize: '1.4rem', fontWeight: 800, margin: '0 0 16px' }}>This Week&apos;s Rhythm</h2>
-
-          {(summary.strongest || summary.needs_attention) && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, margin: '0 0 16px' }}>
-              {summary.strongest && (
-                <p style={{ margin: 0, fontSize: '0.88rem', color: '#444' }}>
-                  <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#42c38b', marginRight: 8 }} />
-                  Strongest: <strong>{summary.strongest.task_name}</strong> — {summary.strongest.percent}% of target
-                </p>
-              )}
-              {summary.needs_attention && (
-                <p style={{ margin: 0, fontSize: '0.88rem', color: '#444' }}>
-                  <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#f75b67', marginRight: 8 }} />
-                  Needs attention: <strong>{summary.needs_attention.task_name}</strong> — {summary.needs_attention.percent}% of target
-                </p>
-              )}
+          <div className="glass" style={{ borderRadius: 20, padding: '24px 26px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+              <h2 className="gradient-text" style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0 }}>This Week&apos;s Rhythm</h2>
+              <span style={{ fontSize: '1.6rem', fontWeight: 800, color: '#74bcd9' }}>
+                {summary.weekly_expected.expected > 0
+                  ? Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100)
+                  : 0}%
+              </span>
             </div>
-          )}
+            <div style={{ height: 10, borderRadius: 6, background: 'rgba(0,0,0,0.07)', overflow: 'hidden', marginBottom: 10 }}>
+              <div style={{
+                width: `${summary.weekly_expected.expected > 0 ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100)) : 0}%`,
+                height: '100%', borderRadius: 6, background: 'linear-gradient(90deg,#f2a7c0,#74bcd9)',
+              }} />
+            </div>
+            <p style={{ margin: '0 0 14px', fontSize: '0.88rem', color: '#555' }}>
+              {summary.weekly_expected.actual} of {Math.round(summary.weekly_expected.expected)} expected occurrences this week
+            </p>
 
-          <div className="ht-stat-rail">
-            <StatTile icon={<ListChecks size={16} />} label="Weekly Targets" value={`${summary.weekly_targets.completed}/${summary.weekly_targets.target}`} />
-            <StatTile
-              icon={<AlertTriangle size={16} />}
-              label="At Risk"
-              value={summary.at_risk > 0 ? String(summary.at_risk) : 'None'}
-              accent={summary.at_risk > 0 ? '#f75b67' : undefined}
-            />
-            <StatTile icon={<Trophy size={16} />} label="Longest Streak" value={`${summary.longest_streak}d`} />
-            <StatTile
-              icon={<Check size={16} />}
-              label="Best Rhythm"
-              value={summary.strongest ? `${summary.strongest.task_name} · ${summary.strongest.percent}%` : 'None yet'}
-            />
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: '0.85rem' }}>
+              {summary.total_habits - summary.at_risk > 0 && (
+                <span style={{ color: '#444' }}>
+                  <Check size={14} color="#42c38b" style={{ verticalAlign: -2, marginRight: 4 }} />
+                  {summary.total_habits - summary.at_risk} ritual{summary.total_habits - summary.at_risk === 1 ? '' : 's'} on pace
+                </span>
+              )}
+              {summary.at_risk > 0 && (
+                <span style={{ color: '#444' }}>
+                  <AlertTriangle size={14} color="#f75b67" style={{ verticalAlign: -2, marginRight: 4 }} />
+                  {summary.at_risk} ritual{summary.at_risk === 1 ? '' : 's'} need{summary.at_risk === 1 ? 's' : ''} attention
+                </span>
+              )}
+              <span style={{ color: '#888' }}>
+                <Trophy size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
+                {summary.longest_streak}-day best streak
+              </span>
+            </div>
+
+            {(summary.on_pace || summary.needs_attention) && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+                {summary.on_pace && (
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: '#444' }}>
+                    <span style={{ color: '#42c38b', fontWeight: 700 }}>✓ On pace:</span>{' '}
+                    <strong>{summary.on_pace.task_name}</strong> — {summary.on_pace.week_actual}/{summary.on_pace.week_target} this week
+                    {summary.on_pace.week_target - summary.on_pace.week_actual > 0 && ` · ${summary.on_pace.week_target - summary.on_pace.week_actual} remaining`}
+                  </p>
+                )}
+                {summary.needs_attention && (
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: '#444' }}>
+                    <span style={{ color: '#c0392b', fontWeight: 700 }}>⚠ Needs attention:</span>{' '}
+                    <strong>{summary.needs_attention.task_name}</strong> — {summary.needs_attention.week_actual}/{summary.needs_attention.week_target} this week
+                    {summary.needs_attention.week_target - summary.needs_attention.week_actual > 0 && ` · ${summary.needs_attention.week_target - summary.needs_attention.week_actual} remaining`}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
-          <div className="glass" style={{ borderRadius: 20, padding: '22px 24px', marginTop: 16 }}>
-            <h3 style={{ margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 700, color: '#444' }}>Daily completion, last 7 days</h3>
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 96 }}>
-              {summary.weekly_rhythm.map(d => (
-                <div
-                  key={d.date}
-                  onClick={() => setSelectedDay(prev => prev === d.date ? null : d.date)}
-                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end', cursor: 'pointer' }}
-                >
-                  <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#555', minHeight: 12 }}>
-                    {d.scheduled > 0 ? `${d.percent}%` : ''}
+          <div className="glass" style={{ borderRadius: 20, padding: '20px 24px', marginTop: 16 }}>
+            <h3 style={{ margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 700, color: '#444' }}>Daily rhythm — last 7 days</h3>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {summary.weekly_rhythm.map(d => {
+                const glyph = d.scheduled === 0 ? '○' : d.percent >= 100 ? '●' : d.percent > 0 ? '◐' : '○';
+                const glyphColor = d.scheduled === 0
+                  ? 'rgba(0,0,0,0.15)'
+                  : d.percent > 0
+                    ? '#74bcd9'
+                    : '#f75b67';
+                return (
+                  <div
+                    key={d.date}
+                    onClick={() => setSelectedDay(prev => prev === d.date ? null : d.date)}
+                    title={`${d.weekday} ${d.date}: ${d.scheduled > 0 ? `${d.percent}% fulfilled` : 'nothing scheduled'}`}
+                    style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer', padding: '4px 0' }}
+                  >
+                    <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#777', minHeight: 12 }}>
+                      {d.scheduled > 0 ? `${d.percent}%` : '—'}
+                    </div>
+                    <div style={{ fontSize: '1.3rem', lineHeight: 1, color: glyphColor }}>{glyph}</div>
+                    <div style={{ fontSize: '0.68rem', fontWeight: 600, color: '#999' }}>{WEEKDAY_SHORT[d.weekday]}</div>
                   </div>
-                  {d.scheduled === 0 ? (
-                    <div
-                      title={`${d.weekday} ${d.date}: Nothing scheduled`}
-                      style={{ width: '100%', maxWidth: 34, height: 3, borderRadius: 2, background: 'rgba(0,0,0,0.15)', marginBottom: 3 }}
-                    />
-                  ) : (
-                    <div
-                      title={`${d.weekday} ${d.date}: ${d.percent}% fulfilled`}
-                      style={{
-                        width: '100%', maxWidth: 34,
-                        height: Math.max(d.percent > 0 ? d.percent * 0.6 : 8, 8),
-                        borderRadius: 8,
-                        background: d.percent > 0 ? 'linear-gradient(180deg, #f2a7c0, #74bcd9)' : 'rgba(247,91,103,0.55)',
-                        boxShadow: d.percent > 0 ? '0 4px 10px rgba(116,188,217,0.35)' : 'none',
-                      }}
-                    />
-                  )}
-                  <div style={{ fontSize: '0.7rem', fontWeight: 600, color: '#777' }}>{WEEKDAY_SHORT[d.weekday]}</div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {selectedDay && habits && (
@@ -416,21 +432,17 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           </div>
 
           {summary.category_consistency.length > 0 && (
-            <div className="glass" style={{ borderRadius: 20, padding: '22px 24px', marginTop: 16 }}>
-              <h3 style={{ margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 700, color: '#444' }}>Consistency by category</h3>
+            <div className="glass" style={{ borderRadius: 20, padding: '20px 24px', marginTop: 16 }}>
+              <h3 style={{ margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 700, color: '#444' }}>Consistency by category — this week</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {summary.category_consistency.map(c => (
                   <div key={c.category} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div style={{ width: 110, fontSize: '0.82rem', fontWeight: c.category === 'Overall' ? 800 : 600, color: '#444' }}>
-                      {c.category === 'Overall' ? 'Overall' : CATEGORY_LABELS[c.category]}
-                    </div>
+                    <div style={{ width: 110, fontSize: '0.82rem', fontWeight: 600, color: '#444' }}>{CATEGORY_LABELS[c.category]}</div>
                     <div style={{ flex: 1, height: 10, borderRadius: 6, background: 'rgba(0,0,0,0.07)', overflow: 'hidden' }}>
-                      <div style={{
-                        width: `${c.percent}%`, height: '100%', borderRadius: 6,
-                        background: c.category === 'Overall' ? 'linear-gradient(90deg,#f2a7c0,#74bcd9)' : CATEGORY_COLORS[c.category],
-                      }} />
+                      <div style={{ width: `${c.percent}%`, height: '100%', borderRadius: 6, background: CATEGORY_COLORS[c.category] }} />
                     </div>
-                    <div style={{ width: 40, textAlign: 'right', fontSize: '0.8rem', fontWeight: 700, color: '#444' }}>{c.percent}%</div>
+                    <div style={{ width: 60, textAlign: 'right', fontSize: '0.78rem', color: '#888' }}>{c.completed}/{c.scheduled}</div>
+                    <div style={{ width: 36, textAlign: 'right', fontSize: '0.8rem', fontWeight: 700, color: '#444' }}>{c.percent}%</div>
                   </div>
                 ))}
               </div>
@@ -627,15 +639,6 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           cursor: pointer;
         }
 
-        .ht-stat-rail {
-          display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px;
-        }
-        .ht-stat-tile {
-          background: rgba(255,255,255,0.5); border-radius: 16px; padding: 14px 16px;
-          display: flex; flex-direction: column; gap: 6px;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-        }
-
         .ht-modal-backdrop {
           position: fixed; inset: 0; z-index: 999;
           background: rgba(0,0,0,0.42); backdrop-filter: blur(4px);
@@ -749,6 +752,12 @@ function HabitCard({
       </div>
 
       {isFlexible ? <WeekDots progress={habit.week_progress!} /> : <ChainRow chain={habit.chain!} />}
+
+      {!isFlexible && (
+        <div style={{ fontSize: '0.74rem', color: habit.checked_in_today ? '#42c38b' : habit.is_today ? '#f79f24' : '#999' }}>
+          {habit.checked_in_today ? 'Done today ✓' : habit.is_today ? 'Scheduled today — not yet done' : 'Not scheduled today'}
+        </div>
+      )}
 
       {isFlexible && (
         <div style={{ fontSize: '0.74rem', color: '#666' }}>
@@ -1036,18 +1045,6 @@ function HabitDetailModal({ habit, onClose }: { habit: HabitWithComputed; onClos
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-function StatTile({ icon, label, value, accent }: { icon: React.ReactNode; label: string; value: string; accent?: string }) {
-  return (
-    <div className="ht-stat-tile">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: accent ?? '#74bcd9' }}>
-        {icon}
-        <span style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', color: '#888' }}>{label}</span>
-      </div>
-      <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</div>
     </div>
   );
 }
