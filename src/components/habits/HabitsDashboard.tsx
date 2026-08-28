@@ -325,8 +325,9 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
               <h2 className="gradient-text" style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0 }}>This Week&apos;s Rhythm</h2>
               <span style={{ fontSize: '1.6rem', fontWeight: 800, color: '#74bcd9' }}>
                 {summary.weekly_expected.expected > 0
-                  ? Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100)
-                  : 0}%
+                  ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100))
+                  : '—'}
+                {summary.weekly_expected.expected > 0 ? '%' : ''}
               </span>
             </div>
             <div style={{ height: 10, borderRadius: 6, background: 'rgba(0,0,0,0.07)', overflow: 'hidden', marginBottom: 10 }}>
@@ -336,7 +337,9 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
               }} />
             </div>
             <p style={{ margin: '0 0 14px', fontSize: '0.88rem', color: '#555' }}>
-              {summary.weekly_expected.actual} of {Math.round(summary.weekly_expected.expected)} expected occurrences this week
+              {summary.weekly_expected.expected > 0
+                ? `${summary.weekly_expected.actual} of ${Math.max(summary.weekly_expected.actual, Math.round(summary.weekly_expected.expected))} expected occurrences this week`
+                : 'Nothing due yet this week'}
             </p>
 
             <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: '0.85rem' }}>
@@ -793,9 +796,6 @@ function HabitCard({
             onCommitted={onAmountCommitted}
           />
         </div>
-      )}
-      {isNumeric && !canAct && (
-        <div style={{ fontSize: '0.74rem', color: '#999', fontStyle: 'italic' }}>Not scheduled today</div>
       )}
 
       <div style={{ display: 'flex', gap: 6, marginTop: 4 }} onClick={e => e.stopPropagation()}>
