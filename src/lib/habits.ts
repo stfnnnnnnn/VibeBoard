@@ -365,8 +365,8 @@ export async function getHabitsForUser(userId: number): Promise<HabitWithCompute
 }
 
 export interface WeeklyRhythmDay { date: string; weekday: Weekday; percent: number; scheduled: number; completed: number }
-export interface RankedHabit { habit_id: number; task_name: string; percent: number }
-export interface CategoryConsistency { category: HabitCategory | 'Overall'; percent: number }
+export interface RankedHabit { habit_id: number; task_name: string; percent: number; week_actual: number; week_target: number }
+export interface CategoryConsistency { category: HabitCategory; percent: number; scheduled: number; completed: number }
 
 export interface HabitsSummary {
   total_habits: number;
@@ -374,28 +374,35 @@ export interface HabitsSummary {
   today_completed: number;
   longest_streak: number;
   weekly_targets: { completed: number; target: number };
+  weekly_expected: { actual: number; expected: number };
   at_risk: number;
   weekly_rhythm: WeeklyRhythmDay[];
   category_consistency: CategoryConsistency[];
-  strongest: RankedHabit | null;
+  on_pace: RankedHabit | null;
   needs_attention: RankedHabit | null;
 }
 
-function habitFulfillmentRate(habit: HabitWithComputed): number | null {
+/** Averages an occurrence's fulfillment over THIS WEEK ONLY (Monday through today) for both
+ * schedule modes. v3 mistakenly averaged a fixed habit's fulfillment over its trailing 7
+ * *calendar* days (which can span two ISO weeks) while a flexible habit's was already
+ * "this week" — the mismatch is why an "Overall" figure could contradict what the hero
+ * shows for today. Both branches now agree on the window. */
+function habitFulfillmentRate(habit: HabitWithComputed, weekStart: string): number | null {
   if (habit.schedule_mode === 'flexible') {
     if (!habit.week_progress) return null;
     return Math.min(habit.week_progress.completed / Math.max(1, habit.week_progress.target), 1);
   }
   if (!habit.chain) return null;
-  const scheduledDays = habit.chain.filter(d => d.scheduled);
-  if (!scheduledDays.length) return null;
-  return scheduledDays.reduce((s, d) => s + d.fulfillment, 0) / scheduledDays.length;
+  const scheduledDaysThisWeek = habit.chain.filter(d => d.scheduled && d.date >= weekStart);
+  if (!scheduledDaysThisWeek.length) return null;
+  return scheduledDaysThisWeek.reduce((s, d) => s + d.fulfillment, 0) / scheduledDaysThisWeek.length;
 }
 
 export async function getSummaryForUser(userId: number): Promise<HabitsSummary> {
   const habits = await getHabitsForUser(userId);
   const { dateStr: today } = todayInManila();
   const days = lastNDays(today, 7);
+  const weekStart = mondayOfWeek(today);
 
   const today_total = habits.filter(h => h.is_today).length;
   const today_completed = habits.filter(h => h.is_today && h.checked_in_today).length;
@@ -407,6 +414,10 @@ export async function getSummaryForUser(userId: number): Promise<HabitsSummary> 
       return { completed: acc.completed + Math.min(h.week_actual, target), target: acc.target + target };
     },
     { completed: 0, target: 0 }
+  );
+  const weekly_expected = habits.reduce(
+    (acc, h) => ({ actual: acc.actual + h.week_actual, expected: acc.expected + h.week_expected }),
+    { actual: 0, expected: 0 }
   );
   const at_risk = habits.filter(h => h.pace === 'behind').length;
 
@@ -428,43 +439,57 @@ export async function getSummaryForUser(userId: number): Promise<HabitsSummary> 
 
   const rates: { habit: HabitWithComputed; rate: number }[] = [];
   for (const h of habits) {
-    const rate = habitFulfillmentRate(h);
+    const rate = habitFulfillmentRate(h, weekStart);
     if (rate !== null) rates.push({ habit: h, rate });
   }
 
-  const category_consistency: CategoryConsistency[] = [];
-  if (rates.length > 0) {
-    const overallPct = Math.round((rates.reduce((s, r) => s + r.rate, 0) / rates.length) * 100);
-    category_consistency.push({ category: 'Overall', percent: overallPct });
+  const byCategory = new Map<HabitCategory, { scheduled: number; completed: number; rates: number[] }>();
+  for (const { habit: h, rate } of rates) {
+    const bucket = byCategory.get(h.task_category) ?? { scheduled: 0, completed: 0, rates: [] };
+    bucket.rates.push(rate);
+    if (h.schedule_mode === 'fixed' && h.chain) {
+      const thisWeekDays = h.chain.filter(d => d.scheduled && d.date >= weekStart);
+      bucket.scheduled += thisWeekDays.length;
+      bucket.completed += thisWeekDays.filter(d => d.completed).length;
+    } else if (h.week_progress) {
+      bucket.scheduled += h.week_progress.target;
+      bucket.completed += h.week_progress.completed;
+    }
+    byCategory.set(h.task_category, bucket);
   }
-  const byCategory = new Map<HabitCategory, number[]>();
-  for (const { habit, rate } of rates) {
-    if (!byCategory.has(habit.task_category)) byCategory.set(habit.task_category, []);
-    byCategory.get(habit.task_category)!.push(rate);
-  }
-  for (const [category, list] of byCategory) {
-    category_consistency.push({ category, percent: Math.round((list.reduce((s, r) => s + r, 0) / list.length) * 100) });
-  }
-  category_consistency.sort((a, b) => {
-    if (a.category === 'Overall') return -1;
-    if (b.category === 'Overall') return 1;
-    return b.percent - a.percent;
-  });
+  const category_consistency: CategoryConsistency[] = Array.from(byCategory.entries())
+    .map(([category, b]) => ({
+      category,
+      percent: Math.round((b.rates.reduce((s, r) => s + r, 0) / b.rates.length) * 100),
+      scheduled: b.scheduled,
+      completed: b.completed,
+    }))
+    .sort((a, b) => b.percent - a.percent);
 
-  let strongest: RankedHabit | null = null;
+  let on_pace: RankedHabit | null = null;
   let needs_attention: RankedHabit | null = null;
-  if (rates.length >= 2) {
-    const sorted = [...rates].sort((a, b) => b.rate - a.rate);
-    const top = sorted[0], bottom = sorted[sorted.length - 1];
-    strongest = { habit_id: top.habit.habit_id, task_name: top.habit.task_name, percent: Math.round(top.rate * 100) };
-    needs_attention = { habit_id: bottom.habit.habit_id, task_name: bottom.habit.task_name, percent: Math.round(bottom.rate * 100) };
+  const behind = rates.filter(r => r.habit.pace === 'behind');
+  const notBehind = rates.filter(r => r.habit.pace !== 'behind');
+  if (notBehind.length > 0) {
+    const top = notBehind.reduce((best, r) => (r.rate > best.rate ? r : best));
+    on_pace = {
+      habit_id: top.habit.habit_id, task_name: top.habit.task_name, percent: Math.round(top.rate * 100),
+      week_actual: top.habit.week_actual, week_target: Math.max(1, top.habit.times_per_week),
+    };
+  }
+  if (behind.length > 0) {
+    const bottom = behind.reduce((worst, r) => (r.rate < worst.rate ? r : worst));
+    needs_attention = {
+      habit_id: bottom.habit.habit_id, task_name: bottom.habit.task_name, percent: Math.round(bottom.rate * 100),
+      week_actual: bottom.habit.week_actual, week_target: Math.max(1, bottom.habit.times_per_week),
+    };
   }
 
   return {
     total_habits: habits.length,
     today_total, today_completed, longest_streak,
-    weekly_targets, at_risk,
-    weekly_rhythm, category_consistency, strongest, needs_attention,
+    weekly_targets, weekly_expected, at_risk,
+    weekly_rhythm, category_consistency, on_pace, needs_attention,
   };
 }
 
