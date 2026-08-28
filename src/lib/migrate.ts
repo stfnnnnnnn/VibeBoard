@@ -6,6 +6,7 @@ let _ranFg = false;
 let _ranCl = false;
 let _ranCanvas = false;
 let _ranSs = false;
+let _ranHabitsV2 = false;
 
 /** Add accomplished_at column to entry tables if not already present. */
 export async function ensureAccomplishedAt(): Promise<void> {
@@ -266,4 +267,28 @@ export async function ensureCanvasSchema(): Promise<void> {
   `);
 
   _ranCanvas = true;
+}
+
+/** Add flexible-scheduling / numeric-tracking columns to the habit tables if not already present. */
+export async function ensureHabitTrackingSchema(): Promise<void> {
+  if (_ranHabitsV2) return;
+
+  const alterations: [string, string][] = [
+    ['habit_tasks', `ADD COLUMN schedule_mode ENUM('fixed','flexible') NOT NULL DEFAULT 'fixed'`],
+    ['habit_tasks', `ADD COLUMN tracking_type ENUM('boolean','numeric') NOT NULL DEFAULT 'boolean'`],
+    ['habit_tasks', `ADD COLUMN target_value DECIMAL(6,1) NULL`],
+    ['habit_tasks', `ADD COLUMN unit_label VARCHAR(24) NULL`],
+    ['habit_tasks', `ADD COLUMN step_value DECIMAL(6,1) NULL DEFAULT 1`],
+    ['habit_checkins', `ADD COLUMN amount DECIMAL(6,1) NULL`],
+  ];
+
+  for (const [table, clause] of alterations) {
+    try {
+      await pool.query(`ALTER TABLE \`${table}\` ${clause}`);
+    } catch (err: unknown) {
+      if ((err as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw err;
+    }
+  }
+
+  _ranHabitsV2 = true;
 }
