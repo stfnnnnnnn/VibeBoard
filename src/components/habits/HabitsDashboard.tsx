@@ -668,7 +668,7 @@ function HabitCard({
         </div>
       )}
 
-      {isNumeric && (
+      {isNumeric && canAct && (
         <AmountInput
           habitId={habit.habit_id}
           amount={habit.today_amount ?? 0}
@@ -677,6 +677,9 @@ function HabitCard({
           step={habit.step_value}
           onCommitted={onAmountCommitted}
         />
+      )}
+      {isNumeric && !canAct && (
+        <div style={{ fontSize: '0.74rem', color: '#999', fontStyle: 'italic' }}>Not scheduled today</div>
       )}
 
       <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
