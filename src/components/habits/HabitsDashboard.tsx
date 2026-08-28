@@ -78,11 +78,17 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(async () => {
     const [hRes, sRes] = await Promise.all([fetch('/api/habits'), fetch('/api/habits/summary')]);
+    if (!hRes.ok || !sRes.ok) {
+      setLoadError(true);
+      return;
+    }
     const hData = await hRes.json();
     const sData = await sRes.json();
+    setLoadError(false);
     setHabits(hData.habits ?? []);
     setSummary(sData);
   }, []);
@@ -248,7 +254,12 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
       </div>
 
       {/* ── Habit grid ── */}
-      {loading ? (
+      {loadError ? (
+        <div className="glass" style={{ borderRadius: 20, padding: '36px 28px', textAlign: 'center', color: '#555' }}>
+          <AlertTriangle size={22} style={{ marginBottom: 8, opacity: 0.7 }} />
+          <p style={{ margin: 0, fontWeight: 600 }}>Couldn&apos;t load your rituals. Try refreshing.</p>
+        </div>
+      ) : loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}><Loader2 className="ht-spin" size={28} /></div>
       ) : filtered.length === 0 ? (
         <div className="glass" style={{ borderRadius: 20, padding: '36px 28px', textAlign: 'center', color: '#555' }}>

@@ -113,6 +113,7 @@ function validateInput(input: HabitInput): ValidatedHabitInput {
   } else {
     weeklyTarget = Math.floor(Number(input.weekly_target));
     if (!weeklyTarget || weeklyTarget < 1) throw new Error('Set how many times per week.');
+    if (weeklyTarget > 7) throw new Error('Times per week can\'t be more than 7.');
   }
 
   const trackingType: TrackingType = input.tracking_type ?? 'boolean';

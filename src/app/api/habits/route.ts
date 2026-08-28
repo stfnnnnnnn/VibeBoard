@@ -17,11 +17,12 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   await ensureHabitTrackingSchema();
 
-  const body = (await req.json()) as HabitInput;
   try {
+    const body = (await req.json()) as HabitInput;
     const habit_id = await createHabit(parseInt(session.user.id), body);
     return Response.json({ status: 'success', habit_id });
   } catch (err) {
-    return Response.json({ error: (err as Error).message }, { status: 400 });
+    const message = err instanceof SyntaxError ? 'Invalid request body.' : (err as Error).message;
+    return Response.json({ error: message }, { status: 400 });
   }
 }
