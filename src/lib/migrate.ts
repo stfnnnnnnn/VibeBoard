@@ -269,9 +269,64 @@ export async function ensureCanvasSchema(): Promise<void> {
   _ranCanvas = true;
 }
 
+/** Create the habit-tracking tables (v1 shape) if they don't already exist. A fresh
+ * deploy target has none of these — the legacy PHP module originally created them, so
+ * there was never a CREATE TABLE anywhere in this codebase until now. */
+async function ensureHabitTablesExist(): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS habit_tasks (
+      habit_id INT NOT NULL AUTO_INCREMENT,
+      user_id INT NOT NULL,
+      task_name VARCHAR(255) NOT NULL,
+      purpose TEXT NOT NULL,
+      habit_urgency ENUM('Urgent','Priority','Important','Not Important','Not Urgent') NOT NULL,
+      task_category ENUM('academic','household','health','social','organizational','life goals') NOT NULL,
+      habit_type ENUM('routine','habit') NOT NULL,
+      days_of_week SET('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday') NOT NULL,
+      times_per_week TINYINT(4) NOT NULL,
+      date_created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      task_status ENUM('active','archived') DEFAULT 'active',
+      PRIMARY KEY (habit_id),
+      KEY user_id (user_id),
+      CONSTRAINT fk_habit_user FOREIGN KEY (user_id) REFERENCES user_login (user_id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS habit_checkins (
+      checkin_id INT NOT NULL AUTO_INCREMENT,
+      habit_id INT NOT NULL,
+      checkin_date DATE NOT NULL,
+      is_completed TINYINT(1) DEFAULT 0,
+      PRIMARY KEY (checkin_id),
+      UNIQUE KEY unique_checkin (habit_id, checkin_date),
+      CONSTRAINT fk_checkin_habit FOREIGN KEY (habit_id) REFERENCES habit_tasks (habit_id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS habit_streaks (
+      streak_id INT NOT NULL AUTO_INCREMENT,
+      user_id INT NOT NULL,
+      habit_id INT NOT NULL,
+      streak_start DATE NOT NULL,
+      streak_end DATE DEFAULT NULL,
+      current_streak_days INT DEFAULT 1,
+      longest_streak INT DEFAULT 1,
+      PRIMARY KEY (streak_id),
+      KEY user_id (user_id),
+      KEY habit_id (habit_id),
+      CONSTRAINT habit_streaks_ibfk_1 FOREIGN KEY (user_id) REFERENCES user_login (user_id) ON DELETE CASCADE,
+      CONSTRAINT habit_streaks_ibfk_2 FOREIGN KEY (habit_id) REFERENCES habit_tasks (habit_id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+  `);
+}
+
 /** Add flexible-scheduling / numeric-tracking columns to the habit tables if not already present. */
 export async function ensureHabitTrackingSchema(): Promise<void> {
   if (_ranHabitsV2) return;
+
+  await ensureHabitTablesExist();
 
   const alterations: [string, string][] = [
     ['habit_tasks', `ADD COLUMN schedule_mode ENUM('fixed','flexible') NOT NULL DEFAULT 'fixed'`],
