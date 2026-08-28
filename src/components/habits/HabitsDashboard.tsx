@@ -967,12 +967,17 @@ function DetailStat({ label, value }: { label: string; value: string }) {
    total check-ins, start date, recent check-ins. No editing surface. ─── */
 function HabitDetailModal({ habit, onClose }: { habit: HabitWithComputed; onClose: () => void }) {
   const [history, setHistory] = useState<HabitHistoryResponse | null>(null);
+  const [historyError, setHistoryError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/habits/${habit.habit_id}/history?weeks=12`)
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => { if (!cancelled) setHistory(data); });
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to load history');
+        return res.json();
+      })
+      .then(data => { if (!cancelled) setHistory(data); })
+      .catch(() => { if (!cancelled) setHistoryError(true); });
     return () => { cancelled = true; };
   }, [habit.habit_id]);
 
@@ -993,7 +998,12 @@ function HabitDetailModal({ habit, onClose }: { habit: HabitWithComputed; onClos
           {habit.schedule_mode === 'flexible' ? <WeekDots progress={habit.week_progress!} /> : <ChainRow chain={habit.chain!} />}
         </div>
 
-        {!history ? (
+        {historyError ? (
+          <div style={{ textAlign: 'center', padding: '30px 0', color: '#555' }}>
+            <AlertTriangle size={22} style={{ marginBottom: 8, opacity: 0.7 }} />
+            <p style={{ margin: 0, fontWeight: 600 }}>Couldn&apos;t load history.</p>
+          </div>
+        ) : !history ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: '30px 0' }}><Loader2 className="ht-spin" size={22} /></div>
         ) : (
           <>
