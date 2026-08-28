@@ -280,7 +280,7 @@ async function ensureHabitTablesExist(): Promise<void> {
       user_id INT NOT NULL,
       task_name VARCHAR(255) NOT NULL,
       purpose TEXT NOT NULL,
-      habit_urgency ENUM('Urgent','Priority','Important','Not Important','Not Urgent') NOT NULL,
+      habit_urgency ENUM('Urgent','Priority','Important','Not Important','Not Urgent') NOT NULL DEFAULT 'Not Urgent',
       task_category ENUM('academic','household','health','social','organizational','life goals') NOT NULL,
       habit_type ENUM('routine','habit') NOT NULL,
       days_of_week SET('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday') NOT NULL,
@@ -354,6 +354,8 @@ export async function ensureHabitTrackingSchema(): Promise<void> {
  * (only on the run that actually adds the column, never on a later no-op call). */
 export async function ensureHabitPriorityAndMinimumSchema(): Promise<void> {
   if (_ranHabitsV3) return;
+
+  await pool.query(`ALTER TABLE habit_tasks MODIFY habit_urgency ENUM('Urgent','Priority','Important','Not Important','Not Urgent') NOT NULL DEFAULT 'Not Urgent'`);
 
   let priorityColumnAdded = false;
   try {
