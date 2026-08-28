@@ -471,8 +471,12 @@ export async function getHabitHistory(userId: number, habitId: number, weeks: nu
   const habitCore = habitCoreOf(habit);
 
   const currentWeekStart = mondayOfWeek(today);
+  const earliestPossibleWeekStart = mondayOfWeek(habit.date_created.slice(0, 10));
   const weekStarts: string[] = [];
-  for (let i = weeks - 1; i >= 0; i--) weekStarts.push(addDaysToDateStr(currentWeekStart, -7 * i));
+  for (let i = weeks - 1; i >= 0; i--) {
+    const ws = addDaysToDateStr(currentWeekStart, -7 * i);
+    if (ws >= earliestPossibleWeekStart) weekStarts.push(ws);
+  }
   const earliestDate = weekStarts[0];
 
   const [rows] = await pool.execute<CheckinRow[]>(
@@ -499,14 +503,23 @@ export async function getHabitHistory(userId: number, habitId: number, weeks: nu
   });
 
   let best_week: HabitHistoryWeek | null = null;
-  for (const w of weeksData) if (!best_week || w.completed > best_week.completed) best_week = w;
+  for (const w of weeksData) {
+    if (w.completed > 0 && (!best_week || w.completed > best_week.completed)) best_week = w;
+  }
 
   let weekly_streak: number | null = null;
   if (habit.schedule_mode === 'flexible') {
     let count = 0;
-    for (let i = weeksData.length - 1; i >= 0; i--) {
-      if (weeksData[i].completed >= weeksData[i].target) count++;
-      else break;
+    const lastIndex = weeksData.length - 1;
+    for (let i = lastIndex; i >= 0; i--) {
+      const met = weeksData[i].completed >= weeksData[i].target;
+      if (met) {
+        count++;
+      } else if (i === lastIndex) {
+        continue; // in-progress week hasn't hit target yet — don't count it, but don't break the streak either
+      } else {
+        break;
+      }
     }
     weekly_streak = count;
   }
