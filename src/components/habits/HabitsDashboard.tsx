@@ -824,7 +824,7 @@ function ChainRow({ chain }: { chain: HabitWithComputed['chain'] }) {
             key={day.date}
             style={{
               display: 'flex', flexDirection: 'column',
-              alignItems: isLast ? 'center' : 'flex-end',
+              alignItems: 'flex-end',
               flex: isLast ? '0 0 auto' : 1,
             }}
           >
