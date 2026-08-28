@@ -75,7 +75,3 @@ export function computeConsecutiveScheduledStreak(
 
   return { length, start };
 }
-
-export const URGENCY_RANK: Record<string, number> = {
-  'Urgent': 5, 'Priority': 4, 'Important': 3, 'Not Important': 2, 'Not Urgent': 1,
-};
