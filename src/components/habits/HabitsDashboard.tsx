@@ -368,7 +368,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
                 .map(h => ({ habit: h, day: h.chain?.find(c => c.date === selectedDay) }))
                 .filter((x): x is { habit: HabitWithComputed; day: NonNullable<HabitWithComputed['chain']>[number] } => !!x.day?.scheduled);
               return (
-                <div className="ht-fade-slide" style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+                <div key={selectedDay} className="ht-fade-slide" style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
                   <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 8 }}>
                     {new Date(selectedDay + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
                   </div>
@@ -732,7 +732,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           cursor: default;
         }
         .ht-amount-wrap.met { background: rgba(66,195,139,0.15); }
-        .ht-amount-wrap.minimum-met { background: rgba(217,113,74,0.12); }
+        .ht-amount-wrap.minimum-met { background: rgba(184,83,44,0.12); }
         .ht-step-btn {
           width: 26px; height: 26px; border-radius: 8px; border: 1px solid #ddd;
           background: #fff; color: #555; display: flex; align-items: center; justify-content: center;
@@ -749,7 +749,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           height: 100%; border-radius: 4px; background: #b7c3cc; transition: width 0.3s ease, background 0.3s ease;
         }
         .ht-amount-wrap.met .ht-amount-fill { background: linear-gradient(90deg,#f2a7c0,#74bcd9); }
-        .ht-amount-wrap.minimum-met .ht-amount-fill { background: #d9714a; }
+        .ht-amount-wrap.minimum-met .ht-amount-fill { background: #b8532c; }
 
         .ht-spin { animation: ht-spin 0.8s linear infinite; }
         @keyframes ht-spin { to { transform: rotate(360deg); } }
@@ -783,7 +783,7 @@ function HabitCard({
       className="ht-card"
       style={{
         borderTop: `4px solid ${categoryColor}`,
-        background: `linear-gradient(180deg, ${categoryColor}1f 0%, rgba(255,255,255,0.55) 160px)`,
+        backgroundImage: `linear-gradient(180deg, ${categoryColor}1f 0%, rgba(255,255,255,0) 160px)`,
       }}
       onClick={onOpenDetail}
     >
@@ -820,7 +820,7 @@ function HabitCard({
       {isFlexible ? <WeekDots progress={habit.week_progress!} /> : <ChainRow chain={habit.chain!} />}
 
       {!isFlexible && (
-        <div style={{ fontSize: '0.74rem', color: habit.checked_in_today ? '#42c38b' : habit.is_today ? '#d9714a' : '#999' }}>
+        <div style={{ fontSize: '0.74rem', color: habit.checked_in_today ? '#42c38b' : habit.is_today ? '#b8532c' : '#999' }}>
           {habit.checked_in_today ? 'Done today ✓' : habit.is_today ? 'Scheduled today — not yet done' : 'Not scheduled today'}
         </div>
       )}
@@ -839,7 +839,7 @@ function HabitCard({
 
       {!isFlexible && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: '#555' }}>
-          <Flame size={13} color="#d9714a" />
+          <Flame size={13} color="#b8532c" />
           <strong>{habit.current_streak}</strong>-day streak
           {habit.longest_streak != null && habit.current_streak != null && habit.longest_streak > habit.current_streak && (
             <span style={{ opacity: 0.6 }}>· best {habit.longest_streak}</span>
