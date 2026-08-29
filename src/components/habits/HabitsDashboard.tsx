@@ -35,6 +35,8 @@ const TYPE_OPTIONS: HabitType[] = ['habit', 'routine'];
 
 const ACTIVE_TOGGLE_STYLE = { background: '#74bcd9', color: '#fff', borderColor: '#74bcd9' };
 
+const HEADING_FONT: React.CSSProperties = { fontFamily: "'DM Sans','Segoe UI',sans-serif", letterSpacing: '-0.01em' };
+
 type FilterValue = 'today' | 'all' | string; // 'category:x' | 'priority:x' | 'day:x'
 
 /* ─── Priority badge — three tiers of visual weight, not one loud badge for all ─── */
@@ -236,12 +238,12 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
   return (
     <div
       className="vb-bg"
-      style={{ minHeight: '100vh', padding: '48px 5% 64px', fontFamily: "'Inter','DM Sans','Segoe UI',sans-serif", color: '#333' }}
+      style={{ minHeight: '100vh', padding: '48px 5% 64px', fontFamily: "'Inter','DM Sans','Segoe UI',sans-serif", color: '#332b45' }}
     >
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap', marginBottom: 6 }}>
         <div>
-          <h1 className="gradient-text" style={{ fontSize: 'clamp(1.9rem,4vw,2.75rem)', fontWeight: 800, margin: 0, lineHeight: 1.1 }}>
+          <h1 className="gradient-text" style={{ ...HEADING_FONT, fontSize: 'clamp(1.9rem,4vw,2.75rem)', fontWeight: 800, margin: 0, lineHeight: 1.1 }}>
             {firstName}&apos;s Rituals
           </h1>
           {summary && (
@@ -261,66 +263,72 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
       {summary && summary.total_habits > 0 && (
         <div style={{ marginTop: 28 }}>
           <div className="glass" style={{ borderRadius: 20, padding: '24px 26px' }}>
-            <h2 className="gradient-text" style={{ fontSize: '1.2rem', fontWeight: 800, margin: '0 0 4px' }}>This Week&apos;s Rhythm</h2>
-            <div style={{ fontSize: '2.4rem', fontWeight: 800, color: '#74bcd9', lineHeight: 1.1, marginBottom: 10 }}>
-              {summary.weekly_expected.expected > 0
-                ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100))
-                : '—'}
-              {summary.weekly_expected.expected > 0 ? '%' : ''}
-            </div>
-            <div style={{ height: 10, borderRadius: 6, background: 'rgba(0,0,0,0.07)', overflow: 'hidden', marginBottom: 10 }}>
-              <div style={{
-                width: `${summary.weekly_expected.expected > 0 ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100)) : 0}%`,
-                height: '100%', borderRadius: 6, background: 'linear-gradient(90deg,#f2a7c0,#74bcd9)',
-              }} />
-            </div>
-            <p style={{ margin: '0 0 14px', fontSize: '0.88rem', color: '#555' }}>
-              {summary.weekly_expected.expected > 0
-                ? <><strong>This week:</strong> {summary.weekly_expected.actual}/{Math.max(summary.weekly_expected.actual, Math.round(summary.weekly_expected.expected))} expected occurrences</>
-                : 'Nothing due yet this week'}
-            </p>
+            <div className="ht-hero-grid">
+              <div>
+                <h2 className="gradient-text" style={{ ...HEADING_FONT, fontSize: '1.2rem', fontWeight: 800, margin: '0 0 4px' }}>This Week&apos;s Rhythm</h2>
+                <div style={{ ...HEADING_FONT, fontSize: '2.4rem', fontWeight: 800, color: '#74bcd9', lineHeight: 1.1, marginBottom: 10 }}>
+                  {summary.weekly_expected.expected > 0
+                    ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100))
+                    : '—'}
+                  {summary.weekly_expected.expected > 0 ? '%' : ''}
+                </div>
+                <div style={{ height: 10, borderRadius: 6, background: 'rgba(0,0,0,0.07)', overflow: 'hidden', marginBottom: 10 }}>
+                  <div className="ht-progress-fill" style={{
+                    width: `${summary.weekly_expected.expected > 0 ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100)) : 0}%`,
+                    height: '100%', borderRadius: 6, background: 'linear-gradient(90deg,#f2a7c0,#74bcd9)',
+                  }} />
+                </div>
+                <p style={{ margin: '0 0 14px', fontSize: '0.88rem', color: '#555' }}>
+                  {summary.weekly_expected.expected > 0
+                    ? <><strong>This week:</strong> {summary.weekly_expected.actual}/{Math.max(summary.weekly_expected.actual, Math.round(summary.weekly_expected.expected))} expected occurrences</>
+                    : 'Nothing due yet this week'}
+                </p>
 
-            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: '0.85rem' }}>
-              {summary.total_habits - summary.at_risk > 0 && (
-                <span style={{ color: '#444' }}>
-                  <Check size={14} color="#42c38b" style={{ verticalAlign: -2, marginRight: 4 }} />
-                  {summary.total_habits - summary.at_risk} ritual{summary.total_habits - summary.at_risk === 1 ? '' : 's'} on pace
-                </span>
-              )}
-              {summary.at_risk > 0 && (
-                <span style={{ color: '#444' }}>
-                  <AlertTriangle size={14} color="#f75b67" style={{ verticalAlign: -2, marginRight: 4 }} />
-                  {summary.at_risk} ritual{summary.at_risk === 1 ? '' : 's'} need{summary.at_risk === 1 ? 's' : ''} attention
-                </span>
-              )}
-              <span style={{ color: '#888' }}>
-                <Trophy size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
-                {summary.longest_streak}-day best streak
-              </span>
-            </div>
+                <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: '0.85rem' }}>
+                  {summary.total_habits - summary.at_risk > 0 && (
+                    <span style={{ color: '#444' }}>
+                      <Check size={14} color="#42c38b" style={{ verticalAlign: -2, marginRight: 4 }} />
+                      {summary.total_habits - summary.at_risk} ritual{summary.total_habits - summary.at_risk === 1 ? '' : 's'} on pace
+                    </span>
+                  )}
+                  {summary.at_risk > 0 && (
+                    <span style={{ color: '#444' }}>
+                      <AlertTriangle size={14} color="#f75b67" style={{ verticalAlign: -2, marginRight: 4 }} />
+                      {summary.at_risk} ritual{summary.at_risk === 1 ? '' : 's'} need{summary.at_risk === 1 ? 's' : ''} attention
+                    </span>
+                  )}
+                </div>
+              </div>
 
-            {(summary.on_pace || summary.needs_attention) && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
-                {summary.on_pace && (
-                  <p style={{ margin: 0, fontSize: '0.85rem', color: '#444' }}>
-                    <span style={{ color: '#42c38b', fontWeight: 700 }}>✓ On pace:</span>{' '}
-                    <strong>{summary.on_pace.task_name}</strong> — {summary.on_pace.week_actual}/{summary.on_pace.week_target} this week
-                    {summary.on_pace.week_target - summary.on_pace.week_actual > 0 && ` · ${summary.on_pace.week_target - summary.on_pace.week_actual} remaining`}
-                  </p>
-                )}
-                {summary.needs_attention && (
-                  <p style={{ margin: 0, fontSize: '0.85rem', color: '#444' }}>
-                    <span style={{ color: '#c0392b', fontWeight: 700 }}>⚠ Needs attention:</span>{' '}
-                    <strong>{summary.needs_attention.task_name}</strong> — {summary.needs_attention.week_actual}/{summary.needs_attention.week_target} this week
-                    {summary.needs_attention.week_target - summary.needs_attention.week_actual > 0 && ` · ${summary.needs_attention.week_target - summary.needs_attention.week_actual} remaining`}
-                  </p>
+              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8 }}>
+                <span style={{ color: '#888', fontSize: '0.85rem' }}>
+                  <Trophy size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
+                  {summary.longest_streak}-day best streak
+                </span>
+                {(summary.on_pace || summary.needs_attention) && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8, paddingTop: 12, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+                    {summary.on_pace && (
+                      <p style={{ margin: 0, fontSize: '0.85rem', color: '#444' }}>
+                        <span style={{ color: '#42c38b', fontWeight: 700 }}>✓ On pace:</span>{' '}
+                        <strong>{summary.on_pace.task_name}</strong> — {summary.on_pace.week_actual}/{summary.on_pace.week_target} this week
+                        {summary.on_pace.week_target - summary.on_pace.week_actual > 0 && ` · ${summary.on_pace.week_target - summary.on_pace.week_actual} remaining`}
+                      </p>
+                    )}
+                    {summary.needs_attention && (
+                      <p style={{ margin: 0, fontSize: '0.85rem', color: '#444' }}>
+                        <span style={{ color: '#c0392b', fontWeight: 700 }}>⚠ Needs attention:</span>{' '}
+                        <strong>{summary.needs_attention.task_name}</strong> — {summary.needs_attention.week_actual}/{summary.needs_attention.week_target} this week
+                        {summary.needs_attention.week_target - summary.needs_attention.week_actual > 0 && ` · ${summary.needs_attention.week_target - summary.needs_attention.week_actual} remaining`}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
+            </div>
           </div>
 
           <div className="glass" style={{ borderRadius: 20, padding: '20px 24px', marginTop: 16 }}>
-            <h3 style={{ margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 700, color: '#444' }}>Daily rhythm — last 7 days</h3>
+            <h3 style={{ ...HEADING_FONT, margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 700, color: '#444' }}>Daily rhythm — last 7 days</h3>
             <div style={{ display: 'flex', gap: 4 }}>
               {summary.weekly_rhythm.map(d => {
                 const glyph = d.scheduled === 0 ? '○' : d.percent >= 100 ? '●' : d.percent > 0 ? '◐' : '○';
@@ -360,7 +368,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
                 .map(h => ({ habit: h, day: h.chain?.find(c => c.date === selectedDay) }))
                 .filter((x): x is { habit: HabitWithComputed; day: NonNullable<HabitWithComputed['chain']>[number] } => !!x.day?.scheduled);
               return (
-                <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+                <div className="ht-fade-slide" style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
                   <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 8 }}>
                     {new Date(selectedDay + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
                   </div>
@@ -394,13 +402,13 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
 
           {summary.category_consistency.length > 0 && (
             <div className="glass" style={{ borderRadius: 20, padding: '20px 24px', marginTop: 16 }}>
-              <h3 style={{ margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 700, color: '#444' }}>Consistency by category — this week</h3>
+              <h3 style={{ ...HEADING_FONT, margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 700, color: '#444' }}>Consistency by category — this week</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {summary.category_consistency.map(c => (
                   <div key={c.category} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div style={{ width: 110, fontSize: '0.82rem', fontWeight: 600, color: '#444' }}>{CATEGORY_LABELS[c.category]}</div>
                     <div style={{ flex: 1, height: 10, borderRadius: 6, background: 'rgba(0,0,0,0.07)', overflow: 'hidden' }}>
-                      <div style={{ width: `${c.percent}%`, height: '100%', borderRadius: 6, background: CATEGORY_COLORS[c.category] }} />
+                      <div className="ht-progress-fill" style={{ width: `${c.percent}%`, height: '100%', borderRadius: 6, background: CATEGORY_COLORS[c.category] }} />
                     </div>
                     <div style={{ width: 60, textAlign: 'right', fontSize: '0.78rem', color: '#888' }}>{c.completed}/{c.scheduled}</div>
                     <div style={{ width: 36, textAlign: 'right', fontSize: '0.8rem', fontWeight: 700, color: '#444' }}>{c.percent}%</div>
@@ -441,7 +449,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
       </div>
 
       {/* ── Today's Rituals heading ── */}
-      <h2 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#333', margin: '0 0 14px' }}>
+      <h2 style={{ ...HEADING_FONT, fontSize: '1.1rem', fontWeight: 800, color: '#332b45', margin: '0 0 14px' }}>
         Today&apos;s Rituals{filter === 'today' && !loading && !loadError ? ` · ${filtered.length} scheduled` : ''}
       </h2>
 
@@ -482,7 +490,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
         <div className="ht-modal-backdrop" onClick={closeModal}>
           <div className="ht-modal" onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>{form.habit_id ? 'Edit Ritual' : 'New Ritual'}</h3>
+              <h3 style={{ ...HEADING_FONT, margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>{form.habit_id ? 'Edit Ritual' : 'New Ritual'}</h3>
               <button className="ht-icon-btn" onClick={closeModal} aria-label="Close"><X size={18} /></button>
             </div>
 
@@ -617,7 +625,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           border-radius: 14px;
           border: 1px solid rgba(255,255,255,0.5);
           background: rgba(255,255,255,0.55);
-          font-size: 0.92rem; font-weight: 600; color: #333;
+          font-size: 0.92rem; font-weight: 600; color: #332b45;
           box-shadow: 0 2px 8px rgba(0,0,0,0.06);
           cursor: pointer;
         }
@@ -626,6 +634,15 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
           gap: 20px;
+        }
+
+        .ht-hero-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 20px;
+        }
+        @media (min-width: 720px) {
+          .ht-hero-grid { grid-template-columns: 1.3fr 1fr; }
         }
 
         .ht-card {
@@ -639,6 +656,20 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           cursor: pointer;
         }
         .ht-card:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(0,0,0,0.12); }
+
+        .ht-chain-node {
+          transition: background 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease, transform 0.3s ease;
+        }
+
+        .ht-progress-fill {
+          transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes ht-fade-slide {
+          from { opacity: 0; transform: translateY(-6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .ht-fade-slide { animation: ht-fade-slide 0.25s ease-out; }
 
         .ht-btn {
           flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
@@ -701,14 +732,14 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           cursor: default;
         }
         .ht-amount-wrap.met { background: rgba(66,195,139,0.15); }
-        .ht-amount-wrap.minimum-met { background: rgba(247,159,36,0.12); }
+        .ht-amount-wrap.minimum-met { background: rgba(217,113,74,0.12); }
         .ht-step-btn {
           width: 26px; height: 26px; border-radius: 8px; border: 1px solid #ddd;
           background: #fff; color: #555; display: flex; align-items: center; justify-content: center;
           cursor: pointer; flex-shrink: 0;
         }
         .ht-amount-field {
-          width: 56px; text-align: center; font-size: 0.9rem; font-weight: 700; color: #333;
+          width: 56px; text-align: center; font-size: 0.9rem; font-weight: 700; color: #332b45;
           border: 1px solid #ddd; border-radius: 8px; padding: 4px 2px;
         }
         .ht-amount-bar {
@@ -718,13 +749,14 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           height: 100%; border-radius: 4px; background: #b7c3cc; transition: width 0.3s ease, background 0.3s ease;
         }
         .ht-amount-wrap.met .ht-amount-fill { background: linear-gradient(90deg,#f2a7c0,#74bcd9); }
-        .ht-amount-wrap.minimum-met .ht-amount-fill { background: #f79f24; }
+        .ht-amount-wrap.minimum-met .ht-amount-fill { background: #d9714a; }
 
         .ht-spin { animation: ht-spin 0.8s linear infinite; }
         @keyframes ht-spin { to { transform: rotate(360deg); } }
 
         @media (prefers-reduced-motion: reduce) {
-          .ht-card, .ht-home-btn, .ht-btn { transition: none !important; }
+          .ht-card, .ht-home-btn, .ht-btn, .ht-chain-node, .ht-progress-fill, .ht-amount-fill { transition: none !important; }
+          .ht-fade-slide { animation: none !important; }
           .ht-spin { animation-duration: 1.6s; }
         }
       `}</style>
@@ -744,14 +776,22 @@ function HabitCard({
   const canAct = habit.is_today || habit.checked_in_today;
   const isFlexible = habit.schedule_mode === 'flexible';
   const isNumeric = habit.tracking_type === 'numeric';
+  const categoryColor = CATEGORY_COLORS[habit.task_category];
 
   return (
-    <div className="ht-card" style={{ borderTop: `4px solid ${CATEGORY_COLORS[habit.task_category]}` }} onClick={onOpenDetail}>
+    <div
+      className="ht-card"
+      style={{
+        borderTop: `4px solid ${categoryColor}`,
+        background: `linear-gradient(180deg, ${categoryColor}1f 0%, rgba(255,255,255,0.55) 160px)`,
+      }}
+      onClick={onOpenDetail}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
         <div>
-          <div style={{ fontWeight: 800, fontSize: '1.02rem', color: '#333' }}>{habit.task_name}</div>
+          <div style={{ ...HEADING_FONT, fontWeight: 800, fontSize: '1.02rem', color: '#332b45' }}>{habit.task_name}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: CATEGORY_COLORS[habit.task_category], display: 'inline-block' }} />
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: categoryColor, display: 'inline-block' }} />
             <span style={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#888' }}>
               {CATEGORY_LABELS[habit.task_category]}
             </span>
@@ -780,7 +820,7 @@ function HabitCard({
       {isFlexible ? <WeekDots progress={habit.week_progress!} /> : <ChainRow chain={habit.chain!} />}
 
       {!isFlexible && (
-        <div style={{ fontSize: '0.74rem', color: habit.checked_in_today ? '#42c38b' : habit.is_today ? '#f79f24' : '#999' }}>
+        <div style={{ fontSize: '0.74rem', color: habit.checked_in_today ? '#42c38b' : habit.is_today ? '#d9714a' : '#999' }}>
           {habit.checked_in_today ? 'Done today ✓' : habit.is_today ? 'Scheduled today — not yet done' : 'Not scheduled today'}
         </div>
       )}
@@ -799,7 +839,7 @@ function HabitCard({
 
       {!isFlexible && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: '#555' }}>
-          <Flame size={13} color="#e0679d" />
+          <Flame size={13} color="#d9714a" />
           <strong>{habit.current_streak}</strong>-day streak
           {habit.longest_streak != null && habit.current_streak != null && habit.longest_streak > habit.current_streak && (
             <span style={{ opacity: 0.6 }}>· best {habit.longest_streak}</span>
@@ -865,9 +905,11 @@ function ChainRow({ chain }: { chain: HabitWithComputed['chain'] }) {
                 <div style={{ flex: 1, height: 2, minWidth: 6, background: linked ? 'linear-gradient(90deg,#f2a7c0,#74bcd9)' : 'rgba(0,0,0,0.1)' }} />
               )}
               <div
+                className="ht-chain-node"
                 title={`${day.weekday} ${day.date}${!day.scheduled ? ' — not scheduled' : day.completed ? ' — done' : isToday ? ' — not done yet' : ' — missed'}`}
                 style={{
                   width: 15, height: 15, borderRadius: '50%', flexShrink: 0,
+                  transform: (day.scheduled && day.completed) ? 'scale(1.05)' : 'scale(1)',
                   ...(!day.scheduled
                     ? { border: '1px solid rgba(0,0,0,0.15)', background: 'transparent', opacity: 0.5 }
                     : day.completed
@@ -995,7 +1037,7 @@ function DetailStat({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ background: 'rgba(0,0,0,0.03)', borderRadius: 10, padding: '8px 10px' }}>
       <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#999', textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#333' }}>{value}</div>
+      <div style={{ ...HEADING_FONT, fontSize: '0.95rem', fontWeight: 800, color: '#332b45' }}>{value}</div>
     </div>
   );
 }
@@ -1023,7 +1065,7 @@ function HabitDetailModal({ habit, onClose }: { habit: HabitWithComputed; onClos
       <div className="ht-modal" onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>{habit.task_name}</h3>
+            <h3 style={{ ...HEADING_FONT, margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>{habit.task_name}</h3>
             <div style={{ fontSize: '0.78rem', color: '#888', marginTop: 2 }}>
               {CATEGORY_LABELS[habit.task_category]} · {habit.schedule_mode === 'flexible' ? `${habit.times_per_week}× weekly` : 'Fixed days'}
             </div>
