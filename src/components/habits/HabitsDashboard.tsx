@@ -374,7 +374,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
                           <span style={{ flex: 1 }}>{habit.task_name}</span>
                           <span style={{ width: 6, height: 6, borderRadius: '50%', background: CATEGORY_COLORS[habit.task_category], display: 'inline-block' }} />
                           <span style={{ fontSize: '0.72rem', color: '#888' }}>{CATEGORY_LABELS[habit.task_category]}</span>
-                          {isToday && !day.completed && (
+                          {isToday && !day.completed && habit.tracking_type === 'boolean' && (
                             <button
                               type="button"
                               onClick={() => doCheckin(habit.habit_id)}
