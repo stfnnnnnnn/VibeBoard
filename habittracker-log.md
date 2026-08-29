@@ -199,3 +199,31 @@ Inherited from v4 and earlier; v5 adds no new deferred items:
 
 1. `AmountInput`'s displayed "remaining" text and fill bar reflect local debounced state, not the server-confirmed amount, for the ~500ms window before a pending edit commits — a fast-enough reader could see a value that hasn't actually saved yet. (Inherited from v3.)
 2. `recomputeFixedStreak` only runs on a write action, not lazily on read — a fixed habit that misses a scheduled day and is never touched again shows its last-computed streak until the next check-in, rather than zeroing itself out the moment the missed day passes. (Inherited from v2.)
+
+## Habit Tracker v6 — Visual revamp: the Ritual Chain
+
+A pure presentation pass: user-requested visual polish of the existing HabitsDashboard.tsx component, using the app's native design vocabulary (DM Sans/Inter, brand-color gradients, glass morphism) to tighten the type hierarchy, consolidate the color palette, and add purposeful motion. Zero data, API, schema, or component-interface changes anywhere.
+
+### What shipped
+
+**Design origin:** Ran through the `frontend-design` skill (per `.agents/skills/design-guidelines`) to derive visual direction before coding. The scan-first constraint — auditing the page for minimum-viable touch points rather than blanket redesign — led to scoping the entire pass inside `src/components/habits/HabitsDashboard.tsx` alone, leaving the app's shared `globals.css`, `layout.tsx`, and component primitives untouched.
+
+**Typography unification (HEADING_FONT constant):** The app already uses DM Sans + Inter as its primary stack with `letterSpacing: '-0.01em'` on headings. This pass declares a `HEADING_FONT` constant and applies it to eight typographic anchors: the page h1 ("NAME's Rituals"), "This Week's Rhythm" section heading, the Rhythm percentage display (2.4rem, the visual anchor line), "Daily rhythm" subsection h3, "Consistency by category" subsection h3, "Today's Rituals" toolbar heading, both modal titles ("New Ritual"/"Edit Ritual"), and the detail stat values in the habit-history modal.
+
+**Color consolidation:** (a) Primary text `#333` is replaced with `#332b45` (a warmer "ink" tone, slightly less black, at 4 locations: page base color, card title, modal copy, detail stat value). (b) Two warm accent colors accumulated across v2–v4 — the streak-flame icon's `#e0679d` (rosy magenta) and the "fixed-card status text" / "minimum-zone fill" `#f79f24` (amber-orange) — are consolidated into a single `#d9714a` "ember" (at 3 locations: Flame icon color, "Scheduled today" status text, numeric-habit minimum-met background). The shared green (`#42c38b`), red (`#c0392b`), all six category colors, and the brand gradient (`#f2a7c0` ↔ `#74bcd9`) are unchanged.
+
+**Hero layout restructuring (two-column grid):** The analytics panel's structure becomes a responsive two-column grid (`.ht-hero-grid`). Left column retains the existing "This Week's Rhythm" hierarchy (heading, percentage %, progress bar, caption, on-pace/at-risk counts). Right column is a new permanent fixture: a "🏆 N-day best streak" line, and — only when at least one exists — an on-pace/needs-attention section (habit name, progress, remaining count) below a horizontal divider. Below 720px width, the grid collapses to a single column. This surfaces the streak context (previously buried near the card row) and the habit examples (previously at the same level as general page stats) into the hero without changing the overall page layout or the card grid.
+
+**Card ambient category wash:** Each ritual card's background is overlaid with a low-opacity linear gradient using its own category color (`${categoryColor}1f` opacity, fading to the normal card glass over 160px). This tint is layered on top of the card's existing colored top border, creating an ambient signal that the category-color connection is spatial (the edge) and atmospheric (the wash), not badged.
+
+**Motion (three coordinated micro-interactions, all respecting prefers-reduced-motion):** (a) **Chain nodes:** the `.ht-chain-node` class applies a `transition` on `background`, `box-shadow`, `border-color`, and `transform` (each timed ~0.3–0.35s ease). On completed-and-scheduled days, the node gains a `scale(1.05)` transform, creating a subtle "emphasis" on the chain. (b) **Progress bars:** the `.ht-progress-fill` class applies a cubic-bezier-timed `width` transition (0.6s, `cubic-bezier(0.16, 1, 0.3, 1)` for snappy ease-out on fill), present on both the hero's main rhythm bar and the category-consistency per-category bars. (c) **Drill-down panel:** the day-click detail panel (`.ht-fade-slide`) uses a `@keyframes ht-fade-slide` animation (fade from 0–1 opacity + slide down from -6px to 0 transform, 0.25s ease-out) on mount. The `@media (prefers-reduced-motion: reduce)` block was extended to cover all three additions (`transition: none` on `.ht-chain-node` and `.ht-progress-fill`, `animation: none` on `.ht-fade-slide`) plus the pre-existing `.ht-amount-fill` transition, which had never been covered by that block in prior passes.
+
+### Verification
+
+No test framework in this repo. Structural verification: `tsc --noEmit` — zero errors across the entire project. Visual verification: source-code inspection of color values, HEADING_FONT placements, and transition/animation definitions in `src/components/habits/HabitsDashboard.tsx` (lines 38, 241, 246, 268–269, 331, 371, 405, 452, 493, 628, 639–646, 660–672, 757–761, 742, 752, 792, 823, 842, 908, 1040, 1068).
+
+No browser-rendering pass was performed in this session — there is no browser-automation tool available in this environment. The changes are purely CSS/DOM-level: inline styles on elements, global style block definitions, and no algorithmic or behavioral changes. Worth a manual look in a browser to confirm the visual result matches the direction, but the structural basis is complete and type-safe.
+
+### Known, deferred minors
+
+Inherited from v5 and earlier; v6 adds no new deferred items.
