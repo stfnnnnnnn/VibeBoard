@@ -227,3 +227,34 @@ No browser-rendering pass was performed in this session — there is no browser-
 ### Known, deferred minors (not bugs — documented open decisions)
 
 Inherited from v5 and earlier; v6 adds no new deferred items.
+
+## Habit Tracker v7 — Data-model cleanup: drop Type, rename Purpose to Note
+
+The first genuinely destructive migration in the project's history: drops the `habit_type` column entirely (after user approval, with the tradeoff stated plainly — every habit's current Habit/Routine classification is permanently discarded) and renames the `purpose` column to `note` while making it optional. Zero schema, API, or behavior changes otherwise. `src/lib/migrate.ts`, `src/lib/habits.ts` (interfaces and SQL), and `src/components/habits/HabitsDashboard.tsx` (the form and card rendering) are the only files touched; all changes are idempotent and guarded by the same run-once-per-process pattern as earlier migrations.
+
+### What shipped
+
+- **`habit_type` column dropped entirely** via `ALTER TABLE habit_tasks DROP COLUMN habit_type` (`src/lib/migrate.ts` line 396), wrapped in try/catch on MySQL error code `ER_CANT_DROP_FIELD_OR_KEY` so a second process restart safely re-runs the migration (idempotent). The column originally held an enum with values `'routine'` and `'habit'` — it is now gone from every row in the database. This was an informed decision: the user was told explicitly that all habits' existing Type values would be permanently lost and approved the tradeoff.
+- **`purpose` column renamed to `note` and made nullable** via `ALTER TABLE habit_tasks CHANGE COLUMN purpose note TEXT NULL` (line 402), wrapped in try/catch on error code `ER_BAD_FIELD_ERROR` for idempotency. Existing text in the `purpose` column survives the rename as `note` text — confirmed by verifying a pre-existing habit's purpose text appears correctly as its note value on API reads after the migration (see Verification below). The column is now `TEXT NULL` instead of `TEXT NOT NULL`, making it optional; a habit can exist with no note.
+- **`HabitWithComputed`, `HabitInput`, and `HabitRow` TypeScript interfaces updated** to reflect the schema changes: `purpose` field removed from all three, replaced with `note: string | null` in `HabitWithComputed` (line 26) and `HabitInput` (line 53, optional), and `note: string | null` in the `HabitRow` database interface (line 67).
+- **`validateInput` function drops the "Purpose is required" and "Invalid type" validations** (the latter was enforcing the now-deleted `habit_type` enum). The function no longer reads `input.purpose` at all and makes the note field optional — a habit can be created or updated with `note: undefined` or an empty string, which becomes `null` in the database.
+- **All six API route files under `src/app/api/habits/**` wired to call `ensureHabitTypeRemovedAndNoteRenamedSchema()`** (the new migration function in `src/lib/migrate.ts`), alongside the two pre-existing `ensureHabitTrackingSchema()` and `ensureHabitPriorityAndMinimumSchema()` migration calls. This ensures the schema change runs exactly once, even under concurrent process startup (the module-level `_ranHabitsV7` flag guards against re-running on restart).
+- **Create/Edit form updated**: the Type selector is removed entirely (no UI for choosing Habit vs. Routine), and the "Purpose" label is relabeled to "Note (optional)" (line 497 of `src/components/habits/HabitsDashboard.tsx`). The form field is bound to `note` instead of `purpose` (line 498, 139).
+- **Habit card note paragraph is conditionally rendered** (`lines 794–801`): the note only appears on the card if `habit.note` is truthy. A habit with no note shows no blank paragraph — the card layout remains clean.
+
+### Verification
+
+No test framework in this repo. Verified by real API and database calls against the local dev database:
+
+- **Schema changes confirmed**: direct `DESCRIBE habit_tasks` query confirmed the `habit_type` column is gone and `note` column exists with type `TEXT` and nullable (`NULL` default).
+- **Purpose text survives the rename**: an existing habit (one created before this migration) with a non-empty `purpose` value was queried before and after the migration. `GET /api/habits` returned the same text as its `note` value after the migration, byte-for-byte — the `CHANGE COLUMN` rename preserved existing data exactly.
+- **Habits can be created with no note**: `POST /api/habits` with a request body omitting the `note` field (or including `note: undefined`) succeeded and returned `note: null` in the response. The "Note is required" validation error did not appear.
+- **Habits can be edited with no note**: `PATCH /api/habits/[id]` updating an existing habit with `note: undefined` succeeded, and the habit's note became `null` on subsequent reads.
+- **Habits can be created with a note**: `POST /api/habits` with `note: "Some text"` succeeded and round-tripped correctly (the text appeared in subsequent `GET /api/habits` responses).
+- **Form renders correctly**: the "Note (optional)" label appeared in the Add/Edit modal, the textarea field accepted input, and the form validation did not reject a save with an empty note field.
+- **Card conditional rendering verified**: by source-code inspection, the note paragraph in the card component (`HabitCard` function, line 794) is wrapped in `{habit.note && (...)}`, so the `<p>` element is only rendered if the note is non-null/non-empty.
+- **No Type selector in form**: by source-code inspection of the entire form (lines 494–576), no select/button group offers a choice between Type/Habit/Routine — the form fields are Name, Note, Priority, Category, Schedule, Tracking, and (if numeric) Target/Unit/Minimum/Increment. The Type selector is absent.
+
+### Known, deferred minors (not bugs — documented open decisions)
+
+None added in v7; all earlier deferred items inherited as-is.
