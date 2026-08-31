@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
-import { ensureHabitTrackingSchema, ensureHabitPriorityAndMinimumSchema } from '@/lib/migrate';
+import { ensureHabitTrackingSchema, ensureHabitPriorityAndMinimumSchema, ensureHabitTypeRemovedAndNoteRenamedSchema } from '@/lib/migrate';
 import { getHabitsForUser, createHabit, type HabitInput } from '@/lib/habits';
 
 export async function GET() {
@@ -8,6 +8,7 @@ export async function GET() {
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   await ensureHabitTrackingSchema();
   await ensureHabitPriorityAndMinimumSchema();
+  await ensureHabitTypeRemovedAndNoteRenamedSchema();
 
   const habits = await getHabitsForUser(parseInt(session.user.id));
   return Response.json({ habits });
@@ -18,6 +19,7 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   await ensureHabitTrackingSchema();
   await ensureHabitPriorityAndMinimumSchema();
+  await ensureHabitTypeRemovedAndNoteRenamedSchema();
 
   try {
     const body = (await req.json()) as HabitInput;

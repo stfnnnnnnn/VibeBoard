@@ -8,14 +8,12 @@ import { occurrenceFulfillment, occurrenceCompleted } from '@/lib/habitFulfillme
 
 export type HabitPriority = 'core' | 'normal' | 'optional';
 export type HabitCategory = 'academic' | 'household' | 'health' | 'social' | 'organizational' | 'life goals';
-export type HabitType = 'routine' | 'habit';
 export type ScheduleMode = 'fixed' | 'flexible';
 export type TrackingType = 'boolean' | 'numeric';
 export type Pace = 'ahead' | 'on_pace' | 'behind';
 
 export const PRIORITY_OPTIONS: HabitPriority[] = ['core', 'normal', 'optional'];
 export const CATEGORY_OPTIONS: HabitCategory[] = ['academic', 'household', 'health', 'social', 'organizational', 'life goals'];
-export const TYPE_OPTIONS: HabitType[] = ['habit', 'routine'];
 export const SCHEDULE_MODE_OPTIONS: ScheduleMode[] = ['fixed', 'flexible'];
 export const TRACKING_TYPE_OPTIONS: TrackingType[] = ['boolean', 'numeric'];
 
@@ -25,10 +23,9 @@ export interface WeekProgress { completed: number; target: number }
 export interface HabitWithComputed {
   habit_id: number;
   task_name: string;
-  purpose: string;
+  note: string | null;
   priority: HabitPriority;
   task_category: HabitCategory;
-  habit_type: HabitType;
   schedule_mode: ScheduleMode;
   tracking_type: TrackingType;
   target_value: number | null;
@@ -53,10 +50,9 @@ export interface HabitWithComputed {
 
 export interface HabitInput {
   task_name: string;
-  purpose: string;
+  note?: string | null;
   priority?: HabitPriority;
   task_category: HabitCategory;
-  habit_type: HabitType;
   schedule_mode?: ScheduleMode;
   days_of_week?: Weekday[];
   weekly_target?: number;
@@ -68,8 +64,8 @@ export interface HabitInput {
 }
 
 interface HabitRow extends RowDataPacket {
-  habit_id: number; user_id: number; task_name: string; purpose: string;
-  priority: HabitPriority; task_category: HabitCategory; habit_type: HabitType;
+  habit_id: number; user_id: number; task_name: string; note: string | null;
+  priority: HabitPriority; task_category: HabitCategory;
   days_of_week: string; times_per_week: number; date_created: string;
   schedule_mode: ScheduleMode; tracking_type: TrackingType;
   target_value: string | number | null; minimum_value: string | number | null;
@@ -104,11 +100,9 @@ interface ValidatedHabitInput {
 
 function validateInput(input: HabitInput): ValidatedHabitInput {
   if (!input.task_name?.trim()) throw new Error('Habit name is required.');
-  if (!input.purpose?.trim()) throw new Error('Purpose is required.');
   const priority: HabitPriority = input.priority ?? 'normal';
   if (!PRIORITY_OPTIONS.includes(priority)) throw new Error('Invalid priority.');
   if (!CATEGORY_OPTIONS.includes(input.task_category)) throw new Error('Invalid category.');
-  if (!TYPE_OPTIONS.includes(input.habit_type)) throw new Error('Invalid type.');
 
   const scheduleMode: ScheduleMode = input.schedule_mode ?? 'fixed';
   if (!SCHEDULE_MODE_OPTIONS.includes(scheduleMode)) throw new Error('Invalid schedule mode.');
@@ -286,10 +280,9 @@ export async function getHabitsForUser(userId: number): Promise<HabitWithCompute
     const base = {
       habit_id: row.habit_id,
       task_name: row.task_name,
-      purpose: row.purpose,
+      note: row.note,
       priority: row.priority,
       task_category: row.task_category,
-      habit_type: row.habit_type,
       schedule_mode: row.schedule_mode,
       tracking_type: row.tracking_type,
       target_value: habitCore.target_value,
@@ -585,11 +578,11 @@ export async function createHabit(userId: number, input: HabitInput) {
   const v = validateInput(input);
   const [res] = await pool.execute<ResultSetHeader>(
     `INSERT INTO habit_tasks
-       (user_id, task_name, purpose, priority, task_category, habit_type,
+       (user_id, task_name, note, priority, task_category,
         days_of_week, times_per_week, schedule_mode, tracking_type, target_value, minimum_value, unit_label, step_value)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [userId, input.task_name.trim(), input.purpose.trim(), v.priority, input.task_category,
-     input.habit_type, v.daysStr, v.weeklyTarget, v.scheduleMode, v.trackingType, v.targetValue, v.minimumValue, v.unitLabel, v.stepValue]
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [userId, input.task_name.trim(), input.note?.trim() || null, v.priority, input.task_category,
+     v.daysStr, v.weeklyTarget, v.scheduleMode, v.trackingType, v.targetValue, v.minimumValue, v.unitLabel, v.stepValue]
   );
   return res.insertId;
 }
@@ -609,11 +602,11 @@ export async function updateHabit(userId: number, habitId: number, input: HabitI
 
   await pool.execute(
     `UPDATE habit_tasks
-     SET task_name=?, purpose=?, priority=?, task_category=?, habit_type=?, days_of_week=?, times_per_week=?,
+     SET task_name=?, note=?, priority=?, task_category=?, days_of_week=?, times_per_week=?,
          schedule_mode=?, tracking_type=?, target_value=?, minimum_value=?, unit_label=?, step_value=?
      WHERE habit_id=? AND user_id=?`,
-    [input.task_name.trim(), input.purpose.trim(), v.priority, input.task_category,
-     input.habit_type, v.daysStr, v.weeklyTarget, v.scheduleMode, v.trackingType, v.targetValue, v.minimumValue, v.unitLabel, v.stepValue,
+    [input.task_name.trim(), input.note?.trim() || null, v.priority, input.task_category,
+     v.daysStr, v.weeklyTarget, v.scheduleMode, v.trackingType, v.targetValue, v.minimumValue, v.unitLabel, v.stepValue,
      habitId, userId]
   );
 

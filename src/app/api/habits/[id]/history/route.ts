@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
-import { ensureHabitTrackingSchema, ensureHabitPriorityAndMinimumSchema } from '@/lib/migrate';
+import { ensureHabitTrackingSchema, ensureHabitPriorityAndMinimumSchema, ensureHabitTypeRemovedAndNoteRenamedSchema } from '@/lib/migrate';
 import { getHabitHistory, HabitNotFoundError } from '@/lib/habits';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -8,6 +8,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   await ensureHabitTrackingSchema();
   await ensureHabitPriorityAndMinimumSchema();
+  await ensureHabitTypeRemovedAndNoteRenamedSchema();
 
   const { id } = await params;
   const habitId = parseInt(id);

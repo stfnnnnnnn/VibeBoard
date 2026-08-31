@@ -8,6 +8,7 @@ let _ranCanvas = false;
 let _ranSs = false;
 let _ranHabitsV2 = false;
 let _ranHabitsV3 = false;
+let _ranHabitsV7 = false;
 
 /** Add accomplished_at column to entry tables if not already present. */
 export async function ensureAccomplishedAt(): Promise<void> {
@@ -382,4 +383,26 @@ export async function ensureHabitPriorityAndMinimumSchema(): Promise<void> {
   }
 
   _ranHabitsV3 = true;
+}
+
+/** Drop the (now-unused) habit_type column and rename purpose -> note, making it
+ * optional. Both statements are idempotent: DROP tolerates the column already being
+ * gone, and the rename tolerates "purpose" already being renamed, so a process
+ * restart (which resets the module-level flag below) can safely re-run this. */
+export async function ensureHabitTypeRemovedAndNoteRenamedSchema(): Promise<void> {
+  if (_ranHabitsV7) return;
+
+  try {
+    await pool.query(`ALTER TABLE habit_tasks DROP COLUMN habit_type`);
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code !== 'ER_CANT_DROP_FIELD_OR_KEY') throw err;
+  }
+
+  try {
+    await pool.query(`ALTER TABLE habit_tasks CHANGE COLUMN purpose note TEXT NULL`);
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code !== 'ER_BAD_FIELD_ERROR') throw err;
+  }
+
+  _ranHabitsV7 = true;
 }
