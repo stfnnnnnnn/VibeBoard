@@ -600,6 +600,9 @@ export async function updateHabit(userId: number, habitId: number, input: HabitI
     }
   }
 
+  // Full-replacement update, not a partial patch: every field below is written
+  // verbatim from `input`, including `note` (nulled if omitted) — callers must send
+  // complete current values, not just the fields they intend to change.
   await pool.execute(
     `UPDATE habit_tasks
      SET task_name=?, note=?, priority=?, task_category=?, days_of_week=?, times_per_week=?,
