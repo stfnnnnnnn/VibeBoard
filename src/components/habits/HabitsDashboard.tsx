@@ -7,7 +7,7 @@ import {
   AlertTriangle, X, RotateCcw, Loader2, Sparkles,
 } from 'lucide-react';
 import type {
-  HabitWithComputed, HabitsSummary, HabitCategory, HabitPriority, HabitType,
+  HabitWithComputed, HabitsSummary, HabitCategory, HabitPriority,
   ScheduleMode, TrackingType, WeekProgress, HabitHistoryResponse, HabitHistoryWeek,
 } from '@/lib/habits';
 
@@ -30,8 +30,6 @@ const CATEGORY_LABELS: Record<HabitCategory, string> = {
 
 const PRIORITY_OPTIONS: HabitPriority[] = ['core', 'normal', 'optional'];
 const PRIORITY_LABELS: Record<HabitPriority, string> = { core: 'Core', normal: 'Normal', optional: 'Optional' };
-
-const TYPE_OPTIONS: HabitType[] = ['habit', 'routine'];
 
 const ACTIVE_TOGGLE_STYLE = { background: '#74bcd9', color: '#fff', borderColor: '#74bcd9' };
 
@@ -73,10 +71,9 @@ function PriorityBadge({ priority }: { priority: HabitPriority }) {
 interface FormState {
   habit_id: number | null;
   task_name: string;
-  purpose: string;
+  note: string;
   priority: HabitPriority;
   task_category: HabitCategory | '';
-  habit_type: HabitType | '';
   schedule_mode: ScheduleMode;
   days_of_week: string[];
   weekly_target: string;
@@ -87,7 +84,7 @@ interface FormState {
   step_value: string;
 }
 const EMPTY_FORM: FormState = {
-  habit_id: null, task_name: '', purpose: '', priority: 'normal', task_category: '', habit_type: '',
+  habit_id: null, task_name: '', note: '', priority: 'normal', task_category: '',
   schedule_mode: 'fixed', days_of_week: [], weekly_target: '3',
   tracking_type: 'boolean', target_value: '', minimum_value: '', unit_label: '', step_value: '1',
 };
@@ -139,8 +136,8 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
   const openAdd = () => { setForm(EMPTY_FORM); setFormError(null); setModalOpen(true); };
   const openEdit = (h: HabitWithComputed) => {
     setForm({
-      habit_id: h.habit_id, task_name: h.task_name, purpose: h.purpose,
-      priority: h.priority, task_category: h.task_category, habit_type: h.habit_type,
+      habit_id: h.habit_id, task_name: h.task_name, note: h.note ?? '',
+      priority: h.priority, task_category: h.task_category,
       schedule_mode: h.schedule_mode, days_of_week: h.days_of_week, weekly_target: String(h.times_per_week),
       tracking_type: h.tracking_type,
       target_value: h.target_value != null ? String(h.target_value) : '',
@@ -160,7 +157,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
   };
 
   const submitForm = async () => {
-    if (!form.task_name.trim() || !form.purpose.trim() || !form.task_category || !form.habit_type) {
+    if (!form.task_name.trim() || !form.task_category) {
       setFormError('Fill in every field before saving.');
       return;
     }
@@ -183,8 +180,8 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
     setSaving(true);
     setFormError(null);
     const body: Record<string, unknown> = {
-      task_name: form.task_name, purpose: form.purpose, priority: form.priority,
-      task_category: form.task_category, habit_type: form.habit_type,
+      task_name: form.task_name, note: form.note.trim() || undefined, priority: form.priority,
+      task_category: form.task_category,
       schedule_mode: form.schedule_mode, tracking_type: form.tracking_type,
     };
     if (form.schedule_mode === 'fixed') body.days_of_week = form.days_of_week;
@@ -497,8 +494,8 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
             <label className="ht-label">Name</label>
             <input className="vb-input" value={form.task_name} onChange={e => setForm(f => ({ ...f, task_name: e.target.value }))} placeholder="e.g. Morning run" />
 
-            <label className="ht-label">Purpose</label>
-            <textarea className="vb-input" rows={2} style={{ resize: 'none' }} value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))} placeholder="Why does this matter to you?" />
+            <label className="ht-label">Note (optional)</label>
+            <textarea className="vb-input" rows={2} style={{ resize: 'none' }} value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} placeholder="Add a note, if you'd like" />
 
             <div style={{ display: 'flex', gap: 10 }}>
               <div style={{ flex: 1 }}>
@@ -515,12 +512,6 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
                 </select>
               </div>
             </div>
-
-            <label className="ht-label">Type</label>
-            <select className="vb-input" value={form.habit_type} onChange={e => setForm(f => ({ ...f, habit_type: e.target.value as HabitType }))}>
-              <option value="" disabled>Choose</option>
-              {TYPE_OPTIONS.map(t => <option key={t} value={t}>{t[0].toUpperCase() + t.slice(1)}</option>)}
-            </select>
 
             <label className="ht-label">Schedule</label>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -800,12 +791,14 @@ function HabitCard({
         <PriorityBadge priority={habit.priority} />
       </div>
 
-      <p style={{
-        margin: 0, fontSize: '0.83rem', color: '#555', lineHeight: 1.4,
-        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-      }}>
-        {habit.purpose}
-      </p>
+      {habit.note && (
+        <p style={{
+          margin: 0, fontSize: '0.83rem', color: '#555', lineHeight: 1.4,
+          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+        }}>
+          {habit.note}
+        </p>
+      )}
 
       <div style={{ fontSize: '0.74rem', color: '#888' }}>
         {isFlexible ? 'Flexible' : 'Fixed'} ·{' '}
