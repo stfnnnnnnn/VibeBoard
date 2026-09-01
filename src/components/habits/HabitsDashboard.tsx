@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   Home, Plus, Minus, Check, Undo2, Flame, Trophy,
-  AlertTriangle, X, RotateCcw, Loader2, Sparkles, MoreHorizontal,
+  AlertTriangle, X, RotateCcw, Loader2, Sparkles, MoreHorizontal, Pencil, Trash2, Pause, Play,
 } from 'lucide-react';
 import type {
   HabitWithComputed, HabitsSummary, HabitCategory, HabitPriority,
@@ -63,6 +63,62 @@ function PriorityBadge({ priority }: { priority: HabitPriority }) {
     <span style={{ fontSize: '0.64rem', fontWeight: 600, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#aaa', whiteSpace: 'nowrap' }}>
       Optional
     </span>
+  );
+}
+
+/* ─── Radial rhythm ring — the page's one circular meter, reserved for the single
+   most important number. Counts up from 0 on mount/update; skips the count-up
+   under prefers-reduced-motion, jumping straight to the final value. ─── */
+function RhythmRing({ percent, size = 96, strokeWidth = 8 }: { percent: number | null; size?: number; strokeWidth?: number }) {
+  const [animated, setAnimated] = useState(0);
+
+  useEffect(() => {
+    if (percent === null) { setAnimated(0); return; }
+    const prefersReduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced) { setAnimated(percent); return; }
+    let raf: number;
+    let start: number | null = null;
+    const duration = 800;
+    const step = (ts: number) => {
+      if (start === null) start = ts;
+      const t = Math.min(1, (ts - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setAnimated(Math.round(percent * eased));
+      if (t < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [percent]);
+
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (animated / 100) * circumference;
+
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="rgba(0,0,0,0.07)" strokeWidth={strokeWidth} />
+        {percent !== null && (
+          <circle
+            cx={size / 2} cy={size / 2} r={radius} fill="none"
+            stroke="url(#ht-ring-gradient)" strokeWidth={strokeWidth} strokeLinecap="round"
+            strokeDasharray={circumference} strokeDashoffset={offset}
+          />
+        )}
+        <defs>
+          <linearGradient id="ht-ring-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#f2a7c0" />
+            <stop offset="100%" stopColor="#74bcd9" />
+          </linearGradient>
+        </defs>
+      </svg>
+      <div style={{
+        position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        ...HEADING_FONT, fontSize: '1.5rem', fontWeight: 800, color: '#74bcd9',
+      }}>
+        {percent === null ? '—' : `${animated}%`}
+      </div>
+    </div>
   );
 }
 
@@ -272,17 +328,16 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
             <div className="ht-hero-grid">
               <div>
                 <h2 className="gradient-text" style={{ ...HEADING_FONT, fontSize: '1.2rem', fontWeight: 800, margin: '0 0 4px' }}>This Week&apos;s Rhythm</h2>
-                <div style={{ ...HEADING_FONT, fontSize: '2.4rem', fontWeight: 800, color: '#74bcd9', lineHeight: 1.1, marginBottom: 10 }}>
-                  {summary.weekly_expected.expected > 0
-                    ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100))
-                    : '—'}
-                  {summary.weekly_expected.expected > 0 ? '%' : ''}
-                </div>
-                <div style={{ height: 10, borderRadius: 6, background: 'rgba(0,0,0,0.07)', overflow: 'hidden', marginBottom: 10 }}>
-                  <div className="ht-progress-fill" style={{
-                    width: `${summary.weekly_expected.expected > 0 ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100)) : 0}%`,
-                    height: '100%', borderRadius: 6, background: 'linear-gradient(90deg,#f2a7c0,#74bcd9)',
-                  }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 10 }}>
+                  <RhythmRing percent={summary.weekly_expected.expected > 0 ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100)) : null} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ height: 10, borderRadius: 6, background: 'rgba(0,0,0,0.07)', overflow: 'hidden' }}>
+                      <div className="ht-progress-fill" style={{
+                        width: `${summary.weekly_expected.expected > 0 ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100)) : 0}%`,
+                        height: '100%', borderRadius: 6, background: 'linear-gradient(90deg,#f2a7c0,#74bcd9)',
+                      }} />
+                    </div>
+                  </div>
                 </div>
                 <p style={{ margin: '0 0 14px', fontSize: '0.88rem', color: '#555' }}>
                   {summary.weekly_expected.expected > 0
@@ -357,12 +412,8 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
                     key={d.date}
                     onClick={() => setSelectedDay(prev => prev === d.date ? null : d.date)}
                     title={`${d.weekday} ${d.date}: ${d.scheduled > 0 ? `${d.percent}% fulfilled` : 'nothing scheduled'}`}
-                    style={{
-                      flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer', padding: '4px 0',
-                      borderRadius: 10,
-                      background: isSelected ? 'rgba(116,188,217,0.14)' : 'transparent',
-                      boxShadow: isSelected ? 'inset 0 0 0 1.5px rgba(116,188,217,0.55)' : 'none',
-                    }}
+                    className={`ht-day-cell${isSelected ? ' selected' : ''}`}
+                    style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer', padding: '4px 0' }}
                   >
                     <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#777', minHeight: 12 }}>
                       {d.scheduled > 0 ? `${d.percent}%` : '—'}
@@ -483,10 +534,11 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
         </div>
       ) : (
         <div className="ht-grid">
-          {filtered.map(h => (
+          {filtered.map((h, index) => (
             <HabitCard
               key={h.habit_id}
               habit={h}
+              index={index}
               busy={busyId === h.habit_id}
               onCheckin={() => doCheckin(h.habit_id)}
               onUndo={() => doUndo(h.habit_id)}
@@ -666,9 +718,27 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
         }
         .ht-card:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(0,0,0,0.12); }
 
+        @keyframes ht-card-in {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .ht-card-enter { animation: ht-card-in 0.4s ease-out backwards; }
+
+        .ht-day-cell {
+          border-radius: 10px;
+          transition: background 0.15s ease;
+        }
+        .ht-day-cell:hover { background: rgba(116,188,217,0.08); }
+        .ht-day-cell.selected { background: rgba(116,188,217,0.14); box-shadow: inset 0 0 0 1.5px rgba(116,188,217,0.55); }
+
         .ht-chain-node {
           transition: background 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease, transform 0.3s ease;
         }
+        @keyframes ht-pulse {
+          0%, 100% { box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(116,188,217,0.55); }
+          50% { box-shadow: 0 0 0 2px #fff, 0 0 0 7px rgba(116,188,217,0.25); }
+        }
+        .ht-chain-node-pulse { animation: ht-pulse 1.8s ease-in-out infinite; }
 
         .ht-progress-fill {
           transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
@@ -684,7 +754,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
           padding: 7px 8px; border: none; border-radius: 10px; cursor: pointer;
           font-size: 0.78rem; font-weight: 700;
-          transition: transform 0.12s ease, filter 0.15s ease;
+          transition: transform 0.12s ease, filter 0.15s ease, background-color 0.3s ease;
         }
         .ht-btn:hover:not(:disabled) { transform: translateY(-1px); }
         .ht-btn-check { background: #42c38b; color: #fff; }
@@ -697,12 +767,19 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
         }
         .ht-icon-btn:hover { background: rgba(0,0,0,0.06); }
 
+        @keyframes ht-menu-in {
+          from { opacity: 0; transform: scale(0.92) translateY(-4px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
         .ht-card-menu {
           position: absolute; right: 0; top: calc(100% + 4px); z-index: 20;
           background: #fff; border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,0.15);
           display: flex; flex-direction: column; min-width: 110px; overflow: hidden;
+          animation: ht-menu-in 0.15s ease-out;
+          transform-origin: top right;
         }
         .ht-card-menu button {
+          display: flex; align-items: center; gap: 8px;
           padding: 8px 12px; text-align: left; border: none; background: none; cursor: pointer;
           font-size: 0.8rem; font-weight: 600; color: #444;
         }
@@ -774,7 +851,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
 
         @media (prefers-reduced-motion: reduce) {
           .ht-card, .ht-home-btn, .ht-btn, .ht-chain-node, .ht-progress-fill, .ht-amount-fill { transition: none !important; }
-          .ht-fade-slide { animation: none !important; }
+          .ht-fade-slide, .ht-card-enter, .ht-card-menu, .ht-chain-node-pulse { animation: none !important; }
           .ht-spin { animation-duration: 1.6s; }
         }
       `}</style>
@@ -785,9 +862,9 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
 /* ─── Habit card ─── */
 
 function HabitCard({
-  habit, busy, onCheckin, onUndo, onEdit, onDelete, onPauseToggle, onAmountCommitted, onOpenDetail,
+  habit, index, busy, onCheckin, onUndo, onEdit, onDelete, onPauseToggle, onAmountCommitted, onOpenDetail,
 }: {
-  habit: HabitWithComputed; busy: boolean;
+  habit: HabitWithComputed; index: number; busy: boolean;
   onCheckin: () => void; onUndo: () => void; onEdit: () => void; onDelete: () => void; onPauseToggle: () => void;
   onAmountCommitted: () => void; onOpenDetail: () => void;
 }) {
@@ -810,12 +887,13 @@ function HabitCard({
 
   return (
     <div
-      className="ht-card"
+      className="ht-card ht-card-enter"
       style={{
         borderTop: `4px solid ${categoryColor}`,
         backgroundImage: `linear-gradient(180deg, ${categoryColor}1f 0%, rgba(255,255,255,0) 160px)`,
         position: 'relative',
         zIndex: menuOpen ? 30 : 'auto',
+        animationDelay: `${Math.min(index, 10) * 40}ms`,
       }}
       onClick={onOpenDetail}
     >
@@ -932,9 +1010,9 @@ function HabitCard({
           </button>
           {menuOpen && (
             <div className="ht-card-menu">
-              <button type="button" onClick={() => { setMenuOpen(false); onEdit(); }}>Edit</button>
-              <button type="button" onClick={() => { setMenuOpen(false); onPauseToggle(); }}>{isPaused ? 'Resume' : 'Pause'}</button>
-              <button type="button" onClick={() => { setMenuOpen(false); onDelete(); }}>Delete</button>
+              <button type="button" onClick={() => { setMenuOpen(false); onEdit(); }}><Pencil size={14} /> Edit</button>
+              <button type="button" onClick={() => { setMenuOpen(false); onPauseToggle(); }}>{isPaused ? <Play size={14} /> : <Pause size={14} />} {isPaused ? 'Resume' : 'Pause'}</button>
+              <button type="button" onClick={() => { setMenuOpen(false); onDelete(); }}><Trash2 size={14} /> Delete</button>
             </div>
           )}
         </div>
@@ -967,27 +1045,31 @@ function ChainRow({ chain }: { chain: HabitWithComputed['chain'] }) {
                 <div style={{ flex: 1, height: 2, minWidth: 6, background: linked ? 'linear-gradient(90deg,#f2a7c0,#74bcd9)' : 'rgba(0,0,0,0.1)' }} />
               )}
               <div
-                className="ht-chain-node"
                 title={`${day.weekday} ${day.date}${!day.scheduled ? ' — not scheduled' : day.completed ? ' — done' : isToday ? ' — not done yet' : ' — missed'}`}
-                style={{
-                  width: 15, height: 15, borderRadius: '50%', flexShrink: 0,
-                  transform: (day.scheduled && day.completed) ? 'scale(1.05)' : 'scale(1)',
-                  ...(!day.scheduled
-                    ? { border: '1px solid rgba(0,0,0,0.15)', background: 'transparent', opacity: 0.5 }
-                    : day.completed
-                      ? { background: 'linear-gradient(135deg,#f2a7c0,#74bcd9)' }
-                      : isToday
-                        ? { border: '2px dashed #74bcd9', background: 'rgba(255,255,255,0.6)' }
-                        : { border: '2px solid rgba(247,91,103,0.55)', background: 'transparent' }),
-                  boxShadow: isToday
-                    ? '0 0 0 2px #fff, 0 0 0 4px rgba(116,188,217,0.55)'
-                    : day.scheduled && day.completed
-                      ? '0 0 0 2px rgba(255,255,255,0.6)'
-                      : 'none',
-                }}
-              />
+                style={{ width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+              >
+                <div
+                  className={`ht-chain-node${isToday && day.scheduled && !day.completed ? ' ht-chain-node-pulse' : ''}`}
+                  style={{
+                    borderRadius: '50%',
+                    transform: (day.scheduled && day.completed) ? 'scale(1.1)' : 'scale(1)',
+                    ...(!day.scheduled
+                      ? { width: 5, height: 5, background: 'rgba(0,0,0,0.25)' }
+                      : day.completed
+                        ? { width: 18, height: 18, background: 'linear-gradient(135deg,#f2a7c0,#74bcd9)' }
+                        : isToday
+                          ? { width: 18, height: 18, border: '2px dashed #74bcd9', background: 'rgba(255,255,255,0.6)' }
+                          : { width: 18, height: 18, border: '2px solid rgba(247,91,103,0.55)', background: 'transparent' }),
+                    boxShadow: isToday && day.scheduled
+                      ? '0 0 0 2px #fff, 0 0 0 4px rgba(116,188,217,0.55)'
+                      : day.scheduled && day.completed
+                        ? '0 0 0 2px rgba(255,255,255,0.6)'
+                        : 'none',
+                  }}
+                />
+              </div>
             </div>
-            <div style={{ width: 15, textAlign: 'center', fontSize: '0.7rem', color: '#777', fontWeight: 700, marginTop: 2 }}>
+            <div style={{ width: 18, textAlign: 'center', fontSize: '0.7rem', color: '#777', fontWeight: 700, marginTop: 2 }}>
               {day.weekday[0]}
             </div>
           </div>
