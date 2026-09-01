@@ -783,10 +783,10 @@ function HabitCard({
   onCheckin: () => void; onUndo: () => void; onEdit: () => void; onDelete: () => void; onPauseToggle: () => void;
   onAmountCommitted: () => void; onOpenDetail: () => void;
 }) {
-  const canAct = habit.is_today || habit.checked_in_today;
   const isFlexible = habit.schedule_mode === 'flexible';
   const isNumeric = habit.tracking_type === 'numeric';
   const isPaused = habit.task_status === 'paused';
+  const canAct = !isPaused && (habit.is_today || habit.checked_in_today);
   const categoryColor = CATEGORY_COLORS[habit.task_category];
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -915,6 +915,7 @@ function HabitCard({
             type="button"
             className="ht-icon-btn"
             onClick={() => setMenuOpen(o => !o)}
+            disabled={busy}
             aria-label="More actions"
             aria-haspopup="true"
             aria-expanded={menuOpen}

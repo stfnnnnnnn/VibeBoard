@@ -719,20 +719,23 @@ export async function resetStreak(userId: number, habitId: number): Promise<void
 }
 
 export async function pauseHabit(userId: number, habitId: number): Promise<void> {
-  const habit = await getOwnedHabitRow(habitId, userId);
-  if (habit.task_status === 'paused') throw new Error('This ritual is already paused.');
+  await getOwnedHabitRow(habitId, userId);
   const { dateStr: today } = todayInManila();
-  await pool.execute(`UPDATE habit_tasks SET task_status='paused' WHERE habit_id=? AND user_id=?`, [habitId, userId]);
+  const [res] = await pool.execute<ResultSetHeader>(
+    `UPDATE habit_tasks SET task_status='paused' WHERE habit_id=? AND user_id=? AND task_status<>'paused'`,
+    [habitId, userId]
+  );
+  if (res.affectedRows === 0) throw new Error('This ritual is already paused.');
   await pool.execute(`INSERT INTO habit_pauses (habit_id, paused_at, resumed_at) VALUES (?, ?, NULL)`, [habitId, today]);
 }
 
 export async function resumeHabit(userId: number, habitId: number): Promise<void> {
-  const habit = await getOwnedHabitRow(habitId, userId);
-  if (habit.task_status !== 'paused') throw new Error('This ritual is not paused.');
+  await getOwnedHabitRow(habitId, userId);
   const { dateStr: today } = todayInManila();
-  await pool.execute(`UPDATE habit_tasks SET task_status='active' WHERE habit_id=? AND user_id=?`, [habitId, userId]);
-  await pool.execute(
-    `UPDATE habit_pauses SET resumed_at=? WHERE habit_id=? AND resumed_at IS NULL ORDER BY pause_id DESC LIMIT 1`,
-    [today, habitId]
+  const [res] = await pool.execute<ResultSetHeader>(
+    `UPDATE habit_tasks SET task_status='active' WHERE habit_id=? AND user_id=? AND task_status='paused'`,
+    [habitId, userId]
   );
+  if (res.affectedRows === 0) throw new Error('This ritual is not paused.');
+  await pool.execute(`UPDATE habit_pauses SET resumed_at=? WHERE habit_id=? AND resumed_at IS NULL`, [today, habitId]);
 }
