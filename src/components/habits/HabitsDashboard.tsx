@@ -316,17 +316,25 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
                     {summary.on_pace && (
                       <p style={{ margin: 0, fontSize: '0.85rem', color: '#444' }}>
                         <span style={{ color: '#42c38b', fontWeight: 700 }}>✓ On pace:</span>{' '}
-                        <strong>{summary.on_pace.task_name}</strong> — {summary.on_pace.week_actual}/{summary.on_pace.week_target} this week
-                        {summary.on_pace.week_target - summary.on_pace.week_actual > 0 && ` · ${summary.on_pace.week_target - summary.on_pace.week_actual} remaining`}
+                        <strong>{summary.on_pace.task_name}</strong> — {summary.on_pace.week_actual}/{summary.on_pace.week_target} completed
+                        {summary.on_pace.week_actual < summary.on_pace.week_target && habits && habits.length > 0 &&
+                          ` · ${habits[0].week_days_remaining} day${habits[0].week_days_remaining === 1 ? '' : 's'} available`}
                       </p>
                     )}
-                    {summary.needs_attention && (
-                      <p style={{ margin: 0, fontSize: '0.85rem', color: '#444' }}>
-                        <span style={{ color: '#c0392b', fontWeight: 700 }}>⚠ Needs attention:</span>{' '}
-                        <strong>{summary.needs_attention.task_name}</strong> — {summary.needs_attention.week_actual}/{summary.needs_attention.week_target} this week
-                        {summary.needs_attention.week_target - summary.needs_attention.week_actual > 0 && ` · ${summary.needs_attention.week_target - summary.needs_attention.week_actual} remaining`}
-                      </p>
-                    )}
+                    {summary.needs_attention && (() => {
+                      const na = summary.needs_attention!;
+                      const fullHabit = habits?.find(h => h.habit_id === na.habit_id);
+                      const todayIncomplete = !!fullHabit && fullHabit.is_today && !fullHabit.checked_in_today;
+                      return (
+                        <p style={{ margin: 0, fontSize: '0.85rem', color: '#444' }}>
+                          <span style={{ color: '#c0392b', fontWeight: 700 }}>⚠ Needs attention:</span>{' '}
+                          <strong>{na.task_name}</strong> —{' '}
+                          {todayIncomplete
+                            ? "today's occurrence is still incomplete"
+                            : `${na.week_actual}/${na.week_target} completed this week`}
+                        </p>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
