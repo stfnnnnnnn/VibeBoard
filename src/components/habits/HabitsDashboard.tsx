@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-  Home, Plus, Minus, Check, Undo2, Pencil, Trash2, Flame, Trophy,
-  AlertTriangle, X, RotateCcw, Loader2, Sparkles,
+  Home, Plus, Minus, Check, Undo2, Flame, Trophy,
+  AlertTriangle, X, RotateCcw, Loader2, Sparkles, MoreHorizontal,
 } from 'lucide-react';
 import type {
   HabitWithComputed, HabitsSummary, HabitCategory, HabitPriority,
@@ -228,6 +228,15 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
     await fetch(`/api/habits/${id}/streak`, { method: 'DELETE' });
     await load();
     setModalOpen(false);
+  });
+
+  const doPause = (id: number) => withBusy(id, async () => {
+    await fetch(`/api/habits/${id}/pause`, { method: 'POST' });
+    await load();
+  });
+  const doResume = (id: number) => withBusy(id, async () => {
+    await fetch(`/api/habits/${id}/pause`, { method: 'DELETE' });
+    await load();
   });
 
   const loading = habits === null;
@@ -475,6 +484,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
               onUndo={() => doUndo(h.habit_id)}
               onEdit={() => openEdit(h)}
               onDelete={() => doDelete(h.habit_id)}
+              onPauseToggle={() => (h.task_status === 'paused' ? doResume(h.habit_id) : doPause(h.habit_id))}
               onAmountCommitted={load}
               onOpenDetail={() => setDetailHabit(h)}
             />
@@ -681,6 +691,17 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
         }
         .ht-icon-btn:hover { background: rgba(0,0,0,0.06); }
 
+        .ht-card-menu {
+          position: absolute; right: 0; top: calc(100% + 4px); z-index: 20;
+          background: #fff; border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+          display: flex; flex-direction: column; min-width: 110px; overflow: hidden;
+        }
+        .ht-card-menu button {
+          padding: 8px 12px; text-align: left; border: none; background: none; cursor: pointer;
+          font-size: 0.8rem; font-weight: 600; color: #444;
+        }
+        .ht-card-menu button:hover { background: rgba(0,0,0,0.05); }
+
         .ht-btn-ghost {
           padding: 10px 18px; border-radius: 12px; border: none;
           background: rgba(0,0,0,0.06); color: #444; font-weight: 700; font-size: 0.9rem;
@@ -758,16 +779,28 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
 /* ─── Habit card ─── */
 
 function HabitCard({
-  habit, busy, onCheckin, onUndo, onEdit, onDelete, onAmountCommitted, onOpenDetail,
+  habit, busy, onCheckin, onUndo, onEdit, onDelete, onPauseToggle, onAmountCommitted, onOpenDetail,
 }: {
   habit: HabitWithComputed; busy: boolean;
-  onCheckin: () => void; onUndo: () => void; onEdit: () => void; onDelete: () => void;
+  onCheckin: () => void; onUndo: () => void; onEdit: () => void; onDelete: () => void; onPauseToggle: () => void;
   onAmountCommitted: () => void; onOpenDetail: () => void;
 }) {
   const canAct = habit.is_today || habit.checked_in_today;
   const isFlexible = habit.schedule_mode === 'flexible';
   const isNumeric = habit.tracking_type === 'numeric';
+  const isPaused = habit.task_status === 'paused';
   const categoryColor = CATEGORY_COLORS[habit.task_category];
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [menuOpen]);
 
   return (
     <div
@@ -788,7 +821,17 @@ function HabitCard({
             </span>
           </div>
         </div>
-        <PriorityBadge priority={habit.priority} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {isPaused && (
+            <span style={{
+              fontSize: '0.64rem', fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase',
+              padding: '3px 8px', borderRadius: 999, background: 'rgba(0,0,0,0.08)', color: '#777', whiteSpace: 'nowrap',
+            }}>
+              Paused
+            </span>
+          )}
+          <PriorityBadge priority={habit.priority} />
+        </div>
       </div>
 
       {habit.note && (
@@ -867,8 +910,25 @@ function HabitCard({
             {habit.checked_in_today ? 'Undo' : 'Done'}
           </button>
         )}
-        <button className="ht-btn ht-btn-edit" onClick={onEdit}><Pencil size={13} /> Edit</button>
-        <button className="ht-btn ht-btn-delete" onClick={onDelete}><Trash2 size={13} /></button>
+        <div ref={menuRef} style={{ position: 'relative' }}>
+          <button
+            type="button"
+            className="ht-icon-btn"
+            onClick={() => setMenuOpen(o => !o)}
+            aria-label="More actions"
+            aria-haspopup="true"
+            aria-expanded={menuOpen}
+          >
+            <MoreHorizontal size={16} />
+          </button>
+          {menuOpen && (
+            <div className="ht-card-menu">
+              <button type="button" onClick={() => { setMenuOpen(false); onEdit(); }}>Edit</button>
+              <button type="button" onClick={() => { setMenuOpen(false); onPauseToggle(); }}>{isPaused ? 'Resume' : 'Pause'}</button>
+              <button type="button" onClick={() => { setMenuOpen(false); onDelete(); }}>Delete</button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
