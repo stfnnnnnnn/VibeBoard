@@ -308,3 +308,21 @@ No test framework in this repo. Verified by real API and database calls against 
 ### Known, deferred minors (not bugs — documented open decisions)
 
 Inherited from v7 and earlier; v8 adds no new deferred items.
+
+## Habit Tracker v9 — Pace-wording fix: separating the pace verdict from the weekly count
+
+Fixes a real semantic-conflation bug in the "This Week's Rhythm" hero's on-pace/needs-attention sentences. The pace verdict (`on_pace`/`needs_attention`) is chosen by comparing actual progress against *expected progress by now* (each habit's `pace` field, from `computePace(week_actual, week_expected)` in `src/lib/habits.ts`), but the sentence's own trailing clause was computed from a *different* number entirely — `week_target - week_actual`, the whole-week deficit — with no distinction drawn between the two concepts. A habit early in its week with `pace: 'on_pace'` and nothing done yet could read "On pace: 0/3 this week · 3 remaining," which looks contradictory even though the underlying verdict was correct.
+
+### What shipped
+
+- **On-pace sentence** now reads `{name} — {actual}/{target} completed · {N} day{s} available` (the days-available clause only shown while `week_actual < week_target`), replacing the previous `{actual}/{target} this week · {N} remaining`. `N` is `week_days_remaining` — a value already computed once per request in `getHabitsForUser` (`src/lib/habits.ts`) and identical across every habit returned for a given day. The frontend reads it off `habits[0].week_days_remaining` rather than requiring a new backend field, since `RankedHabit` (the type `on_pace`/`needs_attention` are shaped as) doesn't itself carry this field.
+- **Needs-attention sentence** now looks up the full habit object for `needs_attention.habit_id` in the already-loaded `habits` array and checks `is_today && !checked_in_today` for it. When true, it reads `{name} — today's occurrence is still incomplete`. When false (the habit is behind but nothing of its schedule is due today), it falls back to `{name} — {actual}/{target} completed this week`, with no "remaining" clause in either branch of the sentence.
+- No backend, schema, or API change — this pass is confined entirely to the hero's JSX in `src/components/habits/HabitsDashboard.tsx`.
+
+### Verification
+
+No test framework in this repo. `npx tsc --noEmit` — zero errors. Verified against the real local dev database via a locally-signed session token: `GET /api/habits/summary` for user_id 2 returned `needs_attention: { habit_id: 8, task_name: 'afafafa', week_actual: 0, week_target: 2 }` (`on_pace` was `null` — no habit currently qualifies); cross-referencing habit 8 in `GET /api/habits` showed `is_today: true, checked_in_today: false`, confirming the "today's occurrence is still incomplete" branch is the one that actually renders for this real habit today. The fallback branch (a needs-attention habit not scheduled today) was not exercised against real data in this pass, since no such habit exists in the current local dataset — it was verified by reading the code logic directly instead.
+
+### Known, deferred minors (not bugs — documented open decisions)
+
+Inherited from v8 and earlier; v9 adds no new deferred items.
