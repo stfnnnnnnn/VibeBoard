@@ -681,8 +681,6 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
         .ht-btn:hover:not(:disabled) { transform: translateY(-1px); }
         .ht-btn-check { background: #42c38b; color: #fff; }
         .ht-btn-check.checked { background: #e7e7f2; color: #444; }
-        .ht-btn-edit { background: rgba(0,0,0,0.06); color: #555; }
-        .ht-btn-delete { background: rgba(247,91,103,0.12); color: #c0392b; }
 
         .ht-icon-btn {
           background: none; border: none; cursor: pointer; color: #777;
@@ -808,6 +806,8 @@ function HabitCard({
       style={{
         borderTop: `4px solid ${categoryColor}`,
         backgroundImage: `linear-gradient(180deg, ${categoryColor}1f 0%, rgba(255,255,255,0) 160px)`,
+        position: 'relative',
+        zIndex: menuOpen ? 30 : 'auto',
       }}
       onClick={onOpenDetail}
     >
