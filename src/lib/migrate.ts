@@ -9,6 +9,7 @@ let _ranSs = false;
 let _ranHabitsV2 = false;
 let _ranHabitsV3 = false;
 let _ranHabitsV7 = false;
+let _ranHabitsV8 = false;
 
 /** Add accomplished_at column to entry tables if not already present. */
 export async function ensureAccomplishedAt(): Promise<void> {
@@ -405,4 +406,31 @@ export async function ensureHabitTypeRemovedAndNoteRenamedSchema(): Promise<void
   }
 
   _ranHabitsV7 = true;
+}
+
+/** Add the 'paused' status value (reusing the pre-existing, previously-unused
+ * task_status column from the legacy schema) and a habit_pauses history table
+ * recording every pause/resume cycle permanently — the streak walk in habits.ts
+ * needs that permanent record to correctly skip paused date ranges forever,
+ * not just while a pause is currently active. Both statements are naturally
+ * idempotent on their own (MODIFY on an identical enum, and CREATE TABLE IF NOT
+ * EXISTS) — no error-code-catch guard is needed here. */
+export async function ensureHabitPauseSchema(): Promise<void> {
+  if (_ranHabitsV8) return;
+
+  await pool.query(`ALTER TABLE habit_tasks MODIFY task_status ENUM('active','archived','paused') NOT NULL DEFAULT 'active'`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS habit_pauses (
+      pause_id INT NOT NULL AUTO_INCREMENT,
+      habit_id INT NOT NULL,
+      paused_at DATE NOT NULL,
+      resumed_at DATE NULL,
+      PRIMARY KEY (pause_id),
+      KEY habit_id (habit_id),
+      CONSTRAINT fk_pause_habit FOREIGN KEY (habit_id) REFERENCES habit_tasks (habit_id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+  `);
+
+  _ranHabitsV8 = true;
 }

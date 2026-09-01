@@ -26,6 +26,7 @@ export interface HabitWithComputed {
   note: string | null;
   priority: HabitPriority;
   task_category: HabitCategory;
+  task_status: 'active' | 'paused';
   schedule_mode: ScheduleMode;
   tracking_type: TrackingType;
   target_value: number | null;
@@ -70,6 +71,7 @@ interface HabitRow extends RowDataPacket {
   schedule_mode: ScheduleMode; tracking_type: TrackingType;
   target_value: string | number | null; minimum_value: string | number | null;
   unit_label: string | null; step_value: string | number | null;
+  task_status: 'active' | 'archived' | 'paused';
 }
 interface StreakRow extends RowDataPacket {
   streak_id: number; user_id: number; habit_id: number; streak_start: string;
@@ -77,6 +79,9 @@ interface StreakRow extends RowDataPacket {
 }
 interface CheckinRow extends RowDataPacket {
   habit_id: number; checkin_date: string; is_completed: number; amount: string | number | null;
+}
+interface PauseRow extends RowDataPacket {
+  habit_id: number; paused_at: string; resumed_at: string | null;
 }
 
 export class HabitNotFoundError extends Error {}
@@ -170,6 +175,18 @@ function habitCoreOf(habit: HabitRow) {
   };
 }
 
+/** Every pause window ever recorded for one habit, as exclusive-end date ranges
+ * ready for `computeConsecutiveScheduledStreak`. An ongoing pause (no resumed_at
+ * yet) gets an exclusive end of "tomorrow," so it correctly covers every day up
+ * to and including today. */
+async function getPausedRangesForHabit(habitId: number): Promise<{ start: string; end: string }[]> {
+  const { dateStr: today } = todayInManila();
+  const [rows] = await pool.execute<PauseRow[]>(
+    `SELECT habit_id, paused_at, resumed_at FROM habit_pauses WHERE habit_id = ?`, [habitId]
+  );
+  return rows.map(r => ({ start: r.paused_at, end: r.resumed_at ?? addDaysToDateStr(today, 1) }));
+}
+
 /** Recomputes and persists the fixed-schedule streak for a habit from its full check-in
  * history, anchored at `today`. Shared by checkin/undo/setAmount so all three agree. */
 async function recomputeFixedStreak(userId: number, habitId: number, habit: HabitRow): Promise<{ current_streak: number; longest_streak: number }> {
@@ -191,8 +208,9 @@ async function recomputeFixedStreak(userId: number, habitId: number, habit: Habi
     return { current_streak: 0, longest_streak: 0 };
   }
 
+  const pausedRanges = await getPausedRangesForHabit(habitId);
   const anchor = completedDates.has(today) ? today : [...completedDates].sort().at(-1)!;
-  const { length, start } = computeConsecutiveScheduledStreak(scheduled, completedDates, anchor);
+  const { length, start } = computeConsecutiveScheduledStreak(scheduled, completedDates, anchor, pausedRanges);
   const longest = Math.max(existing?.longest_streak ?? 0, length);
   const streakStart = start ?? anchor;
 
@@ -272,10 +290,24 @@ export async function getHabitsForUser(userId: number): Promise<HabitWithCompute
     rowsByHabit.get(row.habit_id)!.set(row.checkin_date, { is_completed: row.is_completed, amount: toNum(row.amount) });
   }
 
+  const [pauseRows] = await pool.execute<PauseRow[]>(
+    `SELECT habit_id, paused_at, resumed_at FROM habit_pauses WHERE habit_id IN (${placeholders})`,
+    habitIds
+  );
+  const pausedRangesByHabit = new Map<number, { start: string; end: string }[]>();
+  for (const row of pauseRows) {
+    const list = pausedRangesByHabit.get(row.habit_id) ?? [];
+    list.push({ start: row.paused_at, end: row.resumed_at ?? addDaysToDateStr(today, 1) });
+    pausedRangesByHabit.set(row.habit_id, list);
+  }
+
   const result: HabitWithComputed[] = taskRows.map(row => {
     const habitCore = habitCoreOf(row);
     const scheduled = parseDays(row.days_of_week);
     const checkinsByDate = rowsByHabit.get(row.habit_id) ?? new Map();
+    const pausedRanges = pausedRangesByHabit.get(row.habit_id) ?? [];
+    const isPausedOnDate = (date: string) => pausedRanges.some(r => date >= r.start && date < r.end);
+    const isPaused = row.task_status === 'paused';
 
     const base = {
       habit_id: row.habit_id,
@@ -283,6 +315,7 @@ export async function getHabitsForUser(userId: number): Promise<HabitWithCompute
       note: row.note,
       priority: row.priority,
       task_category: row.task_category,
+      task_status: isPaused ? ('paused' as const) : ('active' as const),
       schedule_mode: row.schedule_mode,
       tracking_type: row.tracking_type,
       target_value: habitCore.target_value,
@@ -304,7 +337,7 @@ export async function getHabitsForUser(userId: number): Promise<HabitWithCompute
       return {
         ...base,
         days_of_week: [],
-        is_today: true,
+        is_today: !isPaused,
         checked_in_today: occurrenceCompleted(habitCore, checkinsByDate.get(today) ?? {}),
         current_streak: null,
         longest_streak: null,
@@ -325,7 +358,7 @@ export async function getHabitsForUser(userId: number): Promise<HabitWithCompute
       const r = checkinsByDate.get(date);
       const fulfillment = r ? occurrenceFulfillment(habitCore, r) : 0;
       const completed = r ? occurrenceCompleted(habitCore, r) : false;
-      return { date, weekday, scheduled: scheduled.has(weekday), completed, fulfillment };
+      return { date, weekday, scheduled: scheduled.has(weekday) && !isPausedOnDate(date), completed, fulfillment };
     });
 
     let weekExpectedCount = 0;
@@ -340,7 +373,7 @@ export async function getHabitsForUser(userId: number): Promise<HabitWithCompute
     return {
       ...base,
       days_of_week: WEEKDAYS.filter(d => scheduled.has(d)),
-      is_today: scheduled.has(todayWeekday),
+      is_today: scheduled.has(todayWeekday) && !isPaused,
       checked_in_today: occurrenceCompleted(habitCore, checkinsByDate.get(today) ?? {}),
       current_streak: current,
       longest_streak: streak?.longest_streak ?? 0,
@@ -392,7 +425,7 @@ function habitFulfillmentRate(habit: HabitWithComputed, weekStart: string): numb
 }
 
 export async function getSummaryForUser(userId: number): Promise<HabitsSummary> {
-  const habits = await getHabitsForUser(userId);
+  const habits = (await getHabitsForUser(userId)).filter(h => h.task_status !== 'paused');
   const { dateStr: today } = todayInManila();
   const days = lastNDays(today, 7);
   const weekStart = mondayOfWeek(today);
@@ -630,6 +663,7 @@ export interface StreakResult { current_streak: number | null; longest_streak: n
 
 export async function checkinHabit(userId: number, habitId: number): Promise<StreakResult> {
   const habit = await getOwnedHabitRow(habitId, userId);
+  if (habit.task_status === 'paused') throw new Error('This ritual is paused — resume it before checking in.');
   if (habit.tracking_type !== 'boolean') throw new Error('This ritual tracks an amount — log it instead of checking in.');
   const { dateStr: today } = todayInManila();
 
@@ -645,6 +679,7 @@ export async function checkinHabit(userId: number, habitId: number): Promise<Str
 
 export async function undoCheckinHabit(userId: number, habitId: number): Promise<StreakResult> {
   const habit = await getOwnedHabitRow(habitId, userId);
+  if (habit.task_status === 'paused') throw new Error('This ritual is paused — resume it before checking in.');
   if (habit.tracking_type !== 'boolean') throw new Error('This ritual tracks an amount — log it instead of checking in.');
   const { dateStr: today } = todayInManila();
 
@@ -656,6 +691,7 @@ export async function undoCheckinHabit(userId: number, habitId: number): Promise
 
 export async function setAmount(userId: number, habitId: number, amount: number, date?: string): Promise<{ amount: number; completed: boolean }> {
   const habit = await getOwnedHabitRow(habitId, userId);
+  if (habit.task_status === 'paused') throw new Error('This ritual is paused — resume it before checking in.');
   if (habit.tracking_type !== 'numeric') throw new Error('This ritual is a simple check-in, not an amount.');
   if (!Number.isFinite(amount) || amount < 0) throw new Error('Amount must be zero or a positive number.');
 
@@ -680,4 +716,23 @@ export async function setAmount(userId: number, habitId: number, amount: number,
 export async function resetStreak(userId: number, habitId: number): Promise<void> {
   await getOwnedHabitRow(habitId, userId);
   await pool.execute(`DELETE FROM habit_streaks WHERE habit_id = ? AND user_id = ?`, [habitId, userId]);
+}
+
+export async function pauseHabit(userId: number, habitId: number): Promise<void> {
+  const habit = await getOwnedHabitRow(habitId, userId);
+  if (habit.task_status === 'paused') throw new Error('This ritual is already paused.');
+  const { dateStr: today } = todayInManila();
+  await pool.execute(`UPDATE habit_tasks SET task_status='paused' WHERE habit_id=? AND user_id=?`, [habitId, userId]);
+  await pool.execute(`INSERT INTO habit_pauses (habit_id, paused_at, resumed_at) VALUES (?, ?, NULL)`, [habitId, today]);
+}
+
+export async function resumeHabit(userId: number, habitId: number): Promise<void> {
+  const habit = await getOwnedHabitRow(habitId, userId);
+  if (habit.task_status !== 'paused') throw new Error('This ritual is not paused.');
+  const { dateStr: today } = todayInManila();
+  await pool.execute(`UPDATE habit_tasks SET task_status='active' WHERE habit_id=? AND user_id=?`, [habitId, userId]);
+  await pool.execute(
+    `UPDATE habit_pauses SET resumed_at=? WHERE habit_id=? AND resumed_at IS NULL ORDER BY pause_id DESC LIMIT 1`,
+    [today, habitId]
+  );
 }

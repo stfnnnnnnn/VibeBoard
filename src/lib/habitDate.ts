@@ -53,7 +53,9 @@ export function computeConsecutiveScheduledStreak(
   scheduledWeekdays: ReadonlySet<Weekday>,
   completedDates: ReadonlySet<string>,
   asOfDateStr: string,
+  pausedRanges: ReadonlyArray<{ start: string; end: string }> = [],
 ): { length: number; start: string | null } {
+  const isPaused = (d: string) => pausedRanges.some(r => d >= r.start && d < r.end);
   let length = 0;
   let start: string | null = null;
   let cursor = asOfDateStr;
@@ -61,7 +63,7 @@ export function computeConsecutiveScheduledStreak(
 
   for (let i = 0; i < CAP; i++) {
     const wd = weekdayOfDateStr(cursor);
-    if (scheduledWeekdays.has(wd)) {
+    if (scheduledWeekdays.has(wd) && !isPaused(cursor)) {
       if (completedDates.has(cursor)) {
         length++;
         start = cursor;
@@ -70,7 +72,7 @@ export function computeConsecutiveScheduledStreak(
       }
       break; // scheduled day, not completed -> the run ends here
     }
-    cursor = addDaysToDateStr(cursor, -1); // unscheduled day, doesn't break the run
+    cursor = addDaysToDateStr(cursor, -1); // unscheduled (or paused) day, doesn't break the run
   }
 
   return { length, start };

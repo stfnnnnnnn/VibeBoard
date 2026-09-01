@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
-import { ensureHabitTrackingSchema, ensureHabitPriorityAndMinimumSchema, ensureHabitTypeRemovedAndNoteRenamedSchema } from '@/lib/migrate';
+import { ensureHabitTrackingSchema, ensureHabitPriorityAndMinimumSchema, ensureHabitTypeRemovedAndNoteRenamedSchema, ensureHabitPauseSchema } from '@/lib/migrate';
 import { getHabitHistory, HabitNotFoundError } from '@/lib/habits';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -9,6 +9,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   await ensureHabitTrackingSchema();
   await ensureHabitPriorityAndMinimumSchema();
   await ensureHabitTypeRemovedAndNoteRenamedSchema();
+  await ensureHabitPauseSchema();
 
   const { id } = await params;
   const habitId = parseInt(id);
