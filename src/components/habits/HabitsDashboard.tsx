@@ -68,7 +68,9 @@ function PriorityBadge({ priority }: { priority: HabitPriority }) {
 
 /* ─── Radial rhythm ring — the page's one circular meter, reserved for the single
    most important number. Counts up from 0 on mount/update; skips the count-up
-   under prefers-reduced-motion, jumping straight to the final value. ─── */
+   under prefers-reduced-motion, jumping straight to the final value. This is
+   also the ONLY place the brand gradient survives (see #ht-ring-gradient below) —
+   every other bar/dot/node in the file uses a flat #74bcd9 as of v12. ─── */
 function RhythmRing({ percent, size = 96, strokeWidth = 8 }: { percent: number | null; size?: number; strokeWidth?: number }) {
   const [animated, setAnimated] = useState(0);
 
@@ -487,67 +489,85 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
               </div>
             </div>
 
-            <label className="ht-label">Schedule</label>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button type="button" className="ht-toggle-btn" style={form.schedule_mode === 'fixed' ? ACTIVE_TOGGLE_STYLE : undefined}
-                onClick={() => setForm(f => ({ ...f, schedule_mode: 'fixed' }))}>Fixed days</button>
-              <button type="button" className="ht-toggle-btn" style={form.schedule_mode === 'flexible' ? ACTIVE_TOGGLE_STYLE : undefined}
-                onClick={() => setForm(f => ({ ...f, schedule_mode: 'flexible' }))}>Flexible</button>
-            </div>
-
-            {form.schedule_mode === 'fixed' ? (
-              <div style={{ display: 'flex', gap: 4, marginTop: 10 }}>
-                {WEEKDAYS.map(d => (
-                  <button
-                    key={d} type="button"
-                    onClick={() => toggleDay(d)}
-                    className="ht-day-btn"
-                    style={form.days_of_week.includes(d) ? ACTIVE_TOGGLE_STYLE : undefined}
-                  >
-                    {WEEKDAY_SHORT[d]}
-                  </button>
-                ))}
+            <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+              <div style={{ fontSize: '0.7rem', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#999', marginBottom: 4 }}>Schedule</div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#444', marginBottom: 10 }}>When should this happen?</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <button type="button" className={`ht-choice-card${form.schedule_mode === 'fixed' ? ' active' : ''}`}
+                  onClick={() => setForm(f => ({ ...f, schedule_mode: 'fixed' }))}>
+                  <div className="ht-choice-card-title">Fixed days</div>
+                  <div className="ht-choice-card-desc">Specific weekdays every week</div>
+                </button>
+                <button type="button" className={`ht-choice-card${form.schedule_mode === 'flexible' ? ' active' : ''}`}
+                  onClick={() => setForm(f => ({ ...f, schedule_mode: 'flexible' }))}>
+                  <div className="ht-choice-card-title">Flexible</div>
+                  <div className="ht-choice-card-desc">Any days, as long as you hit your target</div>
+                </button>
               </div>
-            ) : (
-              <>
-                <label className="ht-label">Times per week</label>
-                <input type="number" min={1} max={7} className="vb-input" value={form.weekly_target}
-                  onChange={e => setForm(f => ({ ...f, weekly_target: e.target.value }))} />
-              </>
-            )}
 
-            <label className="ht-label">Tracking</label>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button type="button" className="ht-toggle-btn" style={form.tracking_type === 'boolean' ? ACTIVE_TOGGLE_STYLE : undefined}
-                onClick={() => setForm(f => ({ ...f, tracking_type: 'boolean' }))}>Yes/No</button>
-              <button type="button" className="ht-toggle-btn" style={form.tracking_type === 'numeric' ? ACTIVE_TOGGLE_STYLE : undefined}
-                onClick={() => setForm(f => ({ ...f, tracking_type: 'numeric' }))}>Track an amount</button>
+              {form.schedule_mode === 'fixed' ? (
+                <div style={{ display: 'flex', gap: 4, marginTop: 10 }}>
+                  {WEEKDAYS.map(d => (
+                    <button
+                      key={d} type="button"
+                      onClick={() => toggleDay(d)}
+                      className="ht-day-btn"
+                      style={form.days_of_week.includes(d) ? ACTIVE_TOGGLE_STYLE : undefined}
+                    >
+                      {WEEKDAY_SHORT[d]}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <label className="ht-label">Times per week</label>
+                  <input type="number" min={1} max={7} className="vb-input" value={form.weekly_target}
+                    onChange={e => setForm(f => ({ ...f, weekly_target: e.target.value }))} />
+                </>
+              )}
             </div>
 
-            {form.tracking_type === 'numeric' && (
-              <>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <div style={{ flex: 1 }}>
-                    <label className="ht-label">Target</label>
-                    <input type="number" min={0} step="any" className="vb-input" value={form.target_value}
-                      onChange={e => setForm(f => ({ ...f, target_value: e.target.value }))} placeholder="e.g. 30" />
+            <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+              <div style={{ fontSize: '0.7rem', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#999', marginBottom: 4 }}>Tracking</div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#444', marginBottom: 10 }}>How will you measure it?</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <button type="button" className={`ht-choice-card${form.tracking_type === 'boolean' ? ' active' : ''}`}
+                  onClick={() => setForm(f => ({ ...f, tracking_type: 'boolean' }))}>
+                  <div className="ht-choice-card-title">Check-in</div>
+                  <div className="ht-choice-card-desc">Simply mark it done</div>
+                </button>
+                <button type="button" className={`ht-choice-card${form.tracking_type === 'numeric' ? ' active' : ''}`}
+                  onClick={() => setForm(f => ({ ...f, tracking_type: 'numeric' }))}>
+                  <div className="ht-choice-card-title">Amount</div>
+                  <div className="ht-choice-card-desc">Track minutes, pages, glasses, etc.</div>
+                </button>
+              </div>
+
+              {form.tracking_type === 'numeric' && (
+                <>
+                  <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <label className="ht-label">Target</label>
+                      <input type="number" min={0} step="any" className="vb-input" value={form.target_value}
+                        onChange={e => setForm(f => ({ ...f, target_value: e.target.value }))} placeholder="e.g. 30" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label className="ht-label">Unit</label>
+                      <input className="vb-input" value={form.unit_label}
+                        onChange={e => setForm(f => ({ ...f, unit_label: e.target.value }))} placeholder="e.g. minutes" />
+                    </div>
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <label className="ht-label">Unit</label>
-                    <input className="vb-input" value={form.unit_label}
-                      onChange={e => setForm(f => ({ ...f, unit_label: e.target.value }))} placeholder="e.g. minutes" />
-                  </div>
-                </div>
-                <label className="ht-label">Minimum (optional)</label>
-                <input type="number" min={0} step="any" className="vb-input" value={form.minimum_value}
-                  onChange={e => setForm(f => ({ ...f, minimum_value: e.target.value }))} placeholder="A lower, forgiving bar" />
-                <details style={{ marginTop: 8 }}>
-                  <summary className="ht-disclosure">Increment</summary>
-                  <input type="number" min={0} step="any" className="vb-input" style={{ marginTop: 8 }} value={form.step_value}
-                    onChange={e => setForm(f => ({ ...f, step_value: e.target.value }))} placeholder="1" />
-                </details>
-              </>
-            )}
+                  <label className="ht-label">Minimum (optional)</label>
+                  <input type="number" min={0} step="any" className="vb-input" value={form.minimum_value}
+                    onChange={e => setForm(f => ({ ...f, minimum_value: e.target.value }))} placeholder="A lower, forgiving bar" />
+                  <details style={{ marginTop: 8 }}>
+                    <summary className="ht-disclosure">Increment</summary>
+                    <input type="number" min={0} step="any" className="vb-input" style={{ marginTop: 8 }} value={form.step_value}
+                      onChange={e => setForm(f => ({ ...f, step_value: e.target.value }))} placeholder="1" />
+                  </details>
+                </>
+              )}
+            </div>
 
             {formError && (
               <p style={{ color: '#c0392b', fontSize: '0.85rem', margin: '12px 0 0', fontWeight: 600 }}>{formError}</p>
@@ -716,11 +736,13 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           border-radius: 8px; border: 1px solid #ddd; background: #f4f4f6; color: #555;
           cursor: pointer; transition: background 0.15s ease;
         }
-        .ht-toggle-btn {
-          padding: 7px 16px; font-size: 0.78rem; font-weight: 700;
-          border-radius: 10px; border: 1px solid #ddd; background: #f4f4f6; color: #555;
-          cursor: pointer; transition: background 0.15s ease;
+        .ht-choice-card {
+          text-align: left; padding: 12px 14px; border-radius: 12px; border: 1.5px solid #ddd;
+          background: #f9f9fb; cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease;
         }
+        .ht-choice-card.active { border-color: #74bcd9; background: rgba(116,188,217,0.08); }
+        .ht-choice-card-title { font-size: 0.85rem; font-weight: 800; color: #332b45; margin-bottom: 3px; }
+        .ht-choice-card-desc { font-size: 0.72rem; color: #777; line-height: 1.3; }
         .ht-disclosure {
           font-size: 0.78rem; font-weight: 700; color: #74bcd9; cursor: pointer;
         }
@@ -747,7 +769,7 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
         .ht-amount-fill {
           height: 100%; border-radius: 4px; background: #b7c3cc; transition: width 0.3s ease, background 0.3s ease;
         }
-        .ht-amount-wrap.met .ht-amount-fill { background: linear-gradient(90deg,#f2a7c0,#74bcd9); }
+        .ht-amount-wrap.met .ht-amount-fill { background: #74bcd9; }
         .ht-amount-wrap.minimum-met .ht-amount-fill { background: #b8532c; }
 
         .ht-spin { animation: ht-spin 0.8s linear infinite; }
@@ -848,7 +870,7 @@ function DailyRhythmPanel({
 
 /* ─── Category consistency panel — kept deliberately quieter than the hero:
    shorter bars, lower fill opacity, smaller type. Category color remains
-   pure identity (the fill hue), unchanged from before this pass. ─── */
+   pure identity (the fill hue), unchanged. ─── */
 function CategoryConsistencyPanel({ categoryConsistency }: { categoryConsistency: HabitsSummary['category_consistency'] }) {
   return (
     <div className="glass" style={{ borderRadius: 20, padding: '16px 20px' }}>
@@ -952,22 +974,31 @@ function HabitCard({
       {isFlexible ? <WeekDots progress={habit.week_progress!} /> : <ChainRow chain={habit.chain!} />}
 
       {!isFlexible && (
-        <div style={{ fontSize: '0.74rem', color: habit.checked_in_today ? '#42c38b' : habit.is_today ? '#b8532c' : '#999' }}>
-          {habit.checked_in_today ? 'Done today ✓' : habit.is_today ? 'Scheduled today — not yet done' : 'Not scheduled today'}
+        <div style={{ fontSize: '0.88rem', fontWeight: 700, color: habit.checked_in_today ? '#42c38b' : habit.is_today ? '#c0392b' : '#999' }}>
+          {habit.checked_in_today
+            ? '✓ Done today'
+            : habit.is_today
+              ? <>⚠ Scheduled today <span style={{ fontWeight: 500, color: '#777' }}>— not yet done</span></>
+              : 'Not scheduled today'}
         </div>
       )}
 
-      {isFlexible && (
-        <div style={{ fontSize: '0.74rem', color: '#666' }}>
-          {Math.max(0, habit.week_progress!.target - habit.week_progress!.completed)} remaining · {habit.week_days_remaining} day{habit.week_days_remaining === 1 ? '' : 's'} left this week
-          {habit.week_progress!.completed < habit.week_progress!.target && habit.pace === 'behind' && (
-            <span style={{ color: '#c0392b', fontWeight: 700, marginLeft: 6 }}>⚠ Behind pace</span>
-          )}
-          {habit.week_progress!.completed < habit.week_progress!.target && habit.pace === 'ahead' && (
-            <span style={{ color: '#42c38b', fontWeight: 700, marginLeft: 6 }}>Ahead of pace</span>
-          )}
-        </div>
-      )}
+      {isFlexible && (() => {
+        const notYetMet = habit.week_progress!.completed < habit.week_progress!.target;
+        const isBehind = notYetMet && habit.pace === 'behind';
+        const isAhead = notYetMet && habit.pace === 'ahead';
+        return (
+          <div style={{ fontSize: '0.88rem', fontWeight: 700, color: isBehind ? '#c0392b' : isAhead ? '#42c38b' : '#555' }}>
+            {isBehind && '⚠ '}
+            {Math.max(0, habit.week_progress!.target - habit.week_progress!.completed)} remaining{' '}
+            <span style={{ fontWeight: 500, color: '#777' }}>
+              · {habit.week_days_remaining} day{habit.week_days_remaining === 1 ? '' : 's'} left this week
+              {isBehind && ' — behind pace'}
+              {isAhead && ' — ahead of pace'}
+            </span>
+          </div>
+        );
+      })()}
 
       {!isFlexible && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: '#555' }}>
@@ -1052,7 +1083,7 @@ function ChainRow({ chain }: { chain: HabitWithComputed['chain'] }) {
           >
             <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
               {i > 0 && (
-                <div style={{ flex: 1, height: 2, minWidth: 6, background: linked ? 'linear-gradient(90deg,#f2a7c0,#74bcd9)' : 'rgba(0,0,0,0.1)' }} />
+                <div style={{ flex: 1, height: 2, minWidth: 6, background: linked ? '#74bcd9' : 'rgba(0,0,0,0.1)' }} />
               )}
               <div
                 title={`${day.weekday} ${day.date}${!day.scheduled ? ' — not scheduled' : day.completed ? ' — done' : isToday ? ' — not done yet' : ' — missed'}`}
@@ -1066,7 +1097,7 @@ function ChainRow({ chain }: { chain: HabitWithComputed['chain'] }) {
                     ...(!day.scheduled
                       ? { width: 5, height: 5, background: 'rgba(0,0,0,0.25)' }
                       : day.completed
-                        ? { width: 18, height: 18, background: 'linear-gradient(135deg,#f2a7c0,#74bcd9)' }
+                        ? { width: 18, height: 18, background: '#74bcd9' }
                         : isToday
                           ? { width: 18, height: 18, border: '2px dashed #74bcd9', background: 'rgba(255,255,255,0.6)' }
                           : { width: 18, height: 18, border: '2px solid rgba(247,91,103,0.55)', background: 'transparent' }),
@@ -1101,7 +1132,7 @@ function WeekDots({ progress }: { progress: WeekProgress }) {
           style={{
             width: 15, height: 15, borderRadius: '50%', flexShrink: 0,
             ...(done
-              ? { background: 'linear-gradient(135deg,#f2a7c0,#74bcd9)', boxShadow: '0 0 0 2px rgba(255,255,255,0.6)' }
+              ? { background: '#74bcd9', boxShadow: '0 0 0 2px rgba(255,255,255,0.6)' }
               : { border: '1px solid rgba(0,0,0,0.15)', background: 'transparent', opacity: 0.5 }),
           }}
         />
@@ -1179,7 +1210,7 @@ function HistoryChart({ weeks }: { weeks: HabitHistoryWeek[] }) {
         <div key={w.week_start} title={`Week of ${w.week_start}: ${w.completed}/${w.target}`} style={{ flex: 1, height: '100%', display: 'flex', alignItems: 'flex-end' }}>
           <div style={{
             width: '100%', height: `${Math.max(4, w.percent)}%`, borderRadius: 3,
-            background: w.percent >= 100 ? 'linear-gradient(180deg,#f2a7c0,#74bcd9)' : 'rgba(116,188,217,0.4)',
+            background: w.percent >= 100 ? '#74bcd9' : 'rgba(116,188,217,0.4)',
           }} />
         </div>
       ))}
