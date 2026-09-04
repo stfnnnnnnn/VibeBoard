@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import {
   Home, Plus, Minus, Check, Undo2, Flame, Trophy,
@@ -696,11 +697,10 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           to { opacity: 1; transform: scale(1) translateY(0); }
         }
         .ht-card-menu {
-          position: absolute; right: 0; top: calc(100% + 4px); z-index: 20;
+          z-index: 1000;
           background: #fff; border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,0.15);
           display: flex; flex-direction: column; min-width: 110px; overflow: hidden;
           animation: ht-menu-in 0.15s ease-out;
-          transform-origin: top right;
         }
         .ht-card-menu button {
           display: flex; align-items: center; gap: 8px;
@@ -907,14 +907,42 @@ function HabitCard({
   const categoryColor = CATEGORY_COLORS[habit.task_category];
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuPanelRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     if (!menuOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      const target = e.target as Node;
+      if (menuRef.current?.contains(target)) return;
+      if (menuPanelRef.current?.contains(target)) return;
+      setMenuOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    // A position: fixed popover is computed once, in viewport coordinates, when it opens.
+    // Scrolling would otherwise leave it visually stranded away from its trigger, so
+    // scrolling anywhere on the page closes it instead of trying to track it.
+    const handleScroll = () => setMenuOpen(false);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [menuOpen]);
+
+  // Measuring the portalled panel's real size after it mounts (rather than guessing)
+  // is what makes the upward-flip near the bottom of the viewport correct. This runs
+  // before the browser paints, so the menu never visibly jumps from a wrong position.
+  useLayoutEffect(() => {
+    if (!menuOpen) { setMenuPos(null); return; }
+    const anchor = menuRef.current?.getBoundingClientRect();
+    const panel = menuPanelRef.current?.getBoundingClientRect();
+    if (!anchor || !panel) return;
+    const spaceBelow = window.innerHeight - anchor.bottom;
+    const openUpward = spaceBelow < panel.height + 8 && anchor.top > panel.height + 8;
+    const top = openUpward ? anchor.top - panel.height - 4 : anchor.bottom + 4;
+    const left = Math.max(8, Math.min(anchor.right - panel.width, window.innerWidth - panel.width - 8));
+    setMenuPos({ top, left });
   }, [menuOpen]);
 
   return (
@@ -924,7 +952,6 @@ function HabitCard({
         borderTop: `4px solid ${categoryColor}`,
         backgroundImage: `linear-gradient(180deg, ${categoryColor}1f 0%, rgba(255,255,255,0) 160px)`,
         position: 'relative',
-        zIndex: menuOpen ? 30 : 'auto',
         animationDelay: `${Math.min(index, 10) * 40}ms`,
       }}
       onClick={onOpenDetail}
@@ -1037,7 +1064,7 @@ function HabitCard({
             {habit.checked_in_today ? 'Undo' : 'Done'}
           </button>
         )}
-        <div ref={menuRef} style={{ position: 'relative' }}>
+        <div ref={menuRef}>
           <button
             type="button"
             className="ht-icon-btn"
@@ -1049,12 +1076,22 @@ function HabitCard({
           >
             <MoreHorizontal size={16} />
           </button>
-          {menuOpen && (
-            <div className="ht-card-menu">
+          {menuOpen && createPortal(
+            <div
+              ref={menuPanelRef}
+              className="ht-card-menu"
+              style={{
+                position: 'fixed',
+                top: menuPos ? menuPos.top : -9999,
+                left: menuPos ? menuPos.left : -9999,
+                visibility: menuPos ? 'visible' : 'hidden',
+              }}
+            >
               <button type="button" onClick={() => { setMenuOpen(false); onEdit(); }}><Pencil size={14} /> Edit</button>
               <button type="button" onClick={() => { setMenuOpen(false); onPauseToggle(); }}>{isPaused ? <Play size={14} /> : <Pause size={14} />} {isPaused ? 'Resume' : 'Pause'}</button>
               <button type="button" onClick={() => { setMenuOpen(false); onDelete(); }}><Trash2 size={14} /> Delete</button>
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       </div>
