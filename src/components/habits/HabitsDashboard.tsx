@@ -356,6 +356,26 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
                   )}
                 </div>
               </div>
+
+              {(() => {
+                const topStreaks = (habits ?? [])
+                  .filter(h => h.schedule_mode === 'fixed' && h.task_status !== 'paused' && (h.current_streak ?? 0) > 0)
+                  .sort((a, b) => (b.current_streak ?? 0) - (a.current_streak ?? 0))
+                  .slice(0, 2);
+                if (topStreaks.length === 0) return null;
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 'auto' }}>
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#999' }}>Keeping it up</span>
+                    {topStreaks.map(h => (
+                      <div key={h.habit_id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: '#444' }}>
+                        <Flame size={13} color="#b8532c" />
+                        <strong>{h.task_name}</strong>
+                        <span style={{ color: '#888' }}>· {h.current_streak}d</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
