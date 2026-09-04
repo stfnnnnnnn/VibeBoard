@@ -78,7 +78,7 @@ The streak line (fixed-schedule only, `Flame` icon + "N-day streak") is untouche
 
 ### 7. Gradient restraint — reserved for `RhythmRing`
 
-Four flattenings, each a one-line value change with no logic change:
+Five flattenings, each a one-line value change with no logic change:
 
 - `ChainRow`'s completed-node fill: `background: 'linear-gradient(135deg,#f2a7c0,#74bcd9)'` → `background: '#74bcd9'`
 - `ChainRow`'s linked-connector line: `background: linked ? 'linear-gradient(90deg,#f2a7c0,#74bcd9)' : 'rgba(0,0,0,0.1)'` → `background: linked ? '#74bcd9' : 'rgba(0,0,0,0.1)'`
@@ -152,7 +152,7 @@ New CSS:
 
 ## Migration & compatibility
 
-Purely presentational — no data, API, or schema change, no new dependency. `.ht-toggle-btn` is removed as dead code (its only two call sites both move to the new `.ht-choice-card` in this same change, so nothing is left referencing it). Every other CSS class in the file is either untouched or, in the case of the four flattened gradients, has only its color *value* changed, not its selector or any other property.
+Purely presentational — no data, API, or schema change, no new dependency. `.ht-toggle-btn` is removed as dead code (its only two call sites both move to the new `.ht-choice-card` in this same change, so nothing is left referencing it). Every other CSS class in the file is either untouched or, in the case of the five flattened gradients, has only its color *value* changed, not its selector or any other property.
 
 ## Testing / verification plan
 
