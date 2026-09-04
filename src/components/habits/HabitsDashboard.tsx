@@ -324,164 +324,68 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
       {/* ── Analytics ── */}
       {summary && summary.total_habits > 0 && (
         <div style={{ marginTop: 28 }}>
-          <div className="glass" style={{ borderRadius: 20, padding: '24px 26px' }}>
-            <div className="ht-hero-grid">
-              <div>
-                <h2 className="gradient-text" style={{ ...HEADING_FONT, fontSize: '1.2rem', fontWeight: 800, margin: '0 0 4px' }}>This Week&apos;s Rhythm</h2>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 10 }}>
-                  <RhythmRing percent={summary.weekly_expected.expected > 0 ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100)) : null} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ height: 10, borderRadius: 6, background: 'rgba(0,0,0,0.07)', overflow: 'hidden' }}>
-                      <div className="ht-progress-fill" style={{
-                        width: `${summary.weekly_expected.expected > 0 ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100)) : 0}%`,
-                        height: '100%', borderRadius: 6, background: 'linear-gradient(90deg,#f2a7c0,#74bcd9)',
-                      }} />
-                    </div>
-                  </div>
-                </div>
-                <p style={{ margin: '0 0 14px', fontSize: '0.88rem', color: '#555' }}>
+          <div className="glass" style={{ borderRadius: 20, padding: '20px 24px' }}>
+            <h2 className="gradient-text" style={{ ...HEADING_FONT, fontSize: '1.15rem', fontWeight: 800, margin: '0 0 12px' }}>This Week&apos;s Rhythm</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+              <RhythmRing
+                percent={summary.weekly_expected.expected > 0 ? Math.min(100, Math.round((summary.weekly_expected.actual / summary.weekly_expected.expected) * 100)) : null}
+                size={72}
+                strokeWidth={7}
+              />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span style={{ ...HEADING_FONT, fontSize: '0.95rem', fontWeight: 700, color: '#332b45' }}>
                   {summary.weekly_expected.expected > 0
-                    ? <><strong>This week:</strong> {summary.weekly_expected.actual}/{Math.max(summary.weekly_expected.actual, Math.round(summary.weekly_expected.expected))} expected occurrences</>
+                    ? <>{summary.weekly_expected.actual}/{Math.max(summary.weekly_expected.actual, Math.round(summary.weekly_expected.expected))} completed</>
                     : 'Nothing due yet this week'}
-                </p>
-
-                <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: '0.85rem' }}>
+                </span>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '0.85rem' }}>
                   {summary.total_habits - summary.at_risk > 0 && (
                     <span style={{ color: '#444' }}>
-                      <Check size={14} color="#42c38b" style={{ verticalAlign: -2, marginRight: 4 }} />
-                      {summary.total_habits - summary.at_risk} ritual{summary.total_habits - summary.at_risk === 1 ? '' : 's'} on pace
+                      <Check size={13} color="#42c38b" style={{ verticalAlign: -2, marginRight: 4 }} />
+                      {summary.total_habits - summary.at_risk} on pace
                     </span>
                   )}
                   {summary.at_risk > 0 && (
                     <span style={{ color: '#444' }}>
-                      <AlertTriangle size={14} color="#f75b67" style={{ verticalAlign: -2, marginRight: 4 }} />
-                      {summary.at_risk} ritual{summary.at_risk === 1 ? '' : 's'} need{summary.at_risk === 1 ? 's' : ''} attention
+                      <AlertTriangle size={13} color="#f75b67" style={{ verticalAlign: -2, marginRight: 4 }} />
+                      {summary.at_risk} need{summary.at_risk === 1 ? 's' : ''} attention
                     </span>
                   )}
                 </div>
               </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8 }}>
-                <span style={{ color: '#888', fontSize: '0.85rem' }}>
-                  <Trophy size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
-                  {summary.longest_streak}-day best streak
-                </span>
-                {(summary.on_pace || summary.needs_attention) && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8, paddingTop: 12, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
-                    {summary.on_pace && (
-                      <p style={{ margin: 0, fontSize: '0.85rem', color: '#444' }}>
-                        <span style={{ color: '#42c38b', fontWeight: 700 }}>✓ On pace:</span>{' '}
-                        <strong>{summary.on_pace.task_name}</strong> — {summary.on_pace.week_actual}/{summary.on_pace.week_target} completed
-                        {summary.on_pace.week_actual < summary.on_pace.week_target && habits && habits.length > 0 &&
-                          ` · ${habits[0].week_days_remaining} day${habits[0].week_days_remaining === 1 ? '' : 's'} available`}
-                      </p>
-                    )}
-                    {summary.needs_attention && (() => {
-                      const na = summary.needs_attention!;
-                      const fullHabit = habits?.find(h => h.habit_id === na.habit_id);
-                      const todayIncomplete = !!fullHabit && fullHabit.is_today && !fullHabit.checked_in_today;
-                      return (
-                        <p style={{ margin: 0, fontSize: '0.85rem', color: '#444' }}>
-                          <span style={{ color: '#c0392b', fontWeight: 700 }}>⚠ Needs attention:</span>{' '}
-                          <strong>{na.task_name}</strong> —{' '}
-                          {todayIncomplete
-                            ? "today's occurrence is still incomplete"
-                            : `${na.week_actual}/${na.week_target} completed this week`}
-                        </p>
-                      );
-                    })()}
-                  </div>
-                )}
-              </div>
             </div>
-          </div>
 
-          <div className="glass" style={{ borderRadius: 20, padding: '20px 24px', marginTop: 16 }}>
-            <h3 style={{ ...HEADING_FONT, margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 700, color: '#444' }}>Daily rhythm — last 7 days</h3>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {summary.weekly_rhythm.map(d => {
-                const glyph = d.scheduled === 0 ? '○' : d.percent >= 100 ? '●' : d.percent > 0 ? '◐' : '○';
-                const glyphColor = d.scheduled === 0
-                  ? 'rgba(0,0,0,0.15)'
-                  : d.percent > 0
-                    ? '#74bcd9'
-                    : '#f75b67';
-                const isSelected = selectedDay === d.date;
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+              {summary.needs_attention && (() => {
+                const na = summary.needs_attention!;
+                const fullHabit = habits?.find(h => h.habit_id === na.habit_id);
+                const todayIncomplete = !!fullHabit && fullHabit.is_today && !fullHabit.checked_in_today;
                 return (
-                  <div
-                    key={d.date}
-                    onClick={() => setSelectedDay(prev => prev === d.date ? null : d.date)}
-                    title={`${d.weekday} ${d.date}: ${d.scheduled > 0 ? `${d.percent}% fulfilled` : 'nothing scheduled'}`}
-                    className={`ht-day-cell${isSelected ? ' selected' : ''}`}
-                    style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer', padding: '4px 0' }}
-                  >
-                    <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#777', minHeight: 12 }}>
-                      {d.scheduled > 0 ? `${d.percent}%` : '—'}
-                    </div>
-                    <div style={{ fontSize: '1.3rem', lineHeight: 1, color: glyphColor }}>{glyph}</div>
-                    <div style={{ fontSize: '0.68rem', fontWeight: 600, color: '#999' }}>{WEEKDAY_SHORT[d.weekday]}</div>
-                  </div>
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: '#444' }}>
+                    <span style={{ color: '#c0392b', fontWeight: 700 }}>⚠ Needs attention:</span>{' '}
+                    <strong>{na.task_name}</strong> —{' '}
+                    {todayIncomplete
+                      ? "today's occurrence is still incomplete"
+                      : `${na.week_actual}/${na.week_target} completed this week`}
+                  </p>
                 );
-              })}
+              })()}
+              <span style={{ color: '#888', fontSize: '0.82rem', whiteSpace: 'nowrap', marginLeft: 'auto' }}>
+                <Trophy size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
+                Best chain · {summary.longest_streak} day{summary.longest_streak === 1 ? '' : 's'}
+              </span>
             </div>
-
-            {selectedDay && habits && (() => {
-              const todayStr = summary.weekly_rhythm[summary.weekly_rhythm.length - 1]?.date;
-              const isToday = selectedDay === todayStr;
-              const dayHabits = habits
-                .filter(h => h.schedule_mode === 'fixed')
-                .map(h => ({ habit: h, day: h.chain?.find(c => c.date === selectedDay) }))
-                .filter((x): x is { habit: HabitWithComputed; day: NonNullable<HabitWithComputed['chain']>[number] } => !!x.day?.scheduled);
-              return (
-                <div key={selectedDay} className="ht-fade-slide" style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
-                  <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 8 }}>
-                    {new Date(selectedDay + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
-                  </div>
-                  {!dayHabits.length ? (
-                    <div style={{ fontSize: '0.82rem', color: '#888' }}>Nothing scheduled this day.</div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {dayHabits.map(({ habit, day }) => (
-                        <div key={habit.habit_id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
-                          <span style={{ color: day.completed ? '#42c38b' : '#c0392b' }}>{day.completed ? '✓' : '○'}</span>
-                          <span style={{ flex: 1 }}>{habit.task_name}</span>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: CATEGORY_COLORS[habit.task_category], display: 'inline-block' }} />
-                          <span style={{ fontSize: '0.72rem', color: '#888' }}>{CATEGORY_LABELS[habit.task_category]}</span>
-                          {isToday && !day.completed && habit.tracking_type === 'boolean' && (
-                            <button
-                              type="button"
-                              onClick={() => doCheckin(habit.habit_id)}
-                              style={{ fontSize: '0.7rem', fontWeight: 700, padding: '3px 9px', borderRadius: 8, border: 'none', background: '#74bcd9', color: '#fff', cursor: 'pointer' }}
-                            >
-                              Check in
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
           </div>
 
-          {summary.category_consistency.length > 0 && (
-            <div className="glass" style={{ borderRadius: 20, padding: '20px 24px', marginTop: 16 }}>
-              <h3 style={{ ...HEADING_FONT, margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 700, color: '#444' }}>Consistency by category — this week</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {summary.category_consistency.map(c => (
-                  <div key={c.category} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div style={{ width: 110, fontSize: '0.82rem', fontWeight: 600, color: '#444' }}>{CATEGORY_LABELS[c.category]}</div>
-                    <div style={{ flex: 1, height: 10, borderRadius: 6, background: 'rgba(0,0,0,0.07)', overflow: 'hidden' }}>
-                      <div className="ht-progress-fill" style={{ width: `${c.percent}%`, height: '100%', borderRadius: 6, background: CATEGORY_COLORS[c.category] }} />
-                    </div>
-                    <div style={{ width: 60, textAlign: 'right', fontSize: '0.78rem', color: '#888' }}>{c.completed}/{c.scheduled}</div>
-                    <div style={{ width: 36, textAlign: 'right', fontSize: '0.8rem', fontWeight: 700, color: '#444' }}>{c.percent}%</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <div
+            className="ht-analytics-row"
+            style={summary.category_consistency.length === 0 ? { gridTemplateColumns: '1fr' } : undefined}
+          >
+            <DailyRhythmPanel summary={summary} habits={habits} selectedDay={selectedDay} setSelectedDay={setSelectedDay} doCheckin={doCheckin} />
+            {summary.category_consistency.length > 0 && (
+              <CategoryConsistencyPanel categoryConsistency={summary.category_consistency} />
+            )}
+          </div>
         </div>
       )}
 
@@ -697,13 +601,14 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           gap: 20px;
         }
 
-        .ht-hero-grid {
+        .ht-analytics-row {
           display: grid;
           grid-template-columns: 1fr;
-          gap: 20px;
+          gap: 16px;
+          margin-top: 16px;
         }
         @media (min-width: 720px) {
-          .ht-hero-grid { grid-template-columns: 1.3fr 1fr; }
+          .ht-analytics-row { grid-template-columns: 1.4fr 1fr; }
         }
 
         .ht-card {
@@ -729,7 +634,6 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           transition: background 0.15s ease;
         }
         .ht-day-cell:hover { background: rgba(116,188,217,0.08); }
-        .ht-day-cell.selected { background: rgba(116,188,217,0.14); box-shadow: inset 0 0 0 1.5px rgba(116,188,217,0.55); }
 
         .ht-chain-node {
           transition: background 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease, transform 0.3s ease;
@@ -855,6 +759,112 @@ export default function HabitsDashboard({ firstName }: { firstName: string }) {
           .ht-spin { animation-duration: 1.6s; }
         }
       `}</style>
+    </div>
+  );
+}
+
+/* ─── Daily rhythm panel — a 7-day heat-strip with a real 4-state glyph model
+   (completed / partial / missed / nothing-scheduled), and a day-click drill-down
+   below acting as the detail half of a master/detail relationship. ─── */
+function DailyRhythmPanel({
+  summary, habits, selectedDay, setSelectedDay, doCheckin,
+}: {
+  summary: HabitsSummary; habits: HabitWithComputed[] | null;
+  selectedDay: string | null; setSelectedDay: (updater: (prev: string | null) => string | null) => void;
+  doCheckin: (id: number) => void;
+}) {
+  return (
+    <div className="glass" style={{ borderRadius: 20, padding: '20px 24px' }}>
+      <h3 style={{ ...HEADING_FONT, margin: '0 0 14px', fontSize: '0.95rem', fontWeight: 700, color: '#444' }}>Daily rhythm — last 7 days</h3>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {summary.weekly_rhythm.map(d => {
+          const glyph = d.scheduled === 0 ? '·' : d.percent >= 100 ? '●' : d.percent > 0 ? '◐' : '○';
+          const glyphColor = d.scheduled === 0
+            ? 'rgba(0,0,0,0.2)'
+            : d.percent > 0
+              ? '#74bcd9'
+              : '#f75b67';
+          const isSelected = selectedDay === d.date;
+          return (
+            <div
+              key={d.date}
+              onClick={() => setSelectedDay(prev => prev === d.date ? null : d.date)}
+              title={`${d.weekday} ${d.date}: ${d.scheduled > 0 ? `${d.percent}% fulfilled` : 'nothing scheduled'}`}
+              className="ht-day-cell"
+              style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer', padding: '8px 4px', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10 }}
+            >
+              <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#777', minHeight: 12 }}>
+                {d.scheduled > 0 ? `${d.percent}%` : '—'}
+              </div>
+              <div style={{ fontSize: '1.3rem', lineHeight: 1, color: glyphColor }}>{glyph}</div>
+              <div style={{ fontSize: '0.68rem', fontWeight: 600, color: '#999' }}>{WEEKDAY_SHORT[d.weekday]}</div>
+              <div style={{ width: 16, height: 3, borderRadius: 2, background: isSelected ? '#74bcd9' : 'transparent' }} />
+            </div>
+          );
+        })}
+      </div>
+
+      {selectedDay && habits && (() => {
+        const todayStr = summary.weekly_rhythm[summary.weekly_rhythm.length - 1]?.date;
+        const isToday = selectedDay === todayStr;
+        const dayHabits = habits
+          .filter(h => h.schedule_mode === 'fixed')
+          .map(h => ({ habit: h, day: h.chain?.find(c => c.date === selectedDay) }))
+          .filter((x): x is { habit: HabitWithComputed; day: NonNullable<HabitWithComputed['chain']>[number] } => !!x.day?.scheduled);
+        return (
+          <div key={selectedDay} className="ht-fade-slide" style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+            <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 8 }}>
+              {new Date(selectedDay + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+            </div>
+            {!dayHabits.length ? (
+              <div style={{ fontSize: '0.82rem', color: '#888' }}>Nothing scheduled this day.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {dayHabits.map(({ habit, day }) => (
+                  <div key={habit.habit_id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
+                    <span style={{ color: day.completed ? '#42c38b' : '#c0392b' }}>{day.completed ? '✓' : '○'}</span>
+                    <span style={{ flex: 1 }}>{habit.task_name}</span>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: CATEGORY_COLORS[habit.task_category], display: 'inline-block' }} />
+                    <span style={{ fontSize: '0.72rem', color: '#888' }}>{CATEGORY_LABELS[habit.task_category]}</span>
+                    {isToday && !day.completed && habit.tracking_type === 'boolean' && (
+                      <button
+                        type="button"
+                        onClick={() => doCheckin(habit.habit_id)}
+                        style={{ fontSize: '0.7rem', fontWeight: 700, padding: '3px 9px', borderRadius: 8, border: 'none', background: '#74bcd9', color: '#fff', cursor: 'pointer' }}
+                      >
+                        Check in
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+/* ─── Category consistency panel — kept deliberately quieter than the hero:
+   shorter bars, lower fill opacity, smaller type. Category color remains
+   pure identity (the fill hue), unchanged from before this pass. ─── */
+function CategoryConsistencyPanel({ categoryConsistency }: { categoryConsistency: HabitsSummary['category_consistency'] }) {
+  return (
+    <div className="glass" style={{ borderRadius: 20, padding: '16px 20px' }}>
+      <h3 style={{ ...HEADING_FONT, margin: '0 0 12px', fontSize: '0.85rem', fontWeight: 700, color: '#666' }}>Consistency by category — this week</h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {categoryConsistency.map(c => (
+          <div key={c.category} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 90, fontSize: '0.76rem', fontWeight: 600, color: '#666' }}>{CATEGORY_LABELS[c.category]}</div>
+            <div style={{ flex: 1, height: 6, borderRadius: 4, background: 'rgba(0,0,0,0.06)', overflow: 'hidden' }}>
+              <div className="ht-progress-fill" style={{ width: `${c.percent}%`, height: '100%', borderRadius: 4, background: CATEGORY_COLORS[c.category], opacity: 0.8 }} />
+            </div>
+            <div style={{ width: 50, textAlign: 'right', fontSize: '0.72rem', color: '#999' }}>{c.completed}/{c.scheduled}</div>
+            <div style={{ width: 32, textAlign: 'right', fontSize: '0.74rem', fontWeight: 700, color: '#666' }}>{c.percent}%</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
