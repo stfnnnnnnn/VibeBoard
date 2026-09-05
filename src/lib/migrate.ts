@@ -523,19 +523,29 @@ export async function ensureWorkboardSchema(): Promise<void> {
   // CHECK constraint (MySQL auto-names those). Both must go before Workboard can insert a
   // second row for the same announcement_id with a different destination column set.
   if (await indexExists('canvas_announcement_links', 'uniq_announcement')) {
-    // Drop the FK that uses the announcement_id column, then drop the unique index, then recreate the FK
-    if (await constraintExists('canvas_announcement_links', 'canvas_announcement_links_ibfk_1')) {
-      await pool.query(`ALTER TABLE canvas_announcement_links DROP FOREIGN KEY canvas_announcement_links_ibfk_1`);
+    // Look up the FK constraint name dynamically (don't assume ibfk_1)
+    const [fkRows] = await pool.query<RowDataPacket[]>(`
+      SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'canvas_announcement_links'
+        AND COLUMN_NAME = 'announcement_id' AND REFERENCED_TABLE_NAME = 'canvas_announcement_bank'
+    `);
+    if (fkRows.length > 0) {
+      const fkName = fkRows[0].CONSTRAINT_NAME;
+      await pool.query(`ALTER TABLE canvas_announcement_links DROP FOREIGN KEY \`${fkName}\``);
     }
     await pool.query(`ALTER TABLE canvas_announcement_links DROP INDEX uniq_announcement`);
-    // Recreate the FK
-    const [fkCheck] = await pool.query<RowDataPacket[]>(`
-      SELECT 1 FROM information_schema.REFERENTIAL_CONSTRAINTS
-      WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'canvas_announcement_links' AND CONSTRAINT_NAME = 'canvas_announcement_links_ibfk_1'
-    `);
-    if (fkCheck.length === 0) {
-      await pool.query(`ALTER TABLE canvas_announcement_links ADD FOREIGN KEY (announcement_id) REFERENCES canvas_announcement_bank(id) ON DELETE CASCADE`);
-    }
+  }
+
+  // Re-add the FK on announcement_id if it's missing (independent of the index handling above).
+  // This ensures idempotency and handles crash-recovery scenarios where the index was dropped
+  // but the FK re-add was interrupted.
+  const [fkExists] = await pool.query<RowDataPacket[]>(`
+    SELECT 1 FROM information_schema.KEY_COLUMN_USAGE
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'canvas_announcement_links'
+      AND COLUMN_NAME = 'announcement_id' AND REFERENCED_TABLE_NAME = 'canvas_announcement_bank'
+  `);
+  if (fkExists.length === 0) {
+    await pool.query(`ALTER TABLE canvas_announcement_links ADD FOREIGN KEY (announcement_id) REFERENCES canvas_announcement_bank(id) ON DELETE CASCADE`);
   }
 
   const [oldChecks] = await pool.query<RowDataPacket[]>(`
