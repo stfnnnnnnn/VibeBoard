@@ -119,9 +119,33 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
             { status: 400 },
           );
         }
-        if (d.target_type === 'grade_entries' && (!d.cat_id || !d.period_id)) {
-          return Response.json({ error: 'cat_id and period_id are required for grade_entries' }, { status: 400 });
+        if (d.target_type === 'grade_entries') {
+          if (subjectMode === 'legacy') {
+            return Response.json(
+              { error: 'This subject uses legacy grading. Choose activities, quizzes, or exams instead.' },
+              { status: 400 },
+            );
+          }
+          if (!d.cat_id || !d.period_id) {
+            return Response.json({ error: 'cat_id and period_id are required for grade_entries' }, { status: 400 });
+          }
+          const [owns] = await pool.execute<RowDataPacket[]>(
+            `SELECT 1 FROM grading_categories gc
+             JOIN grading_periods gp ON gp.period_id = gc.period_id
+             JOIN subject_grading sg ON sg.preset_id = gp.preset_id
+             WHERE gc.cat_id = ? AND gc.period_id = ? AND sg.user_subject_id = ?`,
+            [d.cat_id, d.period_id, item.user_subject_id],
+          );
+          if (!owns.length) {
+            return Response.json({ error: 'That category/period does not belong to this subject' }, { status: 400 });
+          }
         }
+      }
+      if (d.type === 'event' && d.user_subject_id != null) {
+        const [owns] = await pool.execute<RowDataPacket[]>(
+          'SELECT 1 FROM user_subjects WHERE user_subject_id = ? AND user_id = ?', [d.user_subject_id, userId],
+        );
+        if (!owns.length) return Response.json({ error: 'That subject was not found' }, { status: 400 });
       }
       if (d.type === 'schedule_change') {
         const [owns] = await pool.execute<RowDataPacket[]>(
@@ -150,14 +174,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
           else if (d.target_type === 'quizzes') { linkedId = (await insertQuizEntry(commonFields, conn)).entryId; linkColumn = 'quiz_id'; }
           else if (d.target_type === 'exams') { linkedId = (await insertExamEntry(commonFields, conn)).entryId; linkColumn = 'exam_id'; }
           else {
-            const [owns] = await conn.execute<RowDataPacket[]>(
-              `SELECT 1 FROM grading_categories gc
-               JOIN grading_periods gp ON gp.period_id = gc.period_id
-               JOIN subject_grading sg ON sg.preset_id = gp.preset_id
-               WHERE gc.cat_id = ? AND gc.period_id = ? AND sg.user_subject_id = ?`,
-              [d.cat_id!, d.period_id!, item.user_subject_id],
-            );
-            if (!owns.length) throw new Error('That category/period does not belong to this subject');
+            // cat_id/period_id ownership was already validated in the pre-transaction
+            // validation loop above; no need to re-check here.
             linkedId = (await insertGradeEntry({ ...commonFields, catId: d.cat_id!, periodId: d.period_id!, isLab: false }, conn)).entryId;
             linkColumn = 'grade_entry_id';
           }

@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { ensureWorkboardSchema } from '@/lib/migrate';
-import { getWorkboardWeek, mondayOf } from '@/lib/workboard/aggregate';
+import { getWorkboardWeek, mondayOf, todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
 import WorkboardWeekView from '@/components/workboard/WorkboardWeekView';
 
 export default async function WorkboardPage() {
@@ -10,7 +10,7 @@ export default async function WorkboardPage() {
 
   await ensureWorkboardSchema();
   const userId = parseInt(session.user.id);
-  const weekStart = mondayOf(new Date());
+  const weekStart = mondayOf(todayInManilaAsUtcDate());
   const week = await getWorkboardWeek(userId, weekStart);
 
   return <WorkboardWeekView initialWeek={week} />;

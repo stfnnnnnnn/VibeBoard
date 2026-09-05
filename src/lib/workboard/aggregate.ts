@@ -66,6 +66,20 @@ export interface WorkboardWeek {
   heatmap:            DayLoad[];
 }
 
+/** Today's calendar date in Asia/Manila (the app's timezone convention — see
+ *  src/lib/db.ts's `timezone: '+08:00'` connection pin and src/lib/habitDate.ts's
+ *  `todayInManila()`), as a Date anchored at midnight UTC so it can be fed straight
+ *  into `mondayOf` without local-timezone drift. Using `new Date()` directly here
+ *  would read the server process's own (possibly UTC) calendar date, which during
+ *  the ~midnight-8AM Manila window is still "yesterday" and would silently show
+ *  last week's board. */
+export function todayInManilaAsUtcDate(): Date {
+  const dateStr = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  return new Date(`${dateStr}T00:00:00Z`);
+}
+
 /** Monday of the calendar week containing `date`, as "YYYY-MM-DD", computed in UTC so the
  *  result doesn't depend on the server's local timezone (same reasoning as toMysqlUtc in
  *  src/lib/canvas/normalize.ts). */
