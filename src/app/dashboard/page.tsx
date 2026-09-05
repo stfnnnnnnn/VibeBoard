@@ -1,14 +1,16 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
+import { LayoutDashboard } from 'lucide-react';
 import { auth, signOut } from '@/auth';
 import QuoteWidget  from '@/components/dashboard/QuoteWidget';
 import WeatherWidget from '@/components/dashboard/WeatherWidget';
 
 const MODULES = [
-  { href: '/studypulse',  src: '/studypulse.png',     alt: 'Study Pulse'     },
-  { href: '/finance',     src: '/financetracker.png',  alt: 'Finance Tracker' },
-  { href: '/habits',      src: '/habittracker.png',    alt: 'Habit Tracker'   },
+  { href: '/studypulse',  kind: 'image' as const, src: '/studypulse.png',     alt: 'Study Pulse'     },
+  { href: '/finance',     kind: 'image' as const, src: '/financetracker.png', alt: 'Finance Tracker' },
+  { href: '/habits',      kind: 'image' as const, src: '/habittracker.png',   alt: 'Habit Tracker'   },
+  { href: '/workboard',   kind: 'icon'  as const, alt: 'Workboard' },
 ];
 
 export default async function DashboardPage() {
@@ -119,8 +121,8 @@ export default async function DashboardPage() {
       {/* ── Module tiles ────────────────────────── */}
       {/* mobile/tablet: responsive grid | lg+: original flex row (unchanged) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:justify-center gap-5 py-5">
-        {MODULES.map(({ href, src, alt }) => (
-          <Link key={href} href={href} style={{ textDecoration: 'none', color: 'inherit' }}>
+        {MODULES.map((mod) => (
+          <Link key={mod.href} href={mod.href} style={{ textDecoration: 'none', color: 'inherit' }}>
             <div
               className="hover:-translate-y-2.5 transition-all duration-300 shadow-[0_8px_20px_rgba(0,0,0,0.15)] hover:shadow-[0_15px_35px_rgba(0,0,0,0.25)] w-full lg:w-[400px] lg:h-[300px] lg:flex-shrink-0"
               style={{
@@ -136,16 +138,27 @@ export default async function DashboardPage() {
                 className="relative w-full overflow-hidden rounded-[14px] aspect-video lg:aspect-auto lg:h-[220px]"
                 style={{ marginBottom: '10px' }}
               >
-                <Image
-                  src={src}
-                  alt={alt}
-                  fill
-                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 400px"
-                  className="object-cover"
-                  style={{ borderRadius: '14px' }}
-                  unoptimized
-                />
+                {mod.kind === 'image' ? (
+                  <Image
+                    src={mod.src}
+                    alt={mod.alt}
+                    fill
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 400px"
+                    className="object-cover"
+                    style={{ borderRadius: '14px' }}
+                    unoptimized
+                  />
+                ) : (
+                  <div style={{
+                    position: 'absolute', inset: 0, borderRadius: '14px',
+                    background: 'linear-gradient(135deg, #f2a7c0, #74bcd9)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <LayoutDashboard size={64} color="rgba(255,255,255,0.9)" strokeWidth={1.5} />
+                  </div>
+                )}
               </div>
+              <p style={{ textAlign: 'center', fontWeight: 700, color: '#333', margin: 0 }}>{mod.alt}</p>
             </div>
           </Link>
         ))}
