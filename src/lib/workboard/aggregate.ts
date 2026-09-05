@@ -182,3 +182,97 @@ export function computeHeatmap(
   }
   return days;
 }
+
+export async function getWorkboardWeek(userId: number, weekStart: string): Promise<WorkboardWeek> {
+  const weekEnd = addDays(weekStart, 6);
+
+  const [blockRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT sb.block_id, sb.user_subject_id, sb.course_code, sb.section,
+            sb.day_of_week, sb.start_time, sb.end_time, sb.venue, sb.is_online,
+            s.subject_name
+     FROM schedule_blocks sb
+     LEFT JOIN user_subjects us ON sb.user_subject_id = us.user_subject_id
+     LEFT JOIN subjects s ON us.subject_id = s.subject_id
+     WHERE sb.user_id = ?`,
+    [userId],
+  );
+
+  const [overrideRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT so.block_id, so.override_date, so.modality, so.note
+     FROM schedule_overrides so
+     JOIN schedule_blocks sb ON sb.block_id = so.block_id
+     WHERE sb.user_id = ? AND so.override_date BETWEEN ? AND ?`,
+    [userId, weekStart, weekEnd],
+  );
+  const overrideByKey = new Map<string, RowDataPacket>();
+  for (const o of overrideRows) {
+    overrideByKey.set(`${o.block_id}:${String(o.override_date).slice(0, 10)}`, o);
+  }
+
+  const classOccurrences: ClassOccurrence[] = [];
+  for (const b of blockRows) {
+    const dow = b.day_of_week as number;
+    if (dow == null || dow < 0 || dow > 5) continue; // schedule_blocks only ever populates Mon(0)..Sat(5)
+    const date = addDays(weekStart, dow);
+    const override = overrideByKey.get(`${b.block_id}:${date}`);
+    classOccurrences.push({
+      block_id: b.block_id, user_subject_id: b.user_subject_id, course_code: b.course_code,
+      subject_name: b.subject_name, section: b.section, date,
+      start_time: String(b.start_time).slice(0, 5), end_time: String(b.end_time).slice(0, 5),
+      venue: b.venue, is_online: Boolean(b.is_online),
+      override: override ? { modality: override.modality, note: override.note } : null,
+    });
+  }
+
+  async function deadlineQuery(table: string, idCol: string, nameCol: string): Promise<RowDataPacket[]> {
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT t.\`${idCol}\` AS entry_id, t.user_subject_id, t.\`${nameCol}\` AS name, t.deadline,
+              s.subject_name, s.course_code
+       FROM \`${table}\` t
+       JOIN user_subjects us ON t.user_subject_id = us.user_subject_id
+       JOIN subjects s ON us.subject_id = s.subject_id
+       WHERE us.user_id = ? AND t.status != 'Done' AND t.deadline BETWEEN ? AND ?`,
+      [userId, weekStart, weekEnd],
+    );
+    return rows;
+  }
+
+  const [actRows, quizRows, examRows, geRows] = await Promise.all([
+    deadlineQuery('activities', 'activity_id', 'activity_name'),
+    deadlineQuery('quizzes', 'quiz_id', 'quiz_name'),
+    deadlineQuery('exams', 'exam_id', 'exam_name'),
+    deadlineQuery('grade_entries', 'entry_id', 'name'),
+  ]);
+  const deadlines: DeadlineItem[] = [
+    ...actRows.map(r => ({ source_table: 'activities' as const, entry_id: r.entry_id, user_subject_id: r.user_subject_id, subject_name: r.subject_name, course_code: r.course_code, name: r.name, deadline: String(r.deadline).slice(0, 10) })),
+    ...quizRows.map(r => ({ source_table: 'quizzes' as const, entry_id: r.entry_id, user_subject_id: r.user_subject_id, subject_name: r.subject_name, course_code: r.course_code, name: r.name, deadline: String(r.deadline).slice(0, 10) })),
+    ...examRows.map(r => ({ source_table: 'exams' as const, entry_id: r.entry_id, user_subject_id: r.user_subject_id, subject_name: r.subject_name, course_code: r.course_code, name: r.name, deadline: String(r.deadline).slice(0, 10) })),
+    ...geRows.map(r => ({ source_table: 'grade_entries' as const, entry_id: r.entry_id, user_subject_id: r.user_subject_id, subject_name: r.subject_name, course_code: r.course_code, name: r.name, deadline: String(r.deadline).slice(0, 10) })),
+  ];
+
+  const [itemRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT wi.id, wi.user_subject_id, wi.item_type, wi.title, wi.location,
+            wi.starts_at, wi.ends_at, wi.remind_at, wi.note, s.subject_name
+     FROM workboard_items wi
+     LEFT JOIN user_subjects us ON wi.user_subject_id = us.user_subject_id
+     LEFT JOIN subjects s ON us.subject_id = s.subject_id
+     WHERE wi.user_id = ? AND wi.status = 'active'
+       AND (
+         (wi.item_type = 'event' AND DATE(wi.starts_at) BETWEEN ? AND ?)
+         OR (wi.item_type = 'reminder' AND (wi.remind_at IS NULL OR DATE(wi.remind_at) BETWEEN ? AND ?))
+       )`,
+    [userId, weekStart, weekEnd, weekStart, weekEnd],
+  );
+  const allItems: WorkboardEventItem[] = itemRows.map(r => ({
+    id: r.id, user_subject_id: r.user_subject_id, subject_name: r.subject_name, item_type: r.item_type,
+    title: r.title, location: r.location, starts_at: r.starts_at, ends_at: r.ends_at,
+    remind_at: r.remind_at, note: r.note,
+  }));
+  const events = allItems.filter(i => i.item_type === 'event');
+  const reminders = allItems.filter(i => i.item_type === 'reminder');
+
+  const conflicts = [...detectConflicts(classOccurrences, events), ...detectDeadlineClusters(deadlines)];
+  const heatmap = computeHeatmap(weekStart, classOccurrences, deadlines, events);
+
+  return { week_start: weekStart, class_occurrences: classOccurrences, deadlines, events, reminders, conflicts, heatmap };
+}
