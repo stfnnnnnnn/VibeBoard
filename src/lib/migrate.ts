@@ -1,4 +1,5 @@
 import pool from '@/lib/db';
+import type { RowDataPacket } from 'mysql2/promise';
 
 let _ranAc = false;
 let _ranGs = false;
@@ -10,6 +11,7 @@ let _ranHabitsV2 = false;
 let _ranHabitsV3 = false;
 let _ranHabitsV7 = false;
 let _ranHabitsV8 = false;
+let _ranWorkboard = false;
 
 /** Add accomplished_at column to entry tables if not already present. */
 export async function ensureAccomplishedAt(): Promise<void> {
@@ -433,4 +435,126 @@ export async function ensureHabitPauseSchema(): Promise<void> {
   `);
 
   _ranHabitsV8 = true;
+}
+
+async function columnExists(table: string, column: string): Promise<boolean> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    [table, column],
+  );
+  return rows.length > 0;
+}
+
+async function constraintExists(table: string, name: string): Promise<boolean> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT 1 FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ?`,
+    [table, name],
+  );
+  return rows.length > 0;
+}
+
+async function indexExists(table: string, name: string): Promise<boolean> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`,
+    [table, name],
+  );
+  return rows.length > 0;
+}
+
+/** Create the Workboard tables and extend canvas_announcement_links for multi-destination
+ *  announcements, if not already done. */
+export async function ensureWorkboardSchema(): Promise<void> {
+  if (_ranWorkboard) return;
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS workboard_items (
+      id                       INT AUTO_INCREMENT PRIMARY KEY,
+      user_id                  INT NOT NULL,
+      user_subject_id          INT NULL,
+      item_type                ENUM('event','reminder') NOT NULL,
+      title                    VARCHAR(255) NOT NULL,
+      location                 VARCHAR(255) NULL,
+      starts_at                DATETIME NULL,
+      ends_at                  DATETIME NULL,
+      remind_at                DATETIME NULL,
+      note                     TEXT NULL,
+      source_type              ENUM('manual','canvas_announcement') NOT NULL DEFAULT 'manual',
+      source_announcement_id   INT NULL,
+      status                   ENUM('active','dismissed','done') NOT NULL DEFAULT 'active',
+      created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES user_login(user_id) ON DELETE CASCADE,
+      FOREIGN KEY (user_subject_id) REFERENCES user_subjects(user_subject_id) ON DELETE SET NULL,
+      FOREIGN KEY (source_announcement_id) REFERENCES canvas_announcement_bank(id) ON DELETE SET NULL
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schedule_overrides (
+      id                       INT AUTO_INCREMENT PRIMARY KEY,
+      block_id                 INT NOT NULL,
+      override_date            DATE NOT NULL,
+      modality                 ENUM('online','cancelled') NULL,
+      note                     TEXT NULL,
+      source_type              ENUM('manual','canvas_announcement') NOT NULL DEFAULT 'manual',
+      source_announcement_id   INT NULL,
+      created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_block_date (block_id, override_date),
+      FOREIGN KEY (block_id) REFERENCES schedule_blocks(block_id) ON DELETE CASCADE,
+      FOREIGN KEY (source_announcement_id) REFERENCES canvas_announcement_bank(id) ON DELETE SET NULL
+    )
+  `);
+
+  if (!(await columnExists('canvas_announcement_links', 'workboard_item_id'))) {
+    await pool.query(`
+      ALTER TABLE canvas_announcement_links
+        ADD COLUMN workboard_item_id INT NULL,
+        ADD FOREIGN KEY (workboard_item_id) REFERENCES workboard_items(id) ON DELETE CASCADE
+    `);
+  }
+  if (!(await columnExists('canvas_announcement_links', 'schedule_override_id'))) {
+    await pool.query(`
+      ALTER TABLE canvas_announcement_links
+        ADD COLUMN schedule_override_id INT NULL,
+        ADD FOREIGN KEY (schedule_override_id) REFERENCES schedule_overrides(id) ON DELETE CASCADE
+    `);
+  }
+
+  // The original table was created with a single-destination UNIQUE index and an unnamed
+  // CHECK constraint (MySQL auto-names those). Both must go before Workboard can insert a
+  // second row for the same announcement_id with a different destination column set.
+  if (await indexExists('canvas_announcement_links', 'uniq_announcement')) {
+    // Drop the FK that uses the announcement_id column, then drop the unique index, then recreate the FK
+    if (await constraintExists('canvas_announcement_links', 'canvas_announcement_links_ibfk_1')) {
+      await pool.query(`ALTER TABLE canvas_announcement_links DROP FOREIGN KEY canvas_announcement_links_ibfk_1`);
+    }
+    await pool.query(`ALTER TABLE canvas_announcement_links DROP INDEX uniq_announcement`);
+    // Recreate the FK
+    const [fkCheck] = await pool.query<RowDataPacket[]>(`
+      SELECT 1 FROM information_schema.REFERENTIAL_CONSTRAINTS
+      WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'canvas_announcement_links' AND CONSTRAINT_NAME = 'canvas_announcement_links_ibfk_1'
+    `);
+    if (fkCheck.length === 0) {
+      await pool.query(`ALTER TABLE canvas_announcement_links ADD FOREIGN KEY (announcement_id) REFERENCES canvas_announcement_bank(id) ON DELETE CASCADE`);
+    }
+  }
+
+  const [oldChecks] = await pool.query<RowDataPacket[]>(`
+    SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'canvas_announcement_links' AND CONSTRAINT_TYPE = 'CHECK'
+      AND CONSTRAINT_NAME != 'chk_one_destination'
+  `);
+  for (const row of oldChecks) {
+    await pool.query(`ALTER TABLE canvas_announcement_links DROP CONSTRAINT \`${row.CONSTRAINT_NAME}\``);
+  }
+
+  if (!(await constraintExists('canvas_announcement_links', 'chk_one_destination'))) {
+    await pool.query(`
+      ALTER TABLE canvas_announcement_links ADD CONSTRAINT chk_one_destination CHECK (
+        (activity_id IS NOT NULL) + (quiz_id IS NOT NULL) + (exam_id IS NOT NULL) +
+        (grade_entry_id IS NOT NULL) + (workboard_item_id IS NOT NULL) + (schedule_override_id IS NOT NULL) = 1
+      )
+    `);
+  }
+
+  _ranWorkboard = true;
 }
