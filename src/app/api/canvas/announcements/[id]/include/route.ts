@@ -103,17 +103,25 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
 
     const subjectMode = await getSubjectMode(item.user_subject_id);
     for (const d of destinations) {
-      if (d.type === 'task' && subjectMode === 'custom' && LEGACY_TARGETS.includes(d.target_type as typeof LEGACY_TARGETS[number])) {
-        return Response.json(
-          { error: 'This subject uses custom grading. Choose a period and category instead.' },
-          { status: 400 },
-        );
+      if (d.type !== 'task' && d.type !== 'event' && d.type !== 'reminder' && d.type !== 'schedule_change') {
+        return Response.json({ error: 'Invalid destination type' }, { status: 400 });
       }
-      if (d.type === 'task' && subjectMode === 'legacy' && !LEGACY_TARGETS.includes(d.target_type as typeof LEGACY_TARGETS[number]) && d.target_type !== 'grade_entries') {
-        return Response.json({ error: 'Invalid target_type' }, { status: 400 });
-      }
-      if (d.type === 'task' && d.target_type === 'grade_entries' && (!d.cat_id || !d.period_id)) {
-        return Response.json({ error: 'cat_id and period_id are required for grade_entries' }, { status: 400 });
+      if (d.type === 'task') {
+        if (
+          d.target_type !== 'activities' && d.target_type !== 'quizzes'
+          && d.target_type !== 'exams' && d.target_type !== 'grade_entries'
+        ) {
+          return Response.json({ error: 'Invalid target_type' }, { status: 400 });
+        }
+        if (subjectMode === 'custom' && LEGACY_TARGETS.includes(d.target_type as typeof LEGACY_TARGETS[number])) {
+          return Response.json(
+            { error: 'This subject uses custom grading. Choose a period and category instead.' },
+            { status: 400 },
+          );
+        }
+        if (d.target_type === 'grade_entries' && (!d.cat_id || !d.period_id)) {
+          return Response.json({ error: 'cat_id and period_id are required for grade_entries' }, { status: 400 });
+        }
       }
       if (d.type === 'schedule_change') {
         const [owns] = await pool.execute<RowDataPacket[]>(
