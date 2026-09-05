@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { CheckCircle2, EyeOff, Clock, Megaphone } from 'lucide-react';
-import type { SuggestedCategory } from '@/lib/canvas/classify';
+import type { SuggestedCategory, WorkboardDestination } from '@/lib/canvas/classify';
 
 export interface AnnouncementItem {
   id: number;
@@ -14,6 +14,7 @@ export interface AnnouncementItem {
   subject_mode?: 'legacy' | 'custom';
   bank_status: 'pending' | 'included' | 'ignored' | 'removed_upstream';
   suggested_category: SuggestedCategory;
+  suggested_destinations: WorkboardDestination[];
   html_url: string | null;
 }
 
@@ -64,17 +65,32 @@ const FILTER_LABELS: Record<Filter, string> = {
   all: 'All', needs_review: 'Needs Review', converted: 'Converted', dismissed: 'Dismissed',
 };
 
+interface EventDraft { title: string; location: string; starts_at: string; ends_at: string; user_subject_id: number | null }
+interface ReminderDraft { title: string; remind_at: string }
+interface ScheduleChangeDraft { block_id: number | null; override_date: string; modality: 'online' | 'cancelled'; note: string }
+interface ScheduleBlockOption { block_id: number; course_code: string; section: string | null; day_of_week: number }
+
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 export default function CanvasAnnouncementBank({ items, onChange }: { items: AnnouncementItem[]; onChange: () => void }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [includingId, setIncludingId] = useState<number | null>(null);
-  const [targetType, setTargetType] = useState<'activities' | 'quizzes' | 'exams'>('activities');
-  const [deadline, setDeadline] = useState('');
+  const [checked, setChecked] = useState<Set<WorkboardDestination>>(new Set());
   const [busy, setBusy] = useState<number | null>(null);
 
+  // Task sub-form (legacy/custom picker — same fields as before)
+  const [targetType, setTargetType] = useState<'activities' | 'quizzes' | 'exams'>('activities');
+  const [deadline, setDeadline] = useState('');
   const [periodsBySubject, setPeriodsBySubject] = useState<Record<number, GradingPeriod[]>>({});
   const [loadingSubjectId, setLoadingSubjectId] = useState<number | null>(null);
   const [periodId, setPeriodId] = useState<number | null>(null);
   const [catId, setCatId] = useState<number | null>(null);
+
+  // Event / Reminder / Schedule Change sub-forms
+  const [eventDraft, setEventDraft] = useState<EventDraft>({ title: '', location: '', starts_at: '', ends_at: '', user_subject_id: null });
+  const [reminderDraft, setReminderDraft] = useState<ReminderDraft>({ title: '', remind_at: '' });
+  const [scheduleDraft, setScheduleDraft] = useState<ScheduleChangeDraft>({ block_id: null, override_date: '', modality: 'online', note: '' });
+  const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlockOption[]>([]);
 
   const filtered = useMemo(() => items.filter(item => {
     if (filter === 'all') return true;
@@ -86,10 +102,14 @@ export default function CanvasAnnouncementBank({ items, onChange }: { items: Ann
   const openInclude = async (item: AnnouncementItem) => {
     if (includingId === item.id) { setIncludingId(null); return; }
     setIncludingId(item.id);
+    setChecked(new Set(item.suggested_destinations));
     setPeriodId(null);
     setCatId(null);
     setDeadline('');
     setTargetType(item.suggested_category.kind === 'legacy' ? item.suggested_category.target : 'activities');
+    setEventDraft({ title: item.title, location: '', starts_at: '', ends_at: '', user_subject_id: item.user_subject_id });
+    setReminderDraft({ title: item.title, remind_at: '' });
+    setScheduleDraft({ block_id: null, override_date: '', modality: 'online', note: '' });
 
     const subjectId = item.user_subject_id;
     if (item.subject_mode === 'custom' && subjectId && !periodsBySubject[subjectId]) {
@@ -105,6 +125,25 @@ export default function CanvasAnnouncementBank({ items, onChange }: { items: Ann
         setLoadingSubjectId(null);
       }
     }
+    if (scheduleBlocks.length === 0) {
+      try {
+        const res = await fetch('/api/studypulse/schedule');
+        const data = await res.json();
+        setScheduleBlocks((data.blocks ?? []).map((b: { block_id: number; course_code: string; section: string | null; day_of_week: number }) => (
+          { block_id: b.block_id, course_code: b.course_code, section: b.section, day_of_week: b.day_of_week }
+        )));
+      } catch (err) {
+        console.error('Failed to load schedule blocks:', err);
+      }
+    }
+  };
+
+  const toggleDestination = (d: WorkboardDestination) => {
+    setChecked(prev => {
+      const next = new Set(prev);
+      if (next.has(d)) next.delete(d); else next.add(d);
+      return next;
+    });
   };
 
   /** Picking a period auto-preselects a category matching the suggestion, if that period has one. */
@@ -119,20 +158,42 @@ export default function CanvasAnnouncementBank({ items, onChange }: { items: Ann
 
   const confirmInclude = async (item: AnnouncementItem) => {
     const customMode = item.subject_mode === 'custom';
-    if (!deadline) { alert('Choose a deadline first'); return; }
-    if (customMode && (periodId == null || catId == null)) {
-      alert('Choose a grading period and category first');
-      return;
+    const destinations: Record<string, unknown>[] = [];
+
+    if (checked.has('task')) {
+      if (!deadline) { alert('Choose a deadline for the Task destination'); return; }
+      if (customMode) {
+        if (periodId == null || catId == null) { alert('Choose a grading period and category for the Task destination'); return; }
+        destinations.push({ type: 'task', target_type: 'grade_entries', period_id: periodId, cat_id: catId, deadline });
+      } else {
+        destinations.push({ type: 'task', target_type: targetType, deadline });
+      }
     }
+    if (checked.has('event')) {
+      if (!eventDraft.title || !eventDraft.starts_at || !eventDraft.ends_at) { alert('Fill in the Event title, start, and end time'); return; }
+      destinations.push({
+        type: 'event', title: eventDraft.title, location: eventDraft.location || null,
+        starts_at: eventDraft.starts_at, ends_at: eventDraft.ends_at, user_subject_id: eventDraft.user_subject_id,
+      });
+    }
+    if (checked.has('reminder')) {
+      if (!reminderDraft.title) { alert('Fill in the Reminder title'); return; }
+      destinations.push({ type: 'reminder', title: reminderDraft.title, remind_at: reminderDraft.remind_at || null });
+    }
+    if (checked.has('schedule_change')) {
+      if (!scheduleDraft.block_id || !scheduleDraft.override_date) { alert('Choose a class meeting and date for the Schedule Change destination'); return; }
+      destinations.push({
+        type: 'schedule_change', block_id: scheduleDraft.block_id, override_date: scheduleDraft.override_date,
+        modality: scheduleDraft.modality, note: scheduleDraft.note || null,
+      });
+    }
+    if (destinations.length === 0) { alert('Check at least one destination'); return; }
+
     setBusy(item.id);
     try {
       const res = await fetch(`/api/canvas/announcements/${item.id}/include`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          customMode
-            ? { target_type: 'grade_entries', period_id: periodId, cat_id: catId, deadline }
-            : { target_type: targetType, deadline },
-        ),
+        body: JSON.stringify({ destinations }),
       });
       const data = await res.json();
       if (!res.ok) { alert(data.error ?? 'Failed'); return; }
@@ -275,55 +336,91 @@ export default function CanvasAnnouncementBank({ items, onChange }: { items: Ann
                 </button>
               </div>
             )}
-            {includingId === item.id && !customMode && (
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className="cab2-select" style={selectStyle} />
-                <select value={targetType} onChange={e => setTargetType(e.target.value as typeof targetType)} className="cab2-select" style={selectStyle}>
-                  <option value="activities">Activity</option>
-                  <option value="quizzes">Quiz</option>
-                  <option value="exams">Exam</option>
-                </select>
-                <button disabled={busy === item.id || !deadline} onClick={() => confirmInclude(item)} className="cab2-include"
+            {includingId === item.id && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-end' }}>
+                <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', alignSelf: 'stretch', justifyContent: 'flex-end' }}>
+                  {(['task', 'event', 'reminder', 'schedule_change'] as WorkboardDestination[]).map(d => (
+                    <label key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.82rem', fontWeight: 700, color: '#5c6b80', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={checked.has(d)} onChange={() => toggleDestination(d)} />
+                      {d === 'schedule_change' ? 'Schedule Change' : d.charAt(0).toUpperCase() + d.slice(1)}
+                    </label>
+                  ))}
+                </div>
+
+                {checked.has('task') && !customMode && (
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#8a94a6' }}>Task:</span>
+                    <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className="cab2-select" style={selectStyle} />
+                    <select value={targetType} onChange={e => setTargetType(e.target.value as typeof targetType)} className="cab2-select" style={selectStyle}>
+                      <option value="activities">Activity</option>
+                      <option value="quizzes">Quiz</option>
+                      <option value="exams">Exam</option>
+                    </select>
+                  </div>
+                )}
+                {checked.has('task') && customMode && (
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#8a94a6' }}>Task:</span>
+                    {loadingSubjectId === item.user_subject_id && <span style={{ fontSize: '0.8rem', color: '#8a94a6' }}>Loading grading periods…</span>}
+                    {loadingSubjectId !== item.user_subject_id && (
+                      <>
+                        <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className="cab2-select" style={selectStyle} />
+                        <select value={periodId ?? ''} onChange={e => handlePeriodChange(item, Number(e.target.value))} className="cab2-select" style={selectStyle}>
+                          <option value="" disabled>Period…</option>
+                          {(periodsBySubject[item.user_subject_id!] ?? []).map(p => <option key={p.period_id} value={p.period_id}>{p.name}</option>)}
+                        </select>
+                        <select value={catId ?? ''} onChange={e => setCatId(Number(e.target.value))} disabled={periodId == null} className="cab2-select" style={selectStyle}>
+                          <option value="" disabled>Category…</option>
+                          {(periodsBySubject[item.user_subject_id!]?.find(p => p.period_id === periodId)?.categories ?? []).map(c => <option key={c.cat_id} value={c.cat_id}>{c.name}</option>)}
+                        </select>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {checked.has('event') && (
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#8a94a6' }}>Event:</span>
+                    <input placeholder="Title" value={eventDraft.title} onChange={e => setEventDraft(prev => ({ ...prev, title: e.target.value }))} className="cab2-select" style={selectStyle} />
+                    <input placeholder="Location" value={eventDraft.location} onChange={e => setEventDraft(prev => ({ ...prev, location: e.target.value }))} className="cab2-select" style={selectStyle} />
+                    <input type="datetime-local" value={eventDraft.starts_at} onChange={e => setEventDraft(prev => ({ ...prev, starts_at: e.target.value.replace('T', ' ') }))} className="cab2-select" style={selectStyle} />
+                    <input type="datetime-local" value={eventDraft.ends_at} onChange={e => setEventDraft(prev => ({ ...prev, ends_at: e.target.value.replace('T', ' ') }))} className="cab2-select" style={selectStyle} />
+                  </div>
+                )}
+
+                {checked.has('reminder') && (
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#8a94a6' }}>Reminder:</span>
+                    <input placeholder="Title" value={reminderDraft.title} onChange={e => setReminderDraft(prev => ({ ...prev, title: e.target.value }))} className="cab2-select" style={selectStyle} />
+                    <input type="datetime-local" value={reminderDraft.remind_at} onChange={e => setReminderDraft(prev => ({ ...prev, remind_at: e.target.value.replace('T', ' ') }))} className="cab2-select" style={selectStyle} />
+                  </div>
+                )}
+
+                {checked.has('schedule_change') && (
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#8a94a6' }}>Schedule Change:</span>
+                    <select value={scheduleDraft.block_id ?? ''} onChange={e => setScheduleDraft(prev => ({ ...prev, block_id: Number(e.target.value) }))} className="cab2-select" style={selectStyle}>
+                      <option value="" disabled>Class meeting…</option>
+                      {scheduleBlocks.map(b => (
+                        <option key={b.block_id} value={b.block_id}>{b.course_code}{b.section ? ` (${b.section})` : ''} — {DAY_NAMES[b.day_of_week]}</option>
+                      ))}
+                    </select>
+                    <input type="date" value={scheduleDraft.override_date} onChange={e => setScheduleDraft(prev => ({ ...prev, override_date: e.target.value }))} className="cab2-select" style={selectStyle} />
+                    <select value={scheduleDraft.modality} onChange={e => setScheduleDraft(prev => ({ ...prev, modality: e.target.value as 'online' | 'cancelled' }))} className="cab2-select" style={selectStyle}>
+                      <option value="online">Async / Online</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                )}
+
+                <button disabled={busy === item.id || checked.size === 0} onClick={() => confirmInclude(item)} className="cab2-include"
                   style={{
                     ...pillBtn, color: 'white',
-                    background: !deadline ? 'rgba(242,167,192,0.5)' : 'linear-gradient(to right, #f2a7c0, #74bcd9)',
-                    cursor: !deadline ? 'not-allowed' : 'pointer',
+                    background: checked.size === 0 ? 'rgba(242,167,192,0.5)' : 'linear-gradient(to right, #f2a7c0, #74bcd9)',
+                    cursor: checked.size === 0 ? 'not-allowed' : 'pointer',
                   }}>
-                  Confirm Include
+                  Add Selected
                 </button>
-              </div>
-            )}
-            {includingId === item.id && customMode && (
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                {loading && <span style={{ fontSize: '0.8rem', color: '#8a94a6' }}>Loading grading periods…</span>}
-                {!loading && periods && periods.length === 0 && (
-                  <span style={{ fontSize: '0.8rem', color: '#a0507a', fontWeight: 600 }}>
-                    This subject has no grading periods configured yet.
-                  </span>
-                )}
-                {!loading && periods && periods.length > 0 && (
-                  <>
-                    <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className="cab2-select" style={selectStyle} />
-                    <select value={periodId ?? ''} onChange={e => handlePeriodChange(item, Number(e.target.value))} className="cab2-select" style={selectStyle}>
-                      <option value="" disabled>Period…</option>
-                      {periods.map(p => <option key={p.period_id} value={p.period_id}>{p.name}</option>)}
-                    </select>
-                    <select value={catId ?? ''} onChange={e => setCatId(Number(e.target.value))} disabled={!selectedPeriod} className="cab2-select" style={selectStyle}>
-                      <option value="" disabled>Category…</option>
-                      {selectedPeriod?.categories.map(c => <option key={c.cat_id} value={c.cat_id}>{c.name}</option>)}
-                    </select>
-                    <button
-                      disabled={busy === item.id || periodId == null || catId == null || !deadline}
-                      onClick={() => confirmInclude(item)} className="cab2-include"
-                      style={{
-                        ...pillBtn, color: 'white',
-                        background: (periodId == null || catId == null || !deadline) ? 'rgba(242,167,192,0.5)' : 'linear-gradient(to right, #f2a7c0, #74bcd9)',
-                        cursor: (periodId == null || catId == null || !deadline) ? 'not-allowed' : 'pointer',
-                      }}>
-                      Confirm Include
-                    </button>
-                  </>
-                )}
               </div>
             )}
           </div>
