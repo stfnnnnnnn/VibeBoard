@@ -5,6 +5,8 @@ import type { RowDataPacket } from 'mysql2';
 import {
   insertActivityEntry, insertQuizEntry, insertExamEntry, insertGradeEntry,
 } from '@/lib/studypulseEntries';
+import { insertWorkboardItem, insertScheduleOverride } from '@/lib/workboard/items';
+import { ensureWorkboardSchema } from '@/lib/migrate';
 
 interface AnnouncementRow extends RowDataPacket {
   id: number;
@@ -14,6 +16,35 @@ interface AnnouncementRow extends RowDataPacket {
 }
 
 const LEGACY_TARGETS = ['activities', 'quizzes', 'exams'] as const;
+
+interface TaskDestination {
+  type: 'task';
+  target_type: 'activities' | 'quizzes' | 'exams' | 'grade_entries';
+  cat_id?: number;
+  period_id?: number;
+  deadline: string;
+}
+interface EventDestination {
+  type: 'event';
+  title: string;
+  location?: string | null;
+  starts_at: string;
+  ends_at: string;
+  user_subject_id?: number | null;
+}
+interface ReminderDestination {
+  type: 'reminder';
+  title: string;
+  remind_at?: string | null;
+}
+interface ScheduleChangeDestination {
+  type: 'schedule_change';
+  block_id: number;
+  override_date: string;
+  modality?: 'online' | 'cancelled' | null;
+  note?: string | null;
+}
+type DestinationInput = TaskDestination | EventDestination | ReminderDestination | ScheduleChangeDestination;
 
 /** Same check as the Activity Bank's Include route — a subject is "custom" mode when it has
  *  a subject_grading row pointing at a real grading preset. */
@@ -35,16 +66,16 @@ async function getSubjectMode(userSubjectId: number): Promise<'legacy' | 'custom
 export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  await ensureWorkboardSchema();
 
   try {
     const { id } = await props.params;
     const announcementId = parseInt(id);
     const userId = parseInt(session.user.id);
-    const { target_type, cat_id, period_id, deadline } = await req.json();
+    const { destinations } = await req.json() as { destinations?: DestinationInput[] };
 
-    // Announcements carry no due date from Canvas (unlike assignments) — the student supplies one.
-    if (typeof deadline !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(deadline)) {
-      return Response.json({ error: 'A deadline (YYYY-MM-DD) is required' }, { status: 400 });
+    if (!Array.isArray(destinations) || destinations.length === 0) {
+      return Response.json({ error: 'At least one destination is required' }, { status: 400 });
     }
 
     const [rows] = await pool.execute<AnnouncementRow[]>(
@@ -60,9 +91,6 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     if (!item.user_subject_id) {
       return Response.json({ error: 'This item\'s course is not linked to a subject yet' }, { status: 400 });
     }
-
-    // Same re-Include guard as the Activity Bank: 'ignored' can still be Included later
-    // (that's the whole point of "Keep as Announcement" not being final).
     if (item.bank_status === 'included') {
       return Response.json({ error: 'This announcement has already been included' }, { status: 400 });
     }
@@ -74,72 +102,93 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     }
 
     const subjectMode = await getSubjectMode(item.user_subject_id);
-    if (subjectMode === 'custom' && LEGACY_TARGETS.includes(target_type)) {
-      return Response.json(
-        { error: 'This subject uses custom grading. Choose a period and category instead.' },
-        { status: 400 },
-      );
-    }
-
-    // No score/points — announcements aren't graded, unlike assignments.
-    const commonFields = {
-      entryId: null, userSubjectId: item.user_subject_id, name: item.title,
-      specificType: '', urgency: 'Medium', status: 'Pending', deadline,
-      score: null, items: null, grade: null, accomplishedAt: null,
-    };
-
-    if (target_type === 'grade_entries') {
-      if (!cat_id || !period_id) {
+    for (const d of destinations) {
+      if (d.type === 'task' && subjectMode === 'custom' && LEGACY_TARGETS.includes(d.target_type as typeof LEGACY_TARGETS[number])) {
+        return Response.json(
+          { error: 'This subject uses custom grading. Choose a period and category instead.' },
+          { status: 400 },
+        );
+      }
+      if (d.type === 'task' && subjectMode === 'legacy' && !LEGACY_TARGETS.includes(d.target_type as typeof LEGACY_TARGETS[number]) && d.target_type !== 'grade_entries') {
+        return Response.json({ error: 'Invalid target_type' }, { status: 400 });
+      }
+      if (d.type === 'task' && d.target_type === 'grade_entries' && (!d.cat_id || !d.period_id)) {
         return Response.json({ error: 'cat_id and period_id are required for grade_entries' }, { status: 400 });
       }
-      const [owns] = await pool.execute<RowDataPacket[]>(
-        `SELECT 1 FROM grading_categories gc
-         JOIN grading_periods gp ON gp.period_id = gc.period_id
-         JOIN subject_grading sg ON sg.preset_id = gp.preset_id
-         WHERE gc.cat_id = ? AND gc.period_id = ? AND sg.user_subject_id = ?`,
-        [cat_id, period_id, item.user_subject_id],
-      );
-      if (!owns.length) {
-        return Response.json({ error: 'That category/period does not belong to this subject' }, { status: 400 });
+      if (d.type === 'schedule_change') {
+        const [owns] = await pool.execute<RowDataPacket[]>(
+          'SELECT block_id FROM schedule_blocks WHERE block_id = ? AND user_id = ?', [d.block_id, userId],
+        );
+        if (!owns.length) return Response.json({ error: 'That class block was not found' }, { status: 400 });
       }
-    } else if (!LEGACY_TARGETS.includes(target_type)) {
-      return Response.json({ error: 'Invalid target_type' }, { status: 400 });
     }
 
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
+      const createdEntryIds: number[] = [];
 
-      let linkColumn: 'activity_id' | 'quiz_id' | 'exam_id' | 'grade_entry_id';
-      let newEntryId: number;
+      for (const d of destinations) {
+        let linkColumn: 'activity_id' | 'quiz_id' | 'exam_id' | 'grade_entry_id' | 'workboard_item_id' | 'schedule_override_id';
+        let linkedId: number;
 
-      if (target_type === 'activities') {
-        newEntryId = (await insertActivityEntry(commonFields, conn)).entryId;
-        linkColumn = 'activity_id';
-      } else if (target_type === 'quizzes') {
-        newEntryId = (await insertQuizEntry(commonFields, conn)).entryId;
-        linkColumn = 'quiz_id';
-      } else if (target_type === 'exams') {
-        newEntryId = (await insertExamEntry(commonFields, conn)).entryId;
-        linkColumn = 'exam_id';
-      } else {
-        newEntryId = (await insertGradeEntry(
-          { ...commonFields, catId: cat_id, periodId: period_id, isLab: false }, conn,
-        )).entryId;
-        linkColumn = 'grade_entry_id';
+        if (d.type === 'task') {
+          const commonFields = {
+            entryId: null, userSubjectId: item.user_subject_id, name: item.title,
+            specificType: '', urgency: 'Medium', status: 'Pending', deadline: d.deadline,
+            score: null, items: null, grade: null, accomplishedAt: null,
+          };
+          if (d.target_type === 'activities') { linkedId = (await insertActivityEntry(commonFields, conn)).entryId; linkColumn = 'activity_id'; }
+          else if (d.target_type === 'quizzes') { linkedId = (await insertQuizEntry(commonFields, conn)).entryId; linkColumn = 'quiz_id'; }
+          else if (d.target_type === 'exams') { linkedId = (await insertExamEntry(commonFields, conn)).entryId; linkColumn = 'exam_id'; }
+          else {
+            const [owns] = await conn.execute<RowDataPacket[]>(
+              `SELECT 1 FROM grading_categories gc
+               JOIN grading_periods gp ON gp.period_id = gc.period_id
+               JOIN subject_grading sg ON sg.preset_id = gp.preset_id
+               WHERE gc.cat_id = ? AND gc.period_id = ? AND sg.user_subject_id = ?`,
+              [d.cat_id!, d.period_id!, item.user_subject_id],
+            );
+            if (!owns.length) throw new Error('That category/period does not belong to this subject');
+            linkedId = (await insertGradeEntry({ ...commonFields, catId: d.cat_id!, periodId: d.period_id!, isLab: false }, conn)).entryId;
+            linkColumn = 'grade_entry_id';
+          }
+        } else if (d.type === 'event') {
+          linkedId = (await insertWorkboardItem({
+            userId, userSubjectId: d.user_subject_id ?? item.user_subject_id, itemType: 'event',
+            title: d.title, location: d.location ?? null, startsAt: d.starts_at, endsAt: d.ends_at,
+            remindAt: null, note: null, sourceType: 'canvas_announcement', sourceAnnouncementId: announcementId,
+          }, conn)).itemId;
+          linkColumn = 'workboard_item_id';
+        } else if (d.type === 'reminder') {
+          linkedId = (await insertWorkboardItem({
+            userId, userSubjectId: item.user_subject_id, itemType: 'reminder',
+            title: d.title, location: null, startsAt: null, endsAt: null,
+            remindAt: d.remind_at ?? null, note: null, sourceType: 'canvas_announcement', sourceAnnouncementId: announcementId,
+          }, conn)).itemId;
+          linkColumn = 'workboard_item_id';
+        } else {
+          linkedId = (await insertScheduleOverride({
+            blockId: d.block_id, overrideDate: d.override_date, modality: d.modality ?? null,
+            note: d.note ?? null, sourceType: 'canvas_announcement', sourceAnnouncementId: announcementId,
+          }, conn)).overrideId;
+          linkColumn = 'schedule_override_id';
+        }
+
+        await conn.execute(
+          `INSERT INTO canvas_announcement_links (announcement_id, ${linkColumn}) VALUES (?, ?)`,
+          [announcementId, linkedId],
+        );
+        createdEntryIds.push(linkedId);
       }
 
-      await conn.execute(
-        `INSERT INTO canvas_announcement_links (announcement_id, ${linkColumn}) VALUES (?, ?)`,
-        [announcementId, newEntryId],
-      );
       await conn.execute(
         `UPDATE canvas_announcement_bank SET bank_status = 'included' WHERE id = ?`,
         [announcementId],
       );
 
       await conn.commit();
-      return Response.json({ status: 'success', entry_id: newEntryId });
+      return Response.json({ status: 'success', created: createdEntryIds });
     } catch (err) {
       await conn.rollback();
       throw err;
