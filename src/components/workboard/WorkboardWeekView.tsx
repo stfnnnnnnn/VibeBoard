@@ -66,7 +66,7 @@ export default function WorkboardWeekView({ initialWeek }: { initialWeek: Workbo
     }
   };
 
-  const eventsByDay = (date: string) => week.events.filter(e => e.starts_at?.slice(0, 10) === date);
+  const eventsByDay = (date: string) => week.events.filter(e => e.starts_at && e.ends_at && e.starts_at.slice(0, 10) === date);
   const classesByDay = (date: string) => week.class_occurrences.filter(c => c.date === date);
   const deadlinesByDay = (date: string) => week.deadlines.filter(d => d.deadline === date);
 
