@@ -50,3 +50,28 @@ export function suggestCustomCategory(text: string, categoryNames: string[]): st
   }
   return null;
 }
+
+export type WorkboardDestination = 'task' | 'event' | 'reminder' | 'schedule_change';
+
+const SCHEDULE_CHANGE_KEYWORDS = [
+  'asynchronous', 'async session', 'no class', 'class is cancelled', 'class is suspended',
+  'classes are suspended', 'moved online', 'postponed', 'reschedule', 'rescheduled',
+];
+const EVENT_KEYWORDS = [
+  'consultation', 'meeting', 'orientation', 'seminar', 'session will be held',
+];
+
+/**
+ * Deterministic, keyword-based — no AI, matching suggestLegacyCategory/suggestCustomCategory
+ * above. `taskSuggested` is computed by the caller from those two functions (a non-'general'
+ * result) rather than recomputed here, so this function stays independent of grading-mode logic.
+ * 'reminder' has no reliable keyword signal and is never auto-suggested — always opt-in.
+ */
+export function suggestDestinations(text: string, taskSuggested: boolean): Set<WorkboardDestination> {
+  const lower = text.toLowerCase();
+  const destinations = new Set<WorkboardDestination>();
+  if (taskSuggested) destinations.add('task');
+  if (includesAny(lower, SCHEDULE_CHANGE_KEYWORDS)) destinations.add('schedule_change');
+  if (includesAny(lower, EVENT_KEYWORDS)) destinations.add('event');
+  return destinations;
+}

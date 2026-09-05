@@ -3,7 +3,8 @@ import { auth } from '@/auth';
 import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
 import {
-  suggestLegacyCategory, suggestCustomCategory, classificationText, type SuggestedCategory,
+  suggestLegacyCategory, suggestCustomCategory, classificationText, suggestDestinations,
+  type SuggestedCategory, type WorkboardDestination,
 } from '@/lib/canvas/classify';
 
 export async function GET(req: NextRequest) {
@@ -76,7 +77,8 @@ export async function GET(req: NextRequest) {
       const target = suggestLegacyCategory(text);
       suggested = target === 'general' ? { kind: 'general' } : { kind: 'legacy', target };
     }
-    return { ...row, suggested_category: suggested };
+    const destinations: WorkboardDestination[] = [...suggestDestinations(text, suggested.kind !== 'general')];
+    return { ...row, suggested_category: suggested, suggested_destinations: destinations };
   });
 
   return Response.json({ items });
