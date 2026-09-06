@@ -80,10 +80,11 @@ The dot's color is `courseColor(chip_label)` — reuse `WorkboardWeekView.tsx`'s
 - `12px` gap, then due label (if not already folded into the meta line — implementer's choice depending on final row width) and the high-only pill if applicable (§4).
 - `8px` gap, then overflow menu trigger (three-dot icon button, 32×32px, see §9 for hit target).
 
-**Density:**
-- Vertical padding: `12px` top, `12px` bottom.
+**Density** (this is the single-line layout, used at `≥1024px`; below that width the row switches to a two-line layout with different numbers — see §10):
+- Row is `display: flex; align-items: center;` — the row's height is driven by its tallest child (the 40×40px checkbox hit target) via flex centering, not by padding wrapping a shorter text stack. This is what makes the numbers below reconcile instead of contradict.
+- Vertical padding: `8px` top, `8px` bottom.
 - Horizontal padding: `4px` (the row has no side border/card to pad against — this is just breathing room before the priority edge and after the overflow trigger).
-- Minimum row height: `52px` (accommodates two-line title+meta stacking plus the 40px checkbox hit target without clipping).
+- Minimum row height: `56px`, verified: `8px` (top padding) + `40px` (checkbox hit target, the tallest element, vertically centered) + `8px` (bottom padding) = `56px`. No negative margins are needed because the checkbox's hit-target box is a normal flex sibling occupying the row's own vertical space, not an oversized child nested inside a shorter padded wrapper.
 - Divider: `border-bottom: 1px solid rgba(200,210,230,0.35)` on every row except the last in a section — this exact color is `WorkboardWeekView`'s existing day-column border color, reused rather than invented.
 
 **Hover state** (no card to lift, so `translateY` — the pattern `CanvasAnnouncementBank` uses — would look wrong on a borderless row): apply a full-width background wash, `background: rgba(116,188,217,0.06)`, `transition: background 120ms ease`, on `:hover` and `:focus-within`. No shadow, no scale, no lift. This keeps continuity with the "flattened" concept — the row still has no permanent boundary, but gets one transiently on interaction, which is what tells the user it's a target.
@@ -223,20 +224,44 @@ border-radius: inherit; /* or match the element's own radius */
 
 Adjacent interactive elements (checkbox, then title which may itself be clickable to open detail, then chips, then overflow) keep **≥8px** of true gap between their hit-target boxes, not just their visual glyphs, satisfying `touch-spacing`.
 
+### View switcher — active and inactive states
+
+Four buttons (List / Board / Timeline / Calendar), `display: inline-flex; gap: 8px`. Shared shape: `border-radius: 999px`, `padding: 8px 14px`, `min-height: 40px` (stated as an explicit `min-height`, not derived from padding arithmetic, specifically to avoid the kind of height/padding mismatch corrected in §3), icon `16px` lucide, `gap: 6px` between icon and label, label per §1's font (Inter, `0.82rem`, weight 700 in both states — weight does **not** change between states, so switching the active view never shifts any button's width).
+
+| State | Background | Border | Text + icon color | Notes |
+|---|---|---|---|---|
+| Inactive | `rgba(255,255,255,0.5)` | `1px solid rgba(200,210,230,0.5)` | `#5c6b80` | Matches the existing `FILTER_PILL` convention already shipped in `CanvasAnnouncementBank.tsx`, reused rather than reinvented |
+| Active | Solid `#256f92` | `none` | `#ffffff` | See rationale below |
+| Focus-visible (either state) | unchanged from its base background | adds the standard outline from the top of §9 (`2px solid #2a7fa8`, `outline-offset: 2px`) | unchanged | |
+
+Transition: `background 150ms ease, color 150ms ease` (matches the `150ms` timing already used for `.fin-tab`/`.cvs-pill` hover states elsewhere in this app).
+
+**Why the active state is a solid `#256f92`, not the pink→blue gradient fill used elsewhere for "active/primary" (e.g. `.fin-tab.active`, `.vb-btn-pink`):** the gradient's own stops (`#f2a7c0`, `#74bcd9`) put white label text at 1.9–2.1:1 contrast against it — verified by the same relative-luminance computation as §8 — which fails WCAG AA (4.5:1) for text this small (`0.82rem` bold does not qualify for the 3:1 "large text" exception, which requires ≥18.66px bold). Darkening to the palette's own 600-shades (`#d4698a` pink-600, `#2196f3` blue-600) still only reaches 3.1–3.4:1 at the gradient's endpoints, and a gradient's midpoint contrast cannot be verified as a single number the way a solid fill can. `#256f92` (a dark blue in the same family as the `#2a7fa8` focus-ring blue, one step darker) gives white text `5.57:1`, comfortably clearing AA, while staying inside the app's existing blue identity rather than introducing an unrelated hue. This is a deliberate, scoped exception to the gradient-fill-means-active convention used for larger primary buttons elsewhere — it applies specifically where a small text label sits directly on the fill.
+
 ---
 
 ## 10. Responsive
 
 Breakpoints: `1024px` and `768px` — matching the standard anchors this app's tooling already treats as canonical (375/768/1024/1440), scoped down to the two that actually change this layout.
 
-| Breakpoint | Stat cards | Right rail | View switcher | Board | Timeline |
-|---|---|---|---|---|---|
-| `≥1024px` (desktop) | 4-in-a-row | Visible beside content on List/Calendar (fixed `~280px` column); collapsed (hidden) on Board/Timeline | Icon + label, full width | 3 columns side by side | Horizontally scrollable, all lanes visible |
-| `768–1023px` (tablet) | 2×2 grid | Moves below main content on List/Calendar (still visible, not collapsed — only Board/Timeline collapse it); still collapsed on Board/Timeline | Icon-only pills | 3 columns, horizontally scrollable if they don't fit | Horizontally scrollable (unchanged) |
-| `<768px` (mobile) | 2×2 grid (unchanged from tablet) | Below content on List/Calendar | Icon-only pills | Snap-scroll: one column's width per swipe (`scroll-snap-type: x mandatory`, each column `scroll-snap-align: start`) | Horizontally scrollable (unchanged) — Timeline is not hidden or simplified away on mobile, per the spec's explicit requirement that Board and Timeline "remain reachable on mobile rather than disappearing" |
-| `<768px`, initial view | List is the default view on load (not whatever was last selected on desktop) | — | — | — | — |
+| Breakpoint | Stat cards | Right rail | View switcher | Board | Timeline | List row |
+|---|---|---|---|---|---|---|
+| `≥1024px` (desktop) | 4-in-a-row | Visible beside content on List/Calendar (fixed `~280px` column); collapsed (hidden) on Board/Timeline | Icon + label, full width | 3 columns side by side | Horizontally scrollable, all lanes visible | Single-line layout, exactly as specified in §3 (`56px` min-height) |
+| `768–1023px` (tablet) | 2×2 grid | Moves below main content on List/Calendar (still visible, not collapsed — only Board/Timeline collapse it); still collapsed on Board/Timeline | Icon-only pills | 3 columns, horizontally scrollable if they don't fit | Horizontally scrollable (unchanged) | Two-line layout (below) |
+| `<768px` (mobile) | 2×2 grid (unchanged from tablet) | Below content on List/Calendar | Icon-only pills | Snap-scroll: one column's width per swipe (`scroll-snap-type: x mandatory`, each column `scroll-snap-align: start`) | Horizontally scrollable (unchanged) — Timeline is not hidden or simplified away on mobile, per the spec's explicit requirement that Board and Timeline "remain reachable on mobile rather than disappearing" | Two-line layout (below), unchanged from tablet |
+| `<768px`, initial view | List is the default view on load (not whatever was last selected on desktop) | — | — | — | — | — |
 
 No breakpoint hides Board or Timeline from the view switcher — both remain one tap away at every width.
+
+### List row — the two-line layout below `1024px`
+
+Below `1024px`, a row's seven elements (priority edge, checkbox, title/meta, category chip, project/course chip, due label + high pill, overflow menu) no longer fit on one line at any reasonable width, and the three generic escape hatches are each wrong for a different piece: horizontal scroll inside an already-vertically-scrolling list is explicitly against `horizontal-scroll` guidance; hiding the project/course chip or due label loses real information the row exists to show; so the row restructures into two lines instead.
+
+- **Priority edge** (`3px`, full row height) is unchanged — it spans both lines.
+- **Line 1**: checkbox → title → high-priority pill (if `priority === 'high'`) → `margin-left: auto` → overflow trigger. The **title truncates to one line** (`white-space: nowrap; overflow: hidden; text-overflow: ellipsis`, native `title=` attribute holding the full string) — title is the one element in this layout that must never wrap or push line 1 taller, since line 1's height is what the checkbox's 40px hit target depends on.
+- **Line 2**: `margin-left: 52px` (the checkbox's 40px hit-target width + the 12px gap that separates checkbox from title in §3's horizontal rhythm, so line 2's content aligns under the title rather than under the checkbox). Contains category chip, project/course chip, and due label, in that order, `gap: 6px`, `flex-wrap: wrap` — unlike the title, wrapping here is fine and expected; it simply grows the row rather than breaking anything, since the row's height is a `min-height`, not a fixed height.
+- **Row min-height in this mode: `82px`** — verified: `8px` (top padding) + `40px` (line 1, dominated by the checkbox) + `6px` (gap between line 1 and line 2) + `20px` (line 2, dominated by the chip/pill row height) + `8px` (bottom padding) = `82px`. This is a floor, not a cap: if line 2 itself wraps to two rows of chips, the row grows further automatically.
+- Divider and hover treatment (§3) are unchanged in this mode.
 
 ---
 
@@ -249,6 +274,45 @@ No breakpoint hides Board or Timeline from the view switcher — both remain one
 - `courseColor()`'s exact hash function and 5-color palette (§2b) is reused verbatim for project/course dot coloring, not reimplemented, so a course's color is identical whether you're looking at its Calendar block or its List chip.
 
 ---
+
+## 12. Right rail — panel spec
+
+The rail (workload chart + upcoming deadlines) is two independently-scrolling glass panels stacked vertically, shown beside List/Calendar per §10's breakpoint table.
+
+- **Rail column width:** `240px` fixed (`flex: 0 0 240px`) — this is not a new value; it is `WorkboardWeekView.tsx`'s existing reminders-panel width (`flex: '0 0 240px'`), reused so the rail reads as the same object whether the user is on Calendar or List.
+- **Each panel's container** uses the exact `GLASS` constant from §11 (`background: rgba(255,255,255,0.4)`, `backdropFilter: blur(14px)`, `borderRadius: 22px`, `border: 1px solid rgba(255,255,255,0.4)`, `boxShadow: 0 8px 24px rgba(31,38,68,0.09)`), `padding: 14px` — again `WorkboardWeekView`'s existing reminders-panel padding, reused rather than invented.
+- **Gap between the two stacked panels:** `16px` (`display: flex; flex-direction: column; gap: 16px`).
+- **Panel header:** per §1's section-header style (DM Sans, `0.95rem`, weight 800, `#2d3748`), preceded by a `16px` lucide icon in `#74bcd9` — the exact color `WorkboardWeekView.tsx` uses for its own "Reminders" header icon — `margin-bottom: 10px` between header and panel content (matches the reminders panel's existing `margin: '0 0 10px'`).
+
+**Workload chart panel:**
+- 7 day-columns, `gap: 4px` between columns, each column a vertically-stacked bar segmented by the four categories using their §2a **raw** hues (`#4dabf5`/`#8b7fd6`/`#f0a35c`/`#f2a7c0`) at full opacity — this is non-text decoration, so the raw hues are correct here per §8's non-text-vs-text distinction, unlike chip labels.
+- Each day-column bar: `border-radius: 3px 3px 0 0`, day label beneath in the micro-label style (§1: DM Sans `0.68rem`, weight 800, uppercase, `#8a94a6` — acceptable here as it's a repeated axis label, not a unique piece of information).
+- **Empty state** (zero items with a due date in the 7-day window): replace the chart with a single centered line, `"No workload this week"`, Inter `0.78rem`, weight 600, color `#5c6b80`, `padding: 24px 0`.
+
+**Upcoming Deadlines panel:**
+- Compact rows, not the List view's row treatment: each entry `padding: 6px 0`, `border-bottom: 1px solid rgba(200,210,230,0.3)` (a slightly lower alpha than §3's main-list divider, `0.35` → `0.3`, since this is a secondary/summary panel, not the primary work list), no divider after the last entry.
+- Entry content: a `4px` category-color dot (§2a raw hue) + title (Inter `0.8rem`, weight 600, `#2d3748`, single-line ellipsis truncation) + due label right-aligned (Inter `0.7rem`, weight 600, `#5c6b80`).
+- Panel caps at showing `6` entries before scrolling; beyond that, `overflow-y: auto; max-height: 240px`.
+- **Empty state** (zero upcoming deadlines): centered line, `"No upcoming deadlines"`, Inter `0.78rem`, weight 600, color `#5c6b80`, `padding: 20px 0` — `#5c6b80` rather than the lighter muted shade because, unlike Board's empty-column filler (§5b), this sentence is the only content the panel has to offer and is genuinely informative ("you have none"), not decorative filler inside an obviously-empty container — so it falls outside the narrow exception §8 carves out for the lighter shade.
+
+## 13. Category tabs — states, spacing, hit target
+
+Five tabs: **My Work** (all categories combined) / **Academic** / **Projects** / **Organization** / **Life**. Sits directly below the page header, above the stat cards.
+
+**Why this is a different visual pattern from the view switcher (§9), not the same pill treatment reused:** the view switcher and the category tabs are both "pick one of a few options" controls sitting close together in the shell, and giving them the same pill-fill look would make it genuinely ambiguous at a glance which control changes the *view* and which changes the *filter*. Category tabs instead use an underline-indicator pattern — a shape difference (same principle §2 uses to separate category chips from project/course chips: distinguish by shape first, so color and position aren't doing all the work).
+
+- **Container:** `display: flex; gap: 4px`, `border-bottom: 1px solid rgba(200,210,230,0.35)` (the same divider color used throughout — §3, §12 — so this baseline reads as part of the same system, not a new rule color).
+- **Each tab:** `padding: 10px 16px`, `min-height: 40px` (explicit, not padding-derived — same fix pattern as §9's view switcher), `background: transparent`, `border: none` except a `2px` bottom indicator (below), Inter, `0.82rem`, weight **700 in both states** (weight never changes, so the active tab never shifts width and reflows its neighbors).
+- **Inactive tab:** text color `#5c6b80`, indicator `2px solid transparent` (reserving the space so switching tabs never causes a layout jump).
+- **Active tab:** text color `#2d3748`, indicator `2px` tall, `margin-bottom: -1px` (sits exactly over the container's `1px` baseline rather than doubling it).
+
+**Indicator color — and whether §2a's four category colors are used here: deliberately not**, for the four single-category tabs. Reusing `#4dabf5`/`#8b7fd6`/`#f0a35c`/`#f2a7c0` as a *selection* signal on the tab bar would overload the same four hues with a second, different meaning: on a chip (§2a) that hue means "this row belongs to Academic"; on a tab it would mean "you have filtered to Academic" — and the two meanings actively collide the moment a user filters to, say, Projects (purple tab active) while looking at a list still showing blue Academic-colored chips elsewhere in the shell (rail, stat cards) before the filter finishes updating, or in any view that mixes categories. One hue, two unrelated jobs, read together, is confusing rather than reinforcing.
+
+Instead:
+- **Academic / Projects / Organization / Life** (the four single-category tabs) share one neutral indicator color: solid `#74bcd9` — the app's single blue accent, already used unqualified (not category-specific) elsewhere (e.g. rail panel-header icons, §12).
+- **My Work** (the combined/all-categories tab) gets the one exception: a `2px` gradient indicator, `background: linear-gradient(to right, #f2a7c0, #74bcd9)` — implemented as a small absolutely-positioned block (`position: absolute; bottom: -1px; left: 0; right: 0; height: 2px`) rather than a CSS `border-bottom`, since `border-bottom` cannot render a gradient directly. This mirrors how the gradient is already reserved elsewhere in the app for the single top-level/combined thing on a page (the `gradient-text` page heading, §1) rather than for any one category among several — "My Work" is the Workboard-level equivalent of that same role.
+- Both indicator treatments are non-text decoration, so they're checked against the WCAG non-text-contrast threshold (3:1), not the 4.5:1 text threshold from §8 — a solid `#74bcd9` or the gradient's darkest stop against the light glass page background both clear 3:1 comfortably.
+- The indicator is never the only signal: text color (`#5c6b80` → `#2d3748`) always changes alongside it, satisfying `color-not-only`.
 
 ## Summary for implementers
 
