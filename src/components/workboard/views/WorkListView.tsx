@@ -55,9 +55,11 @@ export default function WorkListView(
           Add your first work item to get started.
         </p>
         {/* No add-item entry point exists in the shell yet (Task 11 only builds List) —
-            this button is wired up per the direction doc's spec, ready for that flow to
-            attach an onClick once it exists. */}
-        <button type="button" className="vb-btn-pink" style={{ width: 'auto', padding: '10px 22px' }}>
+            this button is rendered per the direction doc's spec, ready for that flow to
+            attach an onClick once it exists. `disabled` until then: this is the only
+            control a brand-new user sees on first run, so it must not look interactive
+            while it does nothing. */}
+        <button type="button" className="vb-btn-pink" disabled style={{ width: 'auto', padding: '10px 22px' }}>
           New Work Item
         </button>
       </div>

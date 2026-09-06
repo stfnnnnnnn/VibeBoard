@@ -1,6 +1,7 @@
 import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
-import { addDays, todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
+import { todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
+import { addDays, dueDateOf } from '@/lib/workboard/dates';
 
 export type WorkCategory = 'academic' | 'project' | 'organization' | 'life';
 export type WorkStatus   = 'todo' | 'in_progress' | 'done';
@@ -78,10 +79,10 @@ export function deriveAcademicStatus(
   return 'todo';
 }
 
-/** The calendar date portion of an item's due timestamp, or null when undated. */
-export function dueDateOf(item: WorkItem): string | null {
-  return item.due_at ? item.due_at.slice(0, 10) : null;
-}
+/** Re-exported from `@/lib/workboard/dates` (the pool-free module) so existing callers of
+ *  `dueDateOf` from this file keep working — see `dates.ts` for why the implementation
+ *  lives there and not here. */
+export { dueDateOf };
 
 interface AcademicTableSpec {
   source:   AcademicSource;

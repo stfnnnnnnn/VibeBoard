@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, AlertTriangle, Bell, CalendarClock } from 'lucide-react';
 import { courseColor } from '@/lib/workboard/color';
+import { addDays } from '@/lib/workboard/dates';
 
 interface ClassOccurrence {
   block_id: number; user_subject_id: number | null; course_code: string; subject_name: string | null;
@@ -39,17 +40,11 @@ function toMinutes(hhmm: string): number {
   const [h, m] = hhmm.split(':').map(Number);
   return h * 60 + m;
 }
-function addDaysLocal(dateStr: string, n: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-
 export default function WorkboardWeekView({ initialWeek }: { initialWeek: WorkboardWeek }) {
   const [week, setWeek] = useState<WorkboardWeek>(initialWeek);
   const [loading, setLoading] = useState(false);
 
-  const dayDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDaysLocal(week.week_start, i)), [week.week_start]);
+  const dayDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(week.week_start, i)), [week.week_start]);
 
   const goToWeek = async (weekStart: string) => {
     setLoading(true);
@@ -72,14 +67,14 @@ export default function WorkboardWeekView({ initialWeek }: { initialWeek: Workbo
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button onClick={() => goToWeek(addDaysLocal(week.week_start, -7))} disabled={loading}
+          <button onClick={() => goToWeek(addDays(week.week_start, -7))} disabled={loading}
             style={{ ...GLASS, border: 'none', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
             <ChevronLeft size={18} />
           </button>
           <span style={{ fontWeight: 700, color: '#5c6b80', fontSize: '0.9rem' }}>
             {week.week_start} – {dayDates[6]}
           </span>
-          <button onClick={() => goToWeek(addDaysLocal(week.week_start, 7))} disabled={loading}
+          <button onClick={() => goToWeek(addDays(week.week_start, 7))} disabled={loading}
             style={{ ...GLASS, border: 'none', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
             <ChevronRight size={18} />
           </button>

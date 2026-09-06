@@ -4,21 +4,7 @@ import { useState } from 'react';
 import { MoreVertical } from 'lucide-react';
 import type { WorkItem, WorkStatus, WorkCategory } from '@/lib/workboard/workItems';
 import { courseColor } from '@/lib/workboard/color';
-
-/** Local copies of workItems.ts's `dueDateOf` and aggregate.ts's `addDays` — duplicated
- *  rather than imported, deliberately. Both of those modules import `pool` from '@/lib/db'
- *  at module scope for their (unrelated) DB-access exports; a 'use client' file that
- *  imports a runtime value from either one pulls mysql2 (and Node's `net`) into the
- *  browser bundle and breaks the page. `WorkboardWeekView.tsx` already works around this
- *  the same way with its own local `addDaysLocal` — same fix, same reason. */
-function dueDateOf(item: WorkItem): string | null {
-  return item.due_at ? item.due_at.slice(0, 10) : null;
-}
-function addDays(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+import { addDays, dueDateOf } from '@/lib/workboard/dates';
 
 /** Owned items and Study-Pulse-sourced items have different write endpoints. This is the
  *  single place that decision is made — no view should build these URLs itself. */
@@ -131,11 +117,19 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
   const edgeColor = EDGE_COLOR[item.priority];
   const divider = isLast ? 'none' : '1px solid rgba(200,210,230,0.35)';
 
+  const isDone = item.work_status === 'done';
+
   const handleToggle = async () => {
     if (pending) return;
     setPending(true);
     try {
-      const res = await setWorkStatus(item, 'done');
+      // List never shows done items (groupByTimeframe excludes them), so here the toggle is
+      // always todo/in_progress -> done. But this row is shared with Board (Task 15), whose
+      // Done column shows completed items and must let the user un-complete one — hence the
+      // real toggle rather than a hardcoded 'done', even though List only ever exercises one
+      // branch of it today.
+      const next: WorkStatus = isDone ? 'todo' : 'done';
+      const res = await setWorkStatus(item, next);
       if (res.ok) {
         await onChanged();
       } else {
@@ -154,25 +148,31 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
       <input
         type="checkbox"
         className="vb-row-checkbox"
-        checked={false}
+        checked={isDone}
         disabled={pending}
         onChange={handleToggle}
-        aria-label={`Mark "${item.title}" as done`}
+        aria-label={isDone ? `Mark "${item.title}" as not done` : `Mark "${item.title}" as done`}
         style={{ width: '20px', height: '20px', cursor: pending ? 'default' : 'pointer', accentColor: '#256f92' }}
       />
     </label>
   );
 
+  // Rendered per the direction doc's §3 row structure (6 of 6 elements), but there's no menu
+  // content behind it yet — no edit/delete/"Move to" flow exists as of Task 11. `disabled` so
+  // it isn't a live tab stop that announces an action and then does nothing (Task 15's Board
+  // needs real content here for its "Move to →" submenu; whichever task builds that should
+  // wire this trigger up rather than adding a second one).
   const overflowButton = (
     <button
       type="button"
       className="vb-row-overflow"
       aria-label="More options"
       title="More options"
+      disabled
       style={{
         width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: 'transparent', border: 'none', borderRadius: '8px', color: '#5c6b80',
-        cursor: 'pointer', flexShrink: 0,
+        cursor: 'not-allowed', flexShrink: 0, opacity: 0.45,
       }}
     >
       <MoreVertical size={16} />
@@ -201,7 +201,8 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
             <span
               title={item.title}
               style={{
-                fontFamily: FONT, fontSize: '0.88rem', fontWeight: 600, color: '#2d3748',
+                fontFamily: FONT, fontSize: '0.88rem', fontWeight: 600,
+                color: isDone ? '#9aa4b5' : '#2d3748', textDecoration: isDone ? 'line-through' : 'none',
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               }}
             >
@@ -235,7 +236,8 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
               title={item.title}
               style={{
                 marginLeft: '12px', flex: 1, minWidth: 0, fontFamily: FONT, fontSize: '0.88rem', fontWeight: 600,
-                color: '#2d3748', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                color: isDone ? '#9aa4b5' : '#2d3748', textDecoration: isDone ? 'line-through' : 'none',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               }}
             >
               {item.title}
@@ -261,7 +263,7 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
         .vb-work-row:hover, .vb-work-row:focus-within { background: rgba(116,188,217,0.06); }
         .vb-row-checkbox:focus-visible { outline: 2px solid #2a7fa8; outline-offset: 2px; border-radius: 4px; }
         .vb-row-overflow:focus-visible { outline: 2px solid #2a7fa8; outline-offset: 2px; }
-        .vb-row-overflow:hover { background: rgba(200,210,230,0.3); }
+        .vb-row-overflow:hover:not(:disabled) { background: rgba(200,210,230,0.3); }
       `}</style>
     </div>
   );
