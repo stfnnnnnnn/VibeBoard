@@ -73,9 +73,8 @@ export default function WorkboardWeekView({ initialWeek }: { initialWeek: Workbo
   const gridHeight = ((GRID_END - GRID_START) / 60) * HOUR_HEIGHT;
 
   return (
-    <div className="vb-bg min-h-screen pb-10" style={{ padding: '40px 5%', fontFamily: "'Inter','DM Sans','Segoe UI',sans-serif" }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
-        <h1 className="gradient-text" style={{ fontSize: '2.2rem', fontWeight: 700, margin: 0 }}>Workboard</h1>
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button onClick={() => goToWeek(addDaysLocal(week.week_start, -7))} disabled={loading}
             style={{ ...GLASS, border: 'none', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>

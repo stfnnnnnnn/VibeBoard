@@ -1,17 +1,32 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
-import { ensureWorkboardSchema } from '@/lib/migrate';
+import { ensureWorkboardSchema, ensureWorkboardV2Schema } from '@/lib/migrate';
 import { getWorkboardWeek, mondayOf, todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
-import WorkboardWeekView from '@/components/workboard/WorkboardWeekView';
+import { getWorkItems } from '@/lib/workboard/workItems';
+import { computeStats, computeWorkloadChart } from '@/lib/workboard/workStats';
+import WorkboardShell from '@/components/workboard/WorkboardShell';
 
 export default async function WorkboardPage() {
   const session = await auth();
   if (!session?.user?.id) redirect('/login');
 
   await ensureWorkboardSchema();
-  const userId = parseInt(session.user.id);
-  const weekStart = mondayOf(todayInManilaAsUtcDate());
-  const week = await getWorkboardWeek(userId, weekStart);
+  await ensureWorkboardV2Schema();
 
-  return <WorkboardWeekView initialWeek={week} />;
+  const userId    = parseInt(session.user.id);
+  const weekStart = mondayOf(todayInManilaAsUtcDate());
+  const week      = await getWorkboardWeek(userId, weekStart);
+  const payload   = await getWorkItems(userId);
+
+  return (
+    <WorkboardShell
+      initialWeek={week}
+      initialWork={{
+        ...payload,
+        week_start: weekStart,
+        stats:    computeStats(payload.items, payload.generated_at, weekStart),
+        workload: computeWorkloadChart(payload.items, weekStart),
+      }}
+    />
+  );
 }
