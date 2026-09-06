@@ -12,6 +12,7 @@ let _ranHabitsV3 = false;
 let _ranHabitsV7 = false;
 let _ranHabitsV8 = false;
 let _ranWorkboard = false;
+let _ranWorkboardV2 = false;
 
 /** Add accomplished_at column to entry tables if not already present. */
 export async function ensureAccomplishedAt(): Promise<void> {
@@ -567,4 +568,77 @@ export async function ensureWorkboardSchema(): Promise<void> {
   }
 
   _ranWorkboard = true;
+}
+
+/** Create the Workboard v2 tables (projects, owned work items, and the academic overlay)
+ *  if they don't already exist. Study Pulse's own tables are never modified — the overlay
+ *  holds the only three Workboard-specific facts about an academic entry. */
+export async function ensureWorkboardV2Schema(): Promise<void> {
+  if (_ranWorkboardV2) return;
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS workboard_projects (
+      id          INT AUTO_INCREMENT PRIMARY KEY,
+      user_id     INT NOT NULL,
+      name        VARCHAR(120) NOT NULL,
+      color       VARCHAR(16) NULL,
+      status      ENUM('active','archived') NOT NULL DEFAULT 'active',
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_user_project_name (user_id, name),
+      FOREIGN KEY (user_id) REFERENCES user_login(user_id) ON DELETE CASCADE
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS workboard_work_items (
+      id               INT AUTO_INCREMENT PRIMARY KEY,
+      user_id          INT NOT NULL,
+      category         ENUM('academic','project','organization','life') NOT NULL,
+      project_id       INT NULL,
+      user_subject_id  INT NULL,
+      title            VARCHAR(255) NOT NULL,
+      note             TEXT NULL,
+      priority         ENUM('high','normal','low') NOT NULL DEFAULT 'normal',
+      work_status      ENUM('todo','in_progress','done') NOT NULL DEFAULT 'todo',
+      due_at           DATETIME NULL,
+      start_date       DATE NULL,
+      estimated_hours  DECIMAL(5,2) NULL,
+      completed_at     DATETIME NULL,
+      created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_user_status (user_id, work_status),
+      FOREIGN KEY (user_id) REFERENCES user_login(user_id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id) REFERENCES workboard_projects(id) ON DELETE SET NULL,
+      FOREIGN KEY (user_subject_id) REFERENCES user_subjects(user_subject_id) ON DELETE SET NULL
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS workboard_entry_meta (
+      id               INT AUTO_INCREMENT PRIMARY KEY,
+      user_id          INT NOT NULL,
+      activity_id      INT NULL,
+      quiz_id          INT NULL,
+      exam_id          INT NULL,
+      grade_entry_id   INT NULL,
+      in_progress      TINYINT(1) NOT NULL DEFAULT 0,
+      estimated_hours  DECIMAL(5,2) NULL,
+      start_date       DATE NULL,
+      created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_activity (activity_id),
+      UNIQUE KEY uniq_quiz (quiz_id),
+      UNIQUE KEY uniq_exam (exam_id),
+      UNIQUE KEY uniq_grade_entry (grade_entry_id),
+      FOREIGN KEY (user_id) REFERENCES user_login(user_id) ON DELETE CASCADE,
+      FOREIGN KEY (activity_id) REFERENCES activities(activity_id) ON DELETE CASCADE,
+      FOREIGN KEY (quiz_id) REFERENCES quizzes(quiz_id) ON DELETE CASCADE,
+      FOREIGN KEY (exam_id) REFERENCES exams(exam_id) ON DELETE CASCADE,
+      FOREIGN KEY (grade_entry_id) REFERENCES grade_entries(entry_id) ON DELETE CASCADE,
+      CONSTRAINT chk_meta_one_entry CHECK (
+        (activity_id IS NOT NULL) + (quiz_id IS NOT NULL) +
+        (exam_id IS NOT NULL) + (grade_entry_id IS NOT NULL) = 1
+      )
+    )
+  `);
+
+  _ranWorkboardV2 = true;
 }
