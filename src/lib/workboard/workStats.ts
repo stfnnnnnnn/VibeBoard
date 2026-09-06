@@ -1,5 +1,20 @@
-import { addDays } from '@/lib/workboard/aggregate';
-import { dueDateOf, type WorkItem, type WorkCategory } from '@/lib/workboard/workItems';
+import type { WorkItem, WorkCategory } from '@/lib/workboard/workItems';
+
+/** Local copies of aggregate.ts's `addDays` and workItems.ts's `dueDateOf` — duplicated
+ *  rather than imported. Both source modules import `pool` from '@/lib/db' at module scope
+ *  for their (unrelated) DB-access exports; this module is imported at runtime by a
+ *  'use client' view (WorkListView.tsx calls `groupByTimeframe` directly), so pulling in
+ *  either one would drag mysql2 (and Node's `net`) into the browser bundle and break the
+ *  page. `WorkboardWeekView.tsx` already works around the same problem with its own local
+ *  `addDaysLocal` — same fix, same reason. */
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function dueDateOf(item: WorkItem): string | null {
+  return item.due_at ? item.due_at.slice(0, 10) : null;
+}
 
 export interface TimeframeGroups {
   today:     WorkItem[];

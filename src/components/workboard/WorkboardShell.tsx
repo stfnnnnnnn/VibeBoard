@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, List, Columns3, GanttChart, CalendarDays } from 'lucide-react';
 import WorkboardWeekView from './WorkboardWeekView';
+import WorkListView from './views/WorkListView';
 import type { WorkboardWeek } from '@/lib/workboard/aggregate';
 import type { WorkItem, ProjectSummary } from '@/lib/workboard/workItems';
 import type { WorkStats, WorkloadDay } from '@/lib/workboard/workStats';
@@ -68,7 +69,8 @@ export default function WorkboardShell(
       </div>
 
       {view === 'calendar' && <WorkboardWeekView initialWeek={initialWeek} />}
-      {view !== 'calendar' && (
+      {view === 'list' && <WorkListView work={work} onChanged={refreshWork} />}
+      {(view === 'board' || view === 'timeline') && (
         <p style={{ color: '#8a94a6', fontSize: '0.9rem' }}>
           {work.items.length} work item{work.items.length === 1 ? '' : 's'} loaded.
         </p>

@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, AlertTriangle, Bell, CalendarClock } from 'lucide-react';
+import { courseColor } from '@/lib/workboard/color';
 
 interface ClassOccurrence {
   block_id: number; user_subject_id: number | null; course_code: string; subject_name: string | null;
@@ -42,11 +43,6 @@ function addDaysLocal(dateStr: string, n: number): string {
   const d = new Date(`${dateStr}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
-}
-function courseColor(code: string): string {
-  const palette = ['#74bcd9', '#f2a7c0', '#8b7fd6', '#4dabf5', '#f0a35c'];
-  let h = 0; for (const c of code) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return palette[h % palette.length];
 }
 
 export default function WorkboardWeekView({ initialWeek }: { initialWeek: WorkboardWeek }) {
