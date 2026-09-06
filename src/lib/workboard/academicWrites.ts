@@ -4,6 +4,15 @@ import {
   ACADEMIC_TABLES, urgencyFromPriority,
   type AcademicSource, type WorkPriority, type WorkStatus,
 } from '@/lib/workboard/workItems';
+import { todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
+
+/** "YYYY-MM-DD" for today in Manila time — never derive "today" from `new Date()`'s own
+ *  UTC components, since that reads as yesterday during the ~8-hour Manila midnight window. */
+function todayManilaDateString(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(todayInManilaAsUtcDate());
+}
 
 export class AcademicItemNotFoundError extends Error {
   constructor() { super('That item was not found'); this.name = 'AcademicItemNotFoundError'; }
@@ -50,7 +59,7 @@ export async function patchAcademicItem(
     if (patch.work_status !== undefined) {
       if (patch.work_status === 'done') {
         entrySets.push('status = ?', 'accomplished_at = ?');
-        entryValues.push('Done', new Date().toISOString().slice(0, 10));
+        entryValues.push('Done', todayManilaDateString());
       } else {
         entrySets.push('status = ?', 'accomplished_at = ?');
         entryValues.push('Pending', null);
