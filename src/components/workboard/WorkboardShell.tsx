@@ -52,6 +52,7 @@ export default function WorkboardShell(
         {VIEWS.map(({ key, label, Icon }) => (
           <button key={key} onClick={() => setView(key)}
             aria-pressed={view === key}
+            className="vb-view-switch-btn"
             style={{
               display: 'inline-flex', alignItems: 'center', gap: '6px',
               minHeight: '40px', borderRadius: '999px', padding: '8px 14px',
@@ -72,6 +73,13 @@ export default function WorkboardShell(
           {work.items.length} work item{work.items.length === 1 ? '' : 's'} loaded.
         </p>
       )}
+
+      <style jsx>{`
+        .vb-view-switch-btn:focus-visible {
+          outline: 2px solid #2a7fa8;
+          outline-offset: 2px;
+        }
+      `}</style>
     </div>
   );
 }
