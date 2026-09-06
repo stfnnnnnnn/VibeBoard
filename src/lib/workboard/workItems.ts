@@ -2,8 +2,8 @@ import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
 import { todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
 import { addDays, dueDateOf } from '@/lib/workboard/dates';
+import type { WorkCategory } from '@/lib/workboard/workCategories';
 
-export type WorkCategory = 'academic' | 'project' | 'organization' | 'life';
 export type WorkStatus   = 'todo' | 'in_progress' | 'done';
 export type WorkPriority = 'high' | 'normal' | 'low';
 export type WorkSource   = 'owned' | 'activities' | 'quizzes' | 'exams' | 'grade_entries';
@@ -11,7 +11,10 @@ export type WorkSource   = 'owned' | 'activities' | 'quizzes' | 'exams' | 'grade
 export const ACADEMIC_SOURCES = ['activities', 'quizzes', 'exams', 'grade_entries'] as const;
 export type AcademicSource = typeof ACADEMIC_SOURCES[number];
 
-export const WORK_CATEGORIES: WorkCategory[] = ['academic', 'project', 'organization', 'life'];
+/** Re-exported from `./workCategories` (the pool-free module) so existing importers of
+ *  `WorkCategory`/`WORK_CATEGORIES` from this file keep working — see that file for why the
+ *  implementation lives there and not here (client-bundle safety). */
+export { WORK_CATEGORIES, type WorkCategory } from '@/lib/workboard/workCategories';
 
 export interface WorkItem {
   source:           WorkSource;   // 'owned' = workboard_work_items; else the Study Pulse table

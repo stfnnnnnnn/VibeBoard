@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, CheckCircle2 } from 'lucide-react';
-import type { WorkPayload } from '../WorkboardShell';
+import { ChevronDown, ChevronRight, CheckCircle2, SearchX } from 'lucide-react';
+import type { WorkItem } from '@/lib/workboard/workItems';
 import WorkItemRow from '../WorkItemRow';
 import { groupByTimeframe, type TimeframeGroups } from '@/lib/workboard/workStats';
 
@@ -32,17 +32,42 @@ function useIsDesktopRow(): boolean {
   return isDesktop;
 }
 
-export default function WorkListView(
-  { work, onChanged }: { work: WorkPayload; onChanged: () => void | Promise<void> },
-) {
+export interface WorkListViewProps {
+  /** Already filtered by category and search — see `WorkboardShell`'s `visibleItems`. */
+  items:      WorkItem[];
+  /** "YYYY-MM-DD" — `work.generated_at`, so every row agrees on "today" regardless of filtering. */
+  todayStr:   string;
+  /** True when the shell's category tab or search query is currently narrowing `items` —
+   *  distinguishes "genuinely nothing on the board" from "nothing matches this filter", which
+   *  need different empty-state copy (the direction doc's "Nothing on your plate" state
+   *  predates category/search filtering and assumes the former). */
+  isFiltered?: boolean;
+  onChanged:  () => void | Promise<void>;
+}
+
+export default function WorkListView({ items: allItems, todayStr, isFiltered, onChanged }: WorkListViewProps) {
   const groups = useMemo(
-    () => groupByTimeframe(work.items, work.generated_at),
-    [work.items, work.generated_at],
+    () => groupByTimeframe(allItems, todayStr),
+    [allItems, todayStr],
   );
   const [collapsed, setCollapsed] = useState<Partial<Record<SectionKey, boolean>>>({});
   const isDesktop = useIsDesktopRow();
 
   const totalOpen = groups.today.length + groups.upcoming.length + groups.later.length;
+
+  if (totalOpen === 0 && isFiltered) {
+    return (
+      <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+        <SearchX size={48} color="#9aa4b5" style={{ marginBottom: '14px' }} />
+        <h2 style={{ fontFamily: HEADER_FONT, fontSize: '1.05rem', fontWeight: 700, color: '#2d3748', margin: '0 0 6px' }}>
+          No matching work items
+        </h2>
+        <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: '#5c6b80', margin: 0 }}>
+          Try a different category or search term.
+        </p>
+      </div>
+    );
+  }
 
   if (totalOpen === 0) {
     return (
@@ -104,7 +129,7 @@ export default function WorkListView(
                     <WorkItemRow
                       key={`${item.source}-${item.id}`}
                       item={item}
-                      todayStr={work.generated_at}
+                      todayStr={todayStr}
                       isDesktop={isDesktop}
                       isLast={i === items.length - 1}
                       onChanged={onChanged}
