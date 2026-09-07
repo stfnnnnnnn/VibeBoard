@@ -363,7 +363,7 @@ export default function WorkBoardView({ items, todayStr, isFiltered, onChanged, 
             onDrop={e => handleDrop(e, col.key)}
             style={{
               background: 'rgba(255,255,255,0.18)', borderRadius: '18px', padding: '14px 10px',
-              minWidth: '260px', flex: '1 1 260px', boxSizing: 'border-box',
+              boxSizing: 'border-box',
             }}
           >
             <div style={{
@@ -407,6 +407,15 @@ export default function WorkBoardView({ items, todayStr, isFiltered, onChanged, 
       })}
 
       <style jsx>{`
+        /* flex/min-width live here rather than in the column's inline style so this media
+           query can actually override them below 768px — an inline declaration always beats a
+           plain class rule regardless of the media query, per ordinary CSS specificity, and
+           this file previously set flex/minWidth inline while trying to override them here,
+           which meant the mobile snap-scroll rule below was silently dead. */
+        .vb-board-col {
+          flex: 1 1 260px;
+          min-width: 260px;
+        }
         .vb-board-col.drag-over {
           background: rgba(116,188,217,0.14);
           outline: 1.5px dashed rgba(116,188,217,0.6);
@@ -418,6 +427,7 @@ export default function WorkBoardView({ items, todayStr, isFiltered, onChanged, 
           }
           .vb-board-col {
             flex: 0 0 85vw;
+            min-width: 0;
             scroll-snap-align: start;
           }
         }

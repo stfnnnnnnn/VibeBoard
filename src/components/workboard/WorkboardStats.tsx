@@ -111,7 +111,7 @@ export default function WorkboardStats({ stats, oldestOverdueDue }: WorkboardSta
     : 'All caught up';
 
   return (
-    <div style={{ display: 'flex', gap: '14px', marginBottom: '22px', flexWrap: 'wrap' }}>
+    <div className="vb-stat-grid" style={{ display: 'grid', gap: '14px', marginBottom: '22px' }}>
       <Card>
         <Label>Active</Label>
         <Numeral>{active_count}</Numeral>
@@ -135,6 +135,18 @@ export default function WorkboardStats({ stats, oldestOverdueDue }: WorkboardSta
         <Numeral alert={overdueAlert}>{overdue_count}</Numeral>
         <Subtitle alert={overdueAlert}>{overdueSubtitle}</Subtitle>
       </Card>
+
+      {/* Direction doc §10: 4-in-a-row at >=1024px, 2x2 grid below it (tablet and mobile
+          share the same 2x2 treatment). `grid-template-columns` is kept out of the inline
+          style above and set only here, in the stylesheet, so this media query can override
+          it — an inline declaration of the same property would always win over a plain class
+          rule regardless of the media query, per ordinary CSS specificity. */}
+      <style jsx>{`
+        .vb-stat-grid { grid-template-columns: repeat(4, 1fr); }
+        @media (max-width: 1023px) {
+          .vb-stat-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+      `}</style>
     </div>
   );
 }

@@ -189,7 +189,7 @@ export default function WorkboardRail({ workload, items, todayStr }: {
   todayStr: string;
 }) {
   return (
-    <div style={{ flex: '0 0 240px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div className="vb-rail" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div style={{ ...GLASS, padding: '14px' }}>
         <PanelHeader Icon={BarChart3}>This Week&apos;s Workload</PanelHeader>
         <WorkloadChart workload={workload} />
@@ -198,6 +198,18 @@ export default function WorkboardRail({ workload, items, todayStr }: {
         <PanelHeader Icon={CalendarClock}>Upcoming Deadlines</PanelHeader>
         <UpcomingDeadlines items={items} todayStr={todayStr} />
       </div>
+
+      {/* Direction doc §10: the rail is a fixed 240px column beside content at >=1024px, and
+          moves below the main content (full width, natural height) from 1023px down — `flex`
+          is kept out of this root's inline style (see WorkBoardView.tsx's column-width comment
+          for why an inline value here would make this media query inert) so this override can
+          actually take effect once the shell stacks the row into a column below 1024px. */}
+      <style jsx>{`
+        .vb-rail { flex: 0 0 240px; }
+        @media (max-width: 1023px) {
+          .vb-rail { flex: 1 1 auto; width: 100%; }
+        }
+      `}</style>
     </div>
   );
 }
