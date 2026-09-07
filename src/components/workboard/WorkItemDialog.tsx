@@ -208,10 +208,20 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   }, []);
 
   useEffect(() => {
+    // Restore focus to whatever opened this dialog (a row's "Edit" menu item, the shell's or
+    // the empty state's "New Work Item" button) once it closes — otherwise a keyboard user
+    // lands back on `document.body` and has to re-tab from the top of the page.
+    const opener = document.activeElement as HTMLElement | null;
     firstFieldRef.current?.focus();
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prevOverflow; };
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      // The opener can be gone by the time this runs (e.g. the row it belonged to was
+      // filtered out by a search change while the dialog was open) — guard with `isConnected`
+      // rather than letting a stale-element `.focus()` throw.
+      if (opener?.isConnected) opener.focus();
+    };
   }, []);
 
   function handleBackdropMouseDown(e: React.MouseEvent<HTMLDivElement>) {
