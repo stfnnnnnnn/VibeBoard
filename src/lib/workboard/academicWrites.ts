@@ -41,13 +41,19 @@ export async function patchAcademicItem(
   if (!spec) throw new AcademicItemNotFoundError();
 
   // Ownership: never trust the id in the URL — walk the entry back to this user's subjects.
+  // Also grab the entry's *current* status alongside the ownership check, so a patch that
+  // merely re-sends the dialog's seeded `work_status` (unchanged) doesn't re-stamp
+  // `accomplished_at` — see Finding 1 of the whole-branch review.
   const [owns] = await pool.execute<RowDataPacket[]>(
-    `SELECT t.\`${spec.pk}\` AS id FROM \`${spec.table}\` t
+    `SELECT t.\`${spec.pk}\` AS id, t.status AS current_status FROM \`${spec.table}\` t
      JOIN user_subjects us ON us.user_subject_id = t.user_subject_id
      WHERE t.\`${spec.pk}\` = ? AND us.user_id = ?`,
     [entryId, userId],
   );
   if (!owns.length) throw new AcademicItemNotFoundError();
+  const currentStatus = owns[0].current_status as string;
+  const incomingStatus = patch.work_status === 'done' ? 'Done' : patch.work_status !== undefined ? 'Pending' : undefined;
+  const statusChanging = incomingStatus !== undefined && incomingStatus !== currentStatus;
 
   const conn = await pool.getConnection();
   try {
@@ -56,7 +62,11 @@ export async function patchAcademicItem(
     const entrySets: string[] = [];
     const entryValues: (string | null)[] = [];
 
-    if (patch.work_status !== undefined) {
+    // Gated on `statusChanging`, not merely `patch.work_status !== undefined` — the dialog
+    // always sends the item's current work_status even when the user never touched the
+    // Status field, so an unconditional write here would re-stamp (or clear) `accomplished_at`
+    // on every save. See Finding 1 of the whole-branch review.
+    if (statusChanging) {
       if (patch.work_status === 'done') {
         entrySets.push('status = ?', 'accomplished_at = ?');
         entryValues.push('Done', todayManilaDateString());

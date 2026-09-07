@@ -4,6 +4,7 @@ import pool from '@/lib/db';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import { ensureWorkboardV2Schema } from '@/lib/migrate';
 import { WORK_CATEGORIES } from '@/lib/workboard/workItems';
+import { manilaNowDatetime } from '@/lib/workboard/dates';
 
 const PRIORITIES = ['high', 'normal', 'low'];
 const STATUSES   = ['todo', 'in_progress', 'done'];
@@ -67,7 +68,7 @@ export async function POST(req: NextRequest) {
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     [userId, category, project_id ?? null, user_subject_id ?? null, title.trim(), note || null,
      priority ?? 'normal', status, due_at || null, start_date || null,
-     estimated_hours ?? null, status === 'done' ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null],
+     estimated_hours ?? null, status === 'done' ? manilaNowDatetime() : null],
   );
 
   return Response.json({ status: 'success', item_id: res.insertId });

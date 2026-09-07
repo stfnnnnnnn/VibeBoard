@@ -25,6 +25,27 @@ export function addDays(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Current instant's wall-clock reading in Asia/Manila, as "YYYY-MM-DD HH:MM:SS" for a
+ *  DATETIME column. Every consumer of `workboard_work_items.completed_at`
+ *  (`workStats.ts`'s `completed7d`, `workItems.ts`'s 14-day retention cutoff) does
+ *  `completed_at.slice(0, 10)` and compares that against a Manila calendar date, so the
+ *  stamped value must already be a Manila date — `new Date().toISOString()` would stamp the
+ *  UTC instant instead, which reads one day early during the ~8-hour Manila-midnight window
+ *  (UTC 16:00-24:00). Same convention as `academicWrites.ts`'s `todayManilaDateString()`, just
+ *  carrying a time-of-day too since this column is DATETIME rather than DATE. */
+export function manilaNowDatetime(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '00';
+  // Some Intl implementations render midnight as hour "24" under hour12:false — normalize it.
+  const hour = get('hour') === '24' ? '00' : get('hour');
+  return `${get('year')}-${get('month')}-${get('day')} ${hour}:${get('minute')}:${get('second')}`;
+}
+
 /** The calendar date portion of an item's due timestamp, or null when undated.
  *  Takes a structural `{ due_at }` shape rather than importing `WorkItem` from
  *  `workItems.ts`, so this module never has a reason to import that file (which

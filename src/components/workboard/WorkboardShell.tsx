@@ -329,6 +329,7 @@ export default function WorkboardShell(
                   items={visibleItems}
                   weekStart={work.week_start}
                   today={work.generated_at}
+                  isFiltered={isFiltered}
                 />
               )}
             </div>

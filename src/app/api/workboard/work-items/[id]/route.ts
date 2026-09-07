@@ -3,6 +3,7 @@ import { auth } from '@/auth';
 import pool from '@/lib/db';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import { WORK_CATEGORIES } from '@/lib/workboard/workItems';
+import { manilaNowDatetime } from '@/lib/workboard/dates';
 import { checkReferences } from '../route';
 
 const PATCHABLE = ['title', 'note', 'category', 'project_id', 'user_subject_id',
@@ -18,9 +19,10 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   const itemId = parseInt(id);
 
   const [owns] = await pool.execute<RowDataPacket[]>(
-    'SELECT id FROM workboard_work_items WHERE id = ? AND user_id = ?', [itemId, userId],
+    'SELECT id, work_status AS current_status FROM workboard_work_items WHERE id = ? AND user_id = ?', [itemId, userId],
   );
   if (!owns.length) return Response.json({ error: 'Not found' }, { status: 404 });
+  const currentStatus = owns[0].current_status as string;
 
   const body = await req.json();
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
@@ -48,9 +50,13 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   for (const field of PATCHABLE) {
     if (field in body) { sets.push(`${field} = ?`); values.push(body[field] ?? null); }
   }
-  if ('work_status' in body) {
+  // Only re-stamp `completed_at` when the status is actually *changing* — a PATCH that
+  // includes `work_status: 'done'` merely because the dialog always seeds it from the
+  // item's existing value (editing an unrelated field on an already-done item, say) must
+  // not rewrite the true completion date. See Finding 1 of the whole-branch review.
+  if ('work_status' in body && body.work_status !== currentStatus) {
     sets.push('completed_at = ?');
-    values.push(body.work_status === 'done' ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null);
+    values.push(body.work_status === 'done' ? manilaNowDatetime() : null);
   }
   if (!sets.length) return Response.json({ error: 'No fields to update' }, { status: 400 });
 

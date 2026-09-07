@@ -1,6 +1,6 @@
 'use client';
 
-import { CalendarRange } from 'lucide-react';
+import { CalendarRange, SearchX } from 'lucide-react';
 // Type-only import from `workItems.ts` — that module imports `pool` (mysql2) at module scope
 // for its DB-access exports, so a runtime import here would drag mysql2 into this client
 // bundle (see WorkboardShell.tsx's, WorkItemRow.tsx's, and WorkBoardView.tsx's comments on the
@@ -109,14 +109,32 @@ export interface WorkTimelineViewProps {
   weekStart: string;
   /** "YYYY-MM-DD" — `work.generated_at`, used only to place the today marker. */
   today:     string;
+  /** True when the shell's category tab or search query is currently narrowing `items` —
+   *  same distinction `WorkListView`/`WorkBoardView` make, so a filtered-to-nothing timeline
+   *  reads as "no matches" rather than wrongly telling the user their dated items lack dates. */
+  isFiltered?: boolean;
 }
 
-export default function WorkTimelineView({ items, weekStart, today }: WorkTimelineViewProps) {
+export default function WorkTimelineView({ items, weekStart, today, isFiltered }: WorkTimelineViewProps) {
   // Direction doc §5d: the *legitimately*-empty condition is "no item has a start_date or
   // due_at" — checked against the raw field presence, not against whether anything actually
   // plots in this particular four-week window (a fully-dated backlog with nothing due in the
   // next month is a different, unremarkable situation the axis can render as-is).
   const hasAnyDate = items.some(item => item.start_date !== null || item.due_at !== null);
+
+  if (!hasAnyDate && isFiltered) {
+    return (
+      <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+        <SearchX size={48} color="#9aa4b5" style={{ marginBottom: '14px' }} />
+        <h2 style={{ fontFamily: DM_FONT, fontSize: '1.05rem', fontWeight: 700, color: '#2d3748', margin: '0 0 6px' }}>
+          No matching work items
+        </h2>
+        <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: '#5c6b80', margin: 0 }}>
+          Try a different category or search term.
+        </p>
+      </div>
+    );
+  }
 
   if (!hasAnyDate) {
     return (
