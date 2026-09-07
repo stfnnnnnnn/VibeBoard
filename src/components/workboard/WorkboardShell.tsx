@@ -6,6 +6,7 @@ import { ArrowLeft, List, Columns3, GanttChart, CalendarDays, Search } from 'luc
 import WorkboardWeekView from './WorkboardWeekView';
 import WorkListView from './views/WorkListView';
 import WorkBoardView from './views/WorkBoardView';
+import WorkTimelineView from './views/WorkTimelineView';
 import WorkboardStats from './WorkboardStats';
 import WorkboardRail from './WorkboardRail';
 import WorkItemDialog, { type DialogTarget } from './WorkItemDialog';
@@ -238,9 +239,11 @@ export default function WorkboardShell(
             />
           )}
           {view === 'timeline' && (
-            <p style={{ color: '#8a94a6', fontSize: '0.9rem' }}>
-              {visibleItems.length} work item{visibleItems.length === 1 ? '' : 's'} match{visibleItems.length === 1 ? 'es' : ''} the current filter.
-            </p>
+            <WorkTimelineView
+              items={visibleItems}
+              weekStart={work.week_start}
+              today={work.generated_at}
+            />
           )}
         </div>
 
