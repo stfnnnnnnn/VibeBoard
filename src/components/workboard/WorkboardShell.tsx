@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft, List, Columns3, GanttChart, CalendarDays, Search } from 'lucide-react';
 import WorkboardWeekView from './WorkboardWeekView';
 import WorkListView from './views/WorkListView';
+import WorkBoardView from './views/WorkBoardView';
 import WorkboardStats from './WorkboardStats';
 import WorkboardRail from './WorkboardRail';
 import WorkItemDialog, { type DialogTarget } from './WorkItemDialog';
@@ -227,7 +228,16 @@ export default function WorkboardShell(
               onNewItem={openCreateDialog}
             />
           )}
-          {(view === 'board' || view === 'timeline') && (
+          {view === 'board' && (
+            <WorkBoardView
+              items={visibleItems}
+              todayStr={work.generated_at}
+              isFiltered={isFiltered}
+              onChanged={refreshWork}
+              onNewItem={openCreateDialog}
+            />
+          )}
+          {view === 'timeline' && (
             <p style={{ color: '#8a94a6', fontSize: '0.9rem' }}>
               {visibleItems.length} work item{visibleItems.length === 1 ? '' : 's'} match{visibleItems.length === 1 ? 'es' : ''} the current filter.
             </p>
