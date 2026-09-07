@@ -6,6 +6,7 @@ import { ArrowLeft, List, Columns3, GanttChart, CalendarDays, Search } from 'luc
 import WorkboardWeekView from './WorkboardWeekView';
 import WorkListView from './views/WorkListView';
 import WorkboardStats from './WorkboardStats';
+import WorkboardRail from './WorkboardRail';
 import WorkItemDialog, { type DialogTarget } from './WorkItemDialog';
 import type { WorkboardWeek } from '@/lib/workboard/aggregate';
 import type { WorkItem, ProjectSummary } from '@/lib/workboard/workItems';
@@ -210,22 +211,36 @@ export default function WorkboardShell(
         </div>
       </div>
 
-      {view === 'calendar' && <WorkboardWeekView initialWeek={initialWeek} />}
-      {view === 'list' && (
-        <WorkListView
-          items={visibleItems}
-          todayStr={work.generated_at}
-          isFiltered={isFiltered}
-          onChanged={refreshWork}
-          onEdit={openEditDialog}
-          onNewItem={openCreateDialog}
-        />
-      )}
-      {(view === 'board' || view === 'timeline') && (
-        <p style={{ color: '#8a94a6', fontSize: '0.9rem' }}>
-          {visibleItems.length} work item{visibleItems.length === 1 ? '' : 's'} match{visibleItems.length === 1 ? 'es' : ''} the current filter.
-        </p>
-      )}
+      {/* Direction doc §10/§12: the rail sits beside List/Calendar (fixed 240px column) and
+          collapses entirely on Board/Timeline so kanban columns and the date axis get the
+          full canvas rather than degrading under a squeeze. */}
+      <div style={{ display: 'flex', gap: '18px', alignItems: 'flex-start' }}>
+        <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+          {view === 'calendar' && <WorkboardWeekView initialWeek={initialWeek} />}
+          {view === 'list' && (
+            <WorkListView
+              items={visibleItems}
+              todayStr={work.generated_at}
+              isFiltered={isFiltered}
+              onChanged={refreshWork}
+              onEdit={openEditDialog}
+              onNewItem={openCreateDialog}
+            />
+          )}
+          {(view === 'board' || view === 'timeline') && (
+            <p style={{ color: '#8a94a6', fontSize: '0.9rem' }}>
+              {visibleItems.length} work item{visibleItems.length === 1 ? '' : 's'} match{visibleItems.length === 1 ? 'es' : ''} the current filter.
+            </p>
+          )}
+        </div>
+
+        {(view === 'list' || view === 'calendar') && (
+          // Whole-board data (`work.workload` / `work.items`), never `visibleItems` — the
+          // rail describes the whole board, same rule the stat cards follow, so its numbers
+          // never move as the user types in search or switches category tabs.
+          <WorkboardRail workload={work.workload} items={work.items} todayStr={work.generated_at} />
+        )}
+      </div>
 
       {dialogTarget && (
         <WorkItemDialog
