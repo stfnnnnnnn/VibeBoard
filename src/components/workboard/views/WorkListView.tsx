@@ -43,9 +43,13 @@ export interface WorkListViewProps {
    *  predates category/search filtering and assumes the former). */
   isFiltered?: boolean;
   onChanged:  () => void | Promise<void>;
+  /** Opens the create/edit dialog (Task 13) in edit mode for a given item. */
+  onEdit:     (item: WorkItem) => void;
+  /** Opens the create/edit dialog in create mode — wired to this view's own empty-state button. */
+  onNewItem:  () => void;
 }
 
-export default function WorkListView({ items: allItems, todayStr, isFiltered, onChanged }: WorkListViewProps) {
+export default function WorkListView({ items: allItems, todayStr, isFiltered, onChanged, onEdit, onNewItem }: WorkListViewProps) {
   const groups = useMemo(
     () => groupByTimeframe(allItems, todayStr),
     [allItems, todayStr],
@@ -79,12 +83,7 @@ export default function WorkListView({ items: allItems, todayStr, isFiltered, on
         <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: '#5c6b80', margin: '0 0 18px' }}>
           Add your first work item to get started.
         </p>
-        {/* No add-item entry point exists in the shell yet (Task 11 only builds List) —
-            this button is rendered per the direction doc's spec, ready for that flow to
-            attach an onClick once it exists. `disabled` until then: this is the only
-            control a brand-new user sees on first run, so it must not look interactive
-            while it does nothing. */}
-        <button type="button" className="vb-btn-pink" disabled style={{ width: 'auto', padding: '10px 22px' }}>
+        <button type="button" className="vb-btn-pink" onClick={onNewItem} style={{ width: 'auto', padding: '10px 22px' }}>
           New Work Item
         </button>
       </div>
@@ -133,6 +132,7 @@ export default function WorkListView({ items: allItems, todayStr, isFiltered, on
                       isDesktop={isDesktop}
                       isLast={i === items.length - 1}
                       onChanged={onChanged}
+                      onEdit={onEdit}
                     />
                   ))}
                 </div>

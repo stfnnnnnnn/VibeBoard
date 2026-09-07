@@ -6,6 +6,7 @@ import { ArrowLeft, List, Columns3, GanttChart, CalendarDays, Search } from 'luc
 import WorkboardWeekView from './WorkboardWeekView';
 import WorkListView from './views/WorkListView';
 import WorkboardStats from './WorkboardStats';
+import WorkItemDialog, { type DialogTarget } from './WorkItemDialog';
 import type { WorkboardWeek } from '@/lib/workboard/aggregate';
 import type { WorkItem, ProjectSummary } from '@/lib/workboard/workItems';
 // `WORK_CATEGORIES`/`WorkCategory` come from `workCategories.ts`, not `workItems.ts` — the
@@ -59,12 +60,28 @@ export default function WorkboardShell(
   const [work, setWork] = useState<WorkPayload>(initialWork);
   const [category, setCategory] = useState<CategoryFilter>('all');
   const [query, setQuery] = useState('');
+  const [dialogTarget, setDialogTarget] = useState<DialogTarget | null>(null);
 
   /** Re-pulls the whole work payload. Called after any mutation so stats, the workload
    *  chart, and every view stay consistent without each one tracking its own deltas. */
   const refreshWork = async () => {
     const res = await fetch('/api/workboard/work');
     if (res.ok) setWork(await res.json());
+  };
+
+  const openCreateDialog = () => setDialogTarget({ mode: 'create' });
+  const openEditDialog = (item: WorkItem) => setDialogTarget({ mode: 'edit', item });
+
+  /** Keeps the dialog's project select current the moment a project is created inline,
+   *  without waiting for the next `refreshWork()` (which only runs after the item itself
+   *  saves — the project can be created and abandoned mid-dialog). */
+  const handleProjectCreated = (project: ProjectSummary) => {
+    setWork(w => ({
+      ...w,
+      projects: [...w.projects, project].sort(
+        (a, b) => a.status.localeCompare(b.status) || a.name.localeCompare(b.name),
+      ),
+    }));
   };
 
   // Stats and the workload chart deliberately read `work.stats` / `work.workload` directly
@@ -163,22 +180,33 @@ export default function WorkboardShell(
           ))}
         </div>
 
-        <div style={{ position: 'relative', minWidth: '220px' }}>
-          <Search size={15} color="#8a94a6" aria-hidden style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-          <input
-            type="search"
-            className="vb-work-search"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Search work items…"
-            aria-label="Search work items"
-            style={{
-              width: '100%', minHeight: '40px', boxSizing: 'border-box', borderRadius: '999px',
-              padding: '8px 14px 8px 36px', background: 'rgba(255,255,255,0.5)',
-              border: '1px solid rgba(200,210,230,0.5)', fontFamily: FONT, fontSize: '0.82rem',
-              fontWeight: 500, color: '#2d3748',
-            }}
-          />
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="vb-btn-pink"
+            onClick={openCreateDialog}
+            style={{ width: 'auto', minHeight: '40px', padding: '8px 18px', boxSizing: 'border-box' }}
+          >
+            New Work Item
+          </button>
+
+          <div style={{ position: 'relative', minWidth: '220px' }}>
+            <Search size={15} color="#8a94a6" aria-hidden style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+            <input
+              type="search"
+              className="vb-work-search"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search work items…"
+              aria-label="Search work items"
+              style={{
+                width: '100%', minHeight: '40px', boxSizing: 'border-box', borderRadius: '999px',
+                padding: '8px 14px 8px 36px', background: 'rgba(255,255,255,0.5)',
+                border: '1px solid rgba(200,210,230,0.5)', fontFamily: FONT, fontSize: '0.82rem',
+                fontWeight: 500, color: '#2d3748',
+              }}
+            />
+          </div>
         </div>
       </div>
 
@@ -189,12 +217,24 @@ export default function WorkboardShell(
           todayStr={work.generated_at}
           isFiltered={isFiltered}
           onChanged={refreshWork}
+          onEdit={openEditDialog}
+          onNewItem={openCreateDialog}
         />
       )}
       {(view === 'board' || view === 'timeline') && (
         <p style={{ color: '#8a94a6', fontSize: '0.9rem' }}>
           {visibleItems.length} work item{visibleItems.length === 1 ? '' : 's'} match{visibleItems.length === 1 ? 'es' : ''} the current filter.
         </p>
+      )}
+
+      {dialogTarget && (
+        <WorkItemDialog
+          target={dialogTarget}
+          projects={work.projects}
+          onClose={() => setDialogTarget(null)}
+          onSaved={refreshWork}
+          onProjectCreated={handleProjectCreated}
+        />
       )}
 
       <style jsx>{`

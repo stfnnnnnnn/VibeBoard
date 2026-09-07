@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MoreVertical } from 'lucide-react';
 import type { WorkItem, WorkStatus, WorkCategory } from '@/lib/workboard/workItems';
 import { courseColor } from '@/lib/workboard/color';
@@ -109,13 +109,33 @@ export interface WorkItemRowProps {
   /** Suppresses the row's bottom divider — the last row in a section has none. */
   isLast:     boolean;
   onChanged:  () => void | Promise<void>;
+  /** Opens the create/edit dialog (Task 13) in edit mode for this item. */
+  onEdit:     (item: WorkItem) => void;
 }
 
-export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChanged }: WorkItemRowProps) {
+export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChanged, onEdit }: WorkItemRowProps) {
   const [pending, setPending] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const meta = buildMeta(item, todayStr);
   const edgeColor = EDGE_COLOR[item.priority];
   const divider = isLast ? 'none' : '1px solid rgba(200,210,230,0.35)';
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [menuOpen]);
 
   const isDone = item.work_status === 'done';
 
@@ -157,26 +177,53 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
     </label>
   );
 
-  // Rendered per the direction doc's §3 row structure (6 of 6 elements), but there's no menu
-  // content behind it yet — no edit/delete/"Move to" flow exists as of Task 11. `disabled` so
-  // it isn't a live tab stop that announces an action and then does nothing (Task 15's Board
-  // needs real content here for its "Move to →" submenu; whichever task builds that should
-  // wire this trigger up rather than adding a second one).
+  // Rendered per the direction doc's §3 row structure (6 of 6 elements). Task 13 wires this
+  // up to a single "Edit" action opening the create/edit dialog; Task 15's Board is expected
+  // to add a "Move to →" submenu alongside it rather than building a second trigger.
   const overflowButton = (
-    <button
-      type="button"
-      className="vb-row-overflow"
-      aria-label="More options"
-      title="More options"
-      disabled
-      style={{
-        width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'transparent', border: 'none', borderRadius: '8px', color: '#5c6b80',
-        cursor: 'not-allowed', flexShrink: 0, opacity: 0.45,
-      }}
-    >
-      <MoreVertical size={16} />
-    </button>
+    <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        type="button"
+        className="vb-row-overflow"
+        aria-label="More options"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        title="More options"
+        onClick={() => setMenuOpen(o => !o)}
+        style={{
+          width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'transparent', border: 'none', borderRadius: '8px', color: '#5c6b80',
+          cursor: 'pointer', flexShrink: 0,
+        }}
+      >
+        <MoreVertical size={16} />
+      </button>
+      {menuOpen && (
+        <div
+          role="menu"
+          className="vb-row-menu"
+          style={{
+            position: 'absolute', right: 0, top: '36px', zIndex: 20, minWidth: '120px',
+            background: '#fff', borderRadius: '10px', border: '1px solid rgba(200,210,230,0.6)',
+            boxShadow: '0 8px 24px rgba(31,38,68,0.18)', padding: '4px', overflow: 'hidden',
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="vb-row-menu-item"
+            onClick={() => { setMenuOpen(false); onEdit(item); }}
+            style={{
+              display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
+              background: 'transparent', border: 'none', borderRadius: '6px', cursor: 'pointer',
+              fontFamily: FONT, fontSize: '0.82rem', fontWeight: 600, color: '#2d3748',
+            }}
+          >
+            Edit
+          </button>
+        </div>
+      )}
+    </div>
   );
 
   return (
@@ -243,7 +290,7 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
               {item.title}
             </span>
             {item.priority === 'high' && <span style={{ marginLeft: '8px' }}><HighPriorityPill /></span>}
-            <span style={{ marginLeft: 'auto', paddingLeft: '8px' }}>{overflowButton}</span>
+            <div style={{ marginLeft: 'auto', paddingLeft: '8px' }}>{overflowButton}</div>
           </div>
 
           <div style={{ marginLeft: '52px', marginTop: '6px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
@@ -264,6 +311,8 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
         .vb-row-checkbox:focus-visible { outline: 2px solid #2a7fa8; outline-offset: 2px; border-radius: 4px; }
         .vb-row-overflow:focus-visible { outline: 2px solid #2a7fa8; outline-offset: 2px; }
         .vb-row-overflow:hover:not(:disabled) { background: rgba(200,210,230,0.3); }
+        .vb-row-menu-item:hover { background: rgba(116,188,217,0.12); }
+        .vb-row-menu-item:focus-visible { outline: 2px solid #2a7fa8; outline-offset: -2px; }
       `}</style>
     </div>
   );
