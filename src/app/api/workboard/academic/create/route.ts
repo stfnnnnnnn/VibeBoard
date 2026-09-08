@@ -58,12 +58,35 @@ export async function POST(req: NextRequest) {
   if (typeof deadline !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(deadline)) {
     return Response.json({ error: 'A deadline (YYYY-MM-DD) is required' }, { status: 400 });
   }
+  // The regex proves the shape, not the date: '2026-13-45', '2026-02-31' and '0000-00-00'
+  // all match it. This is the same hazard as MAX_TITLE_LENGTH above — `sql_mode` here is
+  // NO_ZERO_IN_DATE,NO_ZERO_DATE,NO_ENGINE_SUBSTITUTION with no STRICT_TRANS_TABLES, so
+  // MySQL stores an impossible date with a warning instead of erroring and the route
+  // answers 200, leaving a live Study Pulse row with a zero deadline that both Workboard
+  // and the Study Pulse subject page have to render. Require the date to round-trip.
+  const parsedDeadline = new Date(`${deadline}T00:00:00Z`);
+  if (
+    Number.isNaN(parsedDeadline.getTime()) ||
+    parsedDeadline.toISOString().slice(0, 10) !== deadline
+  ) {
+    return Response.json({ error: 'A deadline (YYYY-MM-DD) is required' }, { status: 400 });
+  }
   // `checkReferences` skips keys whose value is null/undefined, so an omitted or
   // non-numeric `user_subject_id` would sail straight past it and land a Study Pulse row
   // with a null subject. Everything below — the grading-mode lookup, the category
-  // ownership join, the insert itself — assumes this has been established first.
-  if (!Number.isInteger(user_subject_id) || user_subject_id <= 0) {
+  // ownership join, the insert itself — assumes this has been established first. The
+  // strictness is deliberate: the raw value flows unchanged into four consumers, so there
+  // is no seam for a coerced-versus-raw mismatch, and `parseInt('11abc') === 11` /
+  // `Number(true) === 1` die at the door. The two messages are split so a present-but-
+  // wrong-typed value (a `<select>` sends a *string*) does not read as a missing field.
+  if (!('user_subject_id' in body)) {
     return Response.json({ error: 'A subject is required' }, { status: 400 });
+  }
+  if (!Number.isInteger(user_subject_id) || user_subject_id <= 0) {
+    return Response.json(
+      { error: 'user_subject_id must be a positive integer' },
+      { status: 400 },
+    );
   }
   const refError = await checkReferences(userId, { userSubjectId: user_subject_id });
   if (refError) return Response.json({ error: refError }, { status: 400 });
@@ -87,6 +110,17 @@ export async function POST(req: NextRequest) {
   if (target_type === 'grade_entries') {
     if (!cat_id || !period_id) {
       return Response.json({ error: 'cat_id and period_id are required for grade_entries' }, { status: 400 });
+    }
+    // Same rule as `user_subject_id`, so one creation dialog does not face three different
+    // rules for three fields that all come out of a `<select>`. Not a security control —
+    // the ownership join below gates both before they reach the insert — but without it a
+    // garbage type surfaces either as the misleading "does not belong to this subject" or,
+    // for an array, as an unhandled 500 from `execute`.
+    if (!Number.isInteger(cat_id) || cat_id <= 0) {
+      return Response.json({ error: 'cat_id must be a positive integer' }, { status: 400 });
+    }
+    if (!Number.isInteger(period_id) || period_id <= 0) {
+      return Response.json({ error: 'period_id must be a positive integer' }, { status: 400 });
     }
     // Never trust a client-supplied cat_id/period_id: this proves the category lives in the
     // given period and that period's preset is the one configured for THIS subject. It is
