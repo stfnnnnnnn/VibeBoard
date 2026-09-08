@@ -3,6 +3,10 @@ import type { RowDataPacket } from 'mysql2';
 import { todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
 import { addDays, dueDateOf } from '@/lib/workboard/dates';
 import type { WorkCategory } from '@/lib/workboard/workCategories';
+import type { WorkContext, WorkStage, LifeArea } from '@/lib/workboard/workContexts';
+import { isStageLegal } from '@/lib/workboard/workContexts';
+import type { OrganizationSummary } from '@/lib/workboard/organizations';
+import { listOrganizations } from '@/lib/workboard/organizations';
 
 export type WorkStatus   = 'todo' | 'in_progress' | 'done';
 export type WorkPriority = 'high' | 'normal' | 'low';
@@ -20,21 +24,42 @@ export interface WorkItem {
   source:           WorkSource;   // 'owned' = workboard_work_items; else the Study Pulse table
   id:               number;       // primary key within that source
   title:            string;
+  /** @deprecated Use `context`. Retained for one release. */
   category:         WorkCategory;
-  /** Project name when project_id is set, else course code when user_subject_id is set,
-   *  else null. Project wins if both are somehow set. */
+  /** Domain term for the DB's `category` column. */
+  context:          WorkContext;
+  /** Project name when project_id is set, else organization name, else course code when
+   *  user_subject_id is set, else null. Earlier entries in that chain win if several are set. */
   chip_label:       string | null;
+  /** First-class project name, independent of `chip_label`'s collapsed chain — the
+   *  Academic table needs Course and Project as two separate columns. Null for academic rows. */
+  project_name:     string | null;
+  /** First-class course code, independent of `chip_label`. */
+  course_code:      string | null;
   project_id:       number | null;
   user_subject_id:  number | null;
   priority:         WorkPriority;
   work_status:      WorkStatus;
+  /** Per-context stage. `work_status` remains its normalised value. */
+  work_stage:       WorkStage;
   /** "YYYY-MM-DD HH:MM:SS" for owned items, "YYYY-MM-DD" for academic ones (Study Pulse's
    *  deadline columns are DATE). Always slice(0,10) to compare dates — never parse as a Date. */
   due_at:           string | null;
+  /** "HH:MM:SS" or null. The date lives in `due_at`; an absent time renders as an em dash. */
+  deadline_time:    string | null;
   start_date:       string | null;
   estimated_hours:  number | null;
   completed_at:     string | null;
   note:             string | null;
+  life_area:        LifeArea | null;
+  organization_id:  number | null;
+  organization_name: string | null;
+  /** The parent context of the linked project, when there is one — lets the Table view
+   *  label the column "Project" vs "Initiative" without a second query. */
+  project_context:  WorkContext | null;
+  link_count:       number;
+  subtask_total:    number;
+  subtask_done:     number;
 }
 
 export interface ProjectSummary {
@@ -47,6 +72,7 @@ export interface ProjectSummary {
 export interface WorkItemsPayload {
   items:         WorkItem[];
   projects:      ProjectSummary[];
+  organizations: OrganizationSummary[];
   generated_at:  string;   // "YYYY-MM-DD" — today's Manila date, so clients group without re-deriving it
 }
 
@@ -79,6 +105,20 @@ export function deriveAcademicStatus(
 ): WorkStatus {
   if (entryStatus === 'Done') return 'done';
   if (inProgress) return 'in_progress';
+  return 'todo';
+}
+
+/**
+ * The stage-level companion to `deriveAcademicStatus`. Study Pulse's `'Done'` is still
+ * checked FIRST — a stale overlay stage can never mask a genuinely completed item. When
+ * the entry is done, the overlay only decides *which* done-ish label to show.
+ */
+export function deriveAcademicStage(
+  entryStatus: string | null | undefined,
+  metaStage: string | null | undefined,
+): WorkStage {
+  if (entryStatus === 'Done') return metaStage === 'submitted' ? 'submitted' : 'done';
+  if (metaStage && isStageLegal('academic', metaStage)) return metaStage;
   return 'todo';
 }
 
@@ -122,10 +162,18 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
 
   const [ownedRows] = await pool.execute<RowDataPacket[]>(
     `SELECT wi.id, wi.category, wi.project_id, wi.user_subject_id, wi.title, wi.note,
-            wi.priority, wi.work_status, wi.due_at, wi.start_date, wi.estimated_hours,
-            wi.completed_at, p.name AS project_name, s.course_code
+            wi.priority, wi.work_status, wi.work_stage, wi.due_at, wi.deadline_time,
+            wi.start_date, wi.estimated_hours, wi.completed_at,
+            wi.life_area, wi.organization_id,
+            p.name AS project_name, p.context AS project_context,
+            o.name AS organization_name,
+            s.course_code,
+            (SELECT COUNT(*) FROM workboard_item_links l WHERE l.work_item_id = wi.id) AS link_count,
+            (SELECT COUNT(*) FROM workboard_subtasks t WHERE t.work_item_id = wi.id) AS subtask_total,
+            (SELECT COUNT(*) FROM workboard_subtasks t WHERE t.work_item_id = wi.id AND t.is_done = 1) AS subtask_done
      FROM workboard_work_items wi
      LEFT JOIN workboard_projects p ON p.id = wi.project_id
+     LEFT JOIN workboard_organizations o ON o.id = wi.organization_id
      LEFT JOIN user_subjects us ON us.user_subject_id = wi.user_subject_id
      LEFT JOIN subjects s ON s.subject_id = us.subject_id
      WHERE wi.user_id = ?
@@ -138,16 +186,31 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
     id:              r.id,
     title:           r.title,
     category:        r.category,
-    chip_label:      r.project_name ?? r.course_code ?? null,
+    context:         r.category,
+    chip_label:      r.project_name ?? r.organization_name ?? r.course_code ?? null,
+    project_name:    r.project_name ?? null,
+    course_code:     r.course_code ?? null,
     project_id:      r.project_id,
     user_subject_id: r.user_subject_id,
     priority:        r.priority,
     work_status:     r.work_status,
+    // Defensive fallback: rows created by a write path that hasn't yet been migrated to set
+    // work_stage (pre-v3 POST/PATCH routes) leave the column NULL. Falling back to work_status
+    // keeps the normaliseStage(work_stage) === work_status invariant true for every row.
+    work_stage:      (r.work_stage ?? r.work_status) as WorkStage,
     due_at:          r.due_at,
+    deadline_time:   r.deadline_time,
     start_date:      r.start_date ? String(r.start_date).slice(0, 10) : null,
     estimated_hours: r.estimated_hours === null ? null : Number(r.estimated_hours),
     completed_at:    r.completed_at,
     note:            r.note,
+    life_area:       r.life_area,
+    organization_id: r.organization_id,
+    organization_name: r.organization_name,
+    project_context: r.project_context ?? null,
+    link_count:      Number(r.link_count),
+    subtask_total:   Number(r.subtask_total),
+    subtask_done:    Number(r.subtask_done),
   }));
 
   for (const spec of ACADEMIC_TABLES) {
@@ -155,7 +218,10 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
       `SELECT t.\`${spec.pk}\` AS entry_id, t.\`${spec.nameCol}\` AS title, t.user_subject_id,
               t.urgency, t.status, t.deadline, t.accomplished_at,
               s.course_code,
-              m.in_progress, m.estimated_hours, m.start_date
+              m.in_progress, m.estimated_hours, m.start_date, m.deadline_time, m.work_stage,
+              (SELECT COUNT(*) FROM workboard_item_links l WHERE l.\`${spec.metaCol}\` = t.\`${spec.pk}\`) AS link_count,
+              (SELECT COUNT(*) FROM workboard_subtasks st WHERE st.\`${spec.metaCol}\` = t.\`${spec.pk}\`) AS subtask_total,
+              (SELECT COUNT(*) FROM workboard_subtasks st WHERE st.\`${spec.metaCol}\` = t.\`${spec.pk}\` AND st.is_done = 1) AS subtask_done
        FROM \`${spec.table}\` t
        JOIN user_subjects us ON us.user_subject_id = t.user_subject_id
        JOIN subjects s ON s.subject_id = us.subject_id
@@ -171,20 +237,34 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
         id:              r.entry_id,
         title:           r.title,
         category:        'academic',
+        context:         'academic',
         chip_label:      r.course_code ?? null,
+        project_name:    null,
+        course_code:     r.course_code ?? null,
         project_id:      null,
         user_subject_id: r.user_subject_id,
         priority:        priorityFromUrgency(r.urgency),
         work_status:     deriveAcademicStatus(r.status, r.in_progress),
+        work_stage:      deriveAcademicStage(r.status, r.work_stage),
         due_at:          r.deadline ? String(r.deadline).slice(0, 10) : null,
+        deadline_time:   r.deadline_time,
         start_date:      r.start_date ? String(r.start_date).slice(0, 10) : null,
         estimated_hours: r.estimated_hours === null || r.estimated_hours === undefined
                            ? null : Number(r.estimated_hours),
         completed_at:    r.accomplished_at ? String(r.accomplished_at).slice(0, 10) : null,
         note:            null,
+        life_area:       null,
+        organization_id: null,
+        organization_name: null,
+        project_context: null,
+        link_count:      Number(r.link_count),
+        subtask_total:   Number(r.subtask_total),
+        subtask_done:    Number(r.subtask_done),
       });
     }
   }
 
-  return { items, projects, generated_at: today };
+  const organizations = await listOrganizations(userId);
+
+  return { items, projects, organizations, generated_at: today };
 }
