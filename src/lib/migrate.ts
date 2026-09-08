@@ -651,6 +651,12 @@ export async function ensureWorkboardV2Schema(): Promise<void> {
 export async function ensureWorkboardV3Schema(): Promise<void> {
   if (_ranWorkboardV3) return;
 
+  // v3 is an extension of v2, never a standalone schema: it ALTERs workboard_entry_meta
+  // and workboard_work_items, and its new tables carry foreign keys into
+  // workboard_work_items -- all v2 objects. Chaining here makes that ordering hold by
+  // construction, so a caller can ask for v3 alone and still get a coherent schema.
+  await ensureWorkboardV2Schema();
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS workboard_organizations (
       id          INT AUTO_INCREMENT PRIMARY KEY,
