@@ -1,0 +1,125 @@
+import { NextRequest } from 'next/server';
+import { auth } from '@/auth';
+import pool from '@/lib/db';
+import type { RowDataPacket } from 'mysql2';
+import { ensureWorkboardV3Schema } from '@/lib/migrate';
+import { checkReferences } from '@/lib/workboard/ownership';
+import {
+  insertActivityEntry, insertQuizEntry, insertExamEntry, insertGradeEntry,
+} from '@/lib/studypulseEntries';
+
+const LEGACY_TARGETS = ['activities', 'quizzes', 'exams'] as const;
+
+/** `activities.activity_name`, `quizzes.quiz_name`, `exams.exam_name` and
+ *  `grade_entries.name` are all VARCHAR(100) on the live schema (verified against
+ *  information_schema, not assumed), and this database does not run in STRICT mode — an
+ *  over-long title would be silently truncated rather than rejected, quietly mangling a
+ *  row in a module Workboard does not own. Reject it here instead. */
+const MAX_TITLE_LENGTH = 100;
+
+/** Same check the Canvas Include route uses: a subject is "custom" mode when it has a
+ *  subject_grading row pointing at a real grading preset. */
+async function getSubjectMode(userSubjectId: number): Promise<'legacy' | 'custom'> {
+  try {
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT 1 FROM subject_grading sg
+       JOIN grading_presets gp ON gp.preset_id = sg.preset_id
+       WHERE sg.user_subject_id = ?`,
+      [userSubjectId],
+    );
+    return rows.length ? 'custom' : 'legacy';
+  } catch (err) {
+    console.error('Workboard academic create: grading-mode lookup failed, assuming legacy:', err);
+    return 'legacy';
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  await ensureWorkboardV3Schema();
+  const userId = parseInt(session.user.id);
+
+  const body = await req.json();
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return Response.json({ error: 'Body must be an object' }, { status: 400 });
+  }
+  const { user_subject_id, title, target_type, cat_id, period_id, deadline, priority } = body;
+
+  if (typeof title !== 'string' || !title.trim()) {
+    return Response.json({ error: 'A title is required' }, { status: 400 });
+  }
+  if (title.trim().length > MAX_TITLE_LENGTH) {
+    return Response.json(
+      { error: `A title of at most ${MAX_TITLE_LENGTH} characters is required` },
+      { status: 400 },
+    );
+  }
+  if (typeof deadline !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(deadline)) {
+    return Response.json({ error: 'A deadline (YYYY-MM-DD) is required' }, { status: 400 });
+  }
+  // `checkReferences` skips keys whose value is null/undefined, so an omitted or
+  // non-numeric `user_subject_id` would sail straight past it and land a Study Pulse row
+  // with a null subject. Everything below — the grading-mode lookup, the category
+  // ownership join, the insert itself — assumes this has been established first.
+  if (!Number.isInteger(user_subject_id) || user_subject_id <= 0) {
+    return Response.json({ error: 'A subject is required' }, { status: 400 });
+  }
+  const refError = await checkReferences(userId, { userSubjectId: user_subject_id });
+  if (refError) return Response.json({ error: refError }, { status: 400 });
+
+  const mode = await getSubjectMode(user_subject_id);
+  if (mode === 'custom' && LEGACY_TARGETS.includes(target_type)) {
+    return Response.json(
+      { error: 'This subject uses custom grading. Choose a period and category instead.' },
+      { status: 400 },
+    );
+  }
+  if (mode === 'legacy' && target_type === 'grade_entries') {
+    return Response.json(
+      { error: 'This subject uses the standard Activity/Quiz/Exam categories.' },
+      { status: 400 },
+    );
+  }
+  if (target_type !== 'grade_entries' && !LEGACY_TARGETS.includes(target_type)) {
+    return Response.json({ error: 'Invalid target_type' }, { status: 400 });
+  }
+  if (target_type === 'grade_entries') {
+    if (!cat_id || !period_id) {
+      return Response.json({ error: 'cat_id and period_id are required for grade_entries' }, { status: 400 });
+    }
+    // Never trust a client-supplied cat_id/period_id: this proves the category lives in the
+    // given period and that period's preset is the one configured for THIS subject. It is
+    // only sound because `checkReferences` above already proved the subject is the user's.
+    const [owns] = await pool.execute<RowDataPacket[]>(
+      `SELECT 1 FROM grading_categories gc
+       JOIN grading_periods gp ON gp.period_id = gc.period_id
+       JOIN subject_grading sg ON sg.preset_id = gp.preset_id
+       WHERE gc.cat_id = ? AND gc.period_id = ? AND sg.user_subject_id = ?`,
+      [cat_id, period_id, user_subject_id],
+    );
+    if (!owns.length) {
+      return Response.json({ error: 'That category/period does not belong to this subject' }, { status: 400 });
+    }
+  }
+
+  // Anything that isn't 'high' or 'low' is deliberately treated as Medium — the creation
+  // form only ever sends those three, and an unknown value is not worth a 400 here.
+  const urgency = priority === 'high' ? 'High' : priority === 'low' ? 'Low' : 'Medium';
+  // score/items/grade stay null: the row is created ungraded. Study Pulse's pre-existing
+  // BEFORE UPDATE trigger forces status='Done' on graded rows, so leaving these null is
+  // what keeps a freshly-created item safe to un-complete from Workboard.
+  const common = {
+    entryId: null, userSubjectId: user_subject_id, name: title.trim(),
+    specificType: '', urgency, status: 'Pending', deadline,
+    score: null, items: null, grade: null, accomplishedAt: null,
+  };
+
+  let entryId: number;
+  if (target_type === 'activities')     entryId = (await insertActivityEntry(common)).entryId;
+  else if (target_type === 'quizzes')   entryId = (await insertQuizEntry(common)).entryId;
+  else if (target_type === 'exams')     entryId = (await insertExamEntry(common)).entryId;
+  else entryId = (await insertGradeEntry({ ...common, catId: cat_id, periodId: period_id, isLab: false })).entryId;
+
+  return Response.json({ status: 'success', source: target_type, entry_id: entryId });
+}
