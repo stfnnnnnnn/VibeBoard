@@ -55,3 +55,18 @@ export function manilaNowDatetime(): string {
 export function dueDateOf(item: { due_at: string | null }): string | null {
   return item.due_at ? item.due_at.slice(0, 10) : null;
 }
+
+/** The wire format for a deadline time: "HH:MM" or "HH:MM:SS". Shared by the work-items
+ *  POST and PATCH so the two routes cannot drift on what they accept. */
+export const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
+
+/** Normalises a wire deadline time to the "HH:MM:SS" shape a TIME column round-trips, so
+ *  a value stored from the short form and one stored from the long form read back the
+ *  same. Returns null for anything the pattern does not accept — the seconds come from
+ *  the match itself rather than from the input's length, so this stays correct even if a
+ *  caller ever runs it before its validation guard. */
+export function normaliseDeadlineTime(value: string): string | null {
+  const match = TIME_PATTERN.exec(value);
+  if (!match) return null;
+  return `${match[1]}:${match[2]}:${match[3] ?? '00'}`;
+}

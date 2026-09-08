@@ -4,19 +4,12 @@ import pool from '@/lib/db';
 import type { ResultSetHeader } from 'mysql2';
 import { ensureWorkboardV2Schema, ensureWorkboardV3Schema } from '@/lib/migrate';
 import { WORK_CATEGORIES } from '@/lib/workboard/workItems';
-import { manilaNowDatetime } from '@/lib/workboard/dates';
+import { manilaNowDatetime, normaliseDeadlineTime, TIME_PATTERN } from '@/lib/workboard/dates';
 import { checkReferences } from '@/lib/workboard/ownership';
 import { LIFE_AREAS, isStageLegal, normaliseStage, type WorkContext } from '@/lib/workboard/workContexts';
 
 const PRIORITIES = ['high', 'normal', 'low'];
 const STATUSES   = ['todo', 'in_progress', 'done'];
-const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
-
-/** The wire accepts "HH:MM" and "HH:MM:SS"; the TIME column should hold one shape, so the
- *  short form grows a ":00" before storage. */
-function normaliseDeadlineTime(value: string): string {
-  return value.length === 5 ? `${value}:00` : value;
-}
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -29,8 +22,12 @@ export async function POST(req: NextRequest) {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     return Response.json({ error: 'Body must be an object' }, { status: 400 });
   }
-  const { category, title, note, project_id, user_subject_id, organization_id, life_area,
-          priority, work_status, work_stage, due_at, deadline_time, start_date, estimated_hours } = body;
+  const { category, title, note, project_id, user_subject_id, organization_id,
+          priority, work_status, work_stage, due_at, start_date, estimated_hours } = body;
+  // A cleared <input> submits '' rather than omitting the key. Treat that as "no value",
+  // exactly as `due_at`'s `|| null` already does, so clearing a field is not a 400.
+  const life_area     = body.life_area === '' ? null : body.life_area;
+  const deadline_time = body.deadline_time === '' ? null : body.deadline_time;
 
   if (!WORK_CATEGORIES.includes(category)) {
     return Response.json({ error: 'category must be academic, project, organization, or life' }, { status: 400 });
