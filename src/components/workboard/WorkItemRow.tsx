@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { MoreVertical } from 'lucide-react';
 import type { WorkItem, WorkStatus, WorkCategory } from '@/lib/workboard/workItems';
 import { courseColor } from '@/lib/workboard/color';
-import { addDays, dueDateOf } from '@/lib/workboard/dates';
+import { dueStateOf, formatDueLabel, type DueState } from '@/lib/workboard/dueSemantics';
 
 /** Owned items and Study-Pulse-sourced items have different write endpoints. This is the
  *  single place that decision is made — no view should build these URLs itself. */
@@ -34,30 +34,36 @@ const EDGE_COLOR: Record<WorkItem['priority'], string> = {
   low:    '#d3dbe6',
 };
 
-/** "Due today" / "Due tomorrow" / "Overdue" / "Due Sep 12" — never a bare ISO date, per the
- *  direction doc's row meta line. `due` and `todayStr` are both "YYYY-MM-DD" so string
- *  comparison is safe (see WorkItem.due_at's doc comment: never parse these as Date). */
-function formatDueLabel(due: string | null, todayStr: string): string | null {
-  if (due === null) return null;
-  if (due < todayStr) return 'Overdue';
-  if (due === todayStr) return 'Due today';
-  if (due === addDays(todayStr, 1)) return 'Due tomorrow';
-  const d = new Date(`${due}T00:00:00Z`);
-  const month = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
-  return `Due ${month} ${d.getUTCDate()}`;
-}
+/** The meta line's color, keyed by the same `DueState` that produced its text — so the two can
+ *  never contradict each other. (They used to: the colour was computed from a bare
+ *  `due < todayStr` with no status check, which painted a completed-early item's "Completed"
+ *  label in the overdue alert red.) `Record<DueState, …>` means a new state cannot be added
+ *  without deciding its colour here.
+ *  `#922e48` is §6's overdue alert red; `#8a5010` is §2a's darkened amber, the only
+ *  AA-passing amber text colour in this system (§8 forbids the raw `#f0a35c` behind text);
+ *  `#5c6b80` is §1's ordinary meta-text colour. */
+const META_COLOR: Record<DueState, string> = {
+  none:           '#5c6b80',
+  upcoming:       '#5c6b80',
+  due_today:      '#5c6b80',
+  completed:      '#5c6b80',
+  completed_late: '#8a5010',
+  overdue:        '#922e48',
+};
 
-/** The row's single meta string — due label + estimate, joined by " · " — and whether it
- *  should render in the overdue alert color. Computed once and reused by both the desktop
- *  (meta line under the title) and mobile (meta folded into line 2) layouts so the two never
- *  disagree about what the row is telling the user. */
-function buildMeta(item: WorkItem, todayStr: string): { text: string | null; overdue: boolean } {
-  const due = dueDateOf(item);
-  const dueLabel = formatDueLabel(due, todayStr);
+/** The row's single meta string — due label + estimate, joined by " · " — and the colour it
+ *  renders in. Computed once and reused by both the desktop (meta line under the title) and
+ *  mobile (meta folded into line 2) layouts so the two never disagree about what the row is
+ *  telling the user. The label itself comes from `dueSemantics`, the module that owns due
+ *  wording for every Workboard surface — this file deliberately keeps no second copy. */
+function buildMeta(item: WorkItem, todayStr: string): { text: string | null; color: string } {
+  const dueLabel = formatDueLabel(item, todayStr);
   const estimateLabel = item.estimated_hours !== null ? `${item.estimated_hours}h` : null;
   const parts = [dueLabel, estimateLabel].filter((p): p is string => p !== null);
-  const overdue = due !== null && due < todayStr;
-  return { text: parts.length ? parts.join(' · ') : null, overdue };
+  return {
+    text: parts.length ? parts.join(' · ') : null,
+    color: META_COLOR[dueStateOf(item, todayStr)],
+  };
 }
 
 function CategoryChip({ category }: { category: WorkCategory }) {
@@ -256,7 +262,7 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
               {item.title}
             </span>
             {meta.text && (
-              <span style={{ fontFamily: FONT, fontSize: '0.76rem', fontWeight: 500, color: meta.overdue ? '#922e48' : '#5c6b80' }}>
+              <span style={{ fontFamily: FONT, fontSize: '0.76rem', fontWeight: 500, color: meta.color }}>
                 {meta.text}
               </span>
             )}
@@ -297,7 +303,7 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
             <CategoryChip category={item.category} />
             {item.chip_label && <ProjectChip label={item.chip_label} />}
             {meta.text && (
-              <span style={{ fontFamily: FONT, fontSize: '0.76rem', fontWeight: 500, color: meta.overdue ? '#922e48' : '#5c6b80' }}>
+              <span style={{ fontFamily: FONT, fontSize: '0.76rem', fontWeight: 500, color: meta.color }}>
                 {meta.text}
               </span>
             )}
