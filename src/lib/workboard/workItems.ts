@@ -4,7 +4,7 @@ import { todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
 import { addDays, dueDateOf } from '@/lib/workboard/dates';
 import type { WorkCategory } from '@/lib/workboard/workCategories';
 import type { WorkContext, WorkStage, LifeArea } from '@/lib/workboard/workContexts';
-import { isStageLegal } from '@/lib/workboard/workContexts';
+import { isStageLegal, normaliseStage } from '@/lib/workboard/workContexts';
 import type { OrganizationSummary } from '@/lib/workboard/organizations';
 import { listOrganizations } from '@/lib/workboard/organizations';
 
@@ -112,14 +112,24 @@ export function deriveAcademicStatus(
  * The stage-level companion to `deriveAcademicStatus`. Study Pulse's `'Done'` is still
  * checked FIRST — a stale overlay stage can never mask a genuinely completed item. When
  * the entry is done, the overlay only decides *which* done-ish label to show.
+ *
+ * `inProgress` is the legacy `workboard_entry_meta.in_progress` flag, used only as a
+ * fallback when no legal `work_stage` is present. The live v2 PATCH route
+ * (`patchAcademicItem`) still only writes `in_progress` and never `work_stage`, so an
+ * academic item marked in-progress through that route would otherwise fall all the way
+ * through to `'todo'` here while `deriveAcademicStatus` (below) correctly reports
+ * `'in_progress'` — breaking the stage/status invariant. `work_stage` still outranks the
+ * flag whenever it is present and legal (e.g. `'ready_to_submit'` written with
+ * `in_progress = 0` by a later task is not clobbered back to `'todo'`).
  */
 export function deriveAcademicStage(
   entryStatus: string | null | undefined,
   metaStage: string | null | undefined,
+  inProgress?: number | boolean | null,
 ): WorkStage {
   if (entryStatus === 'Done') return metaStage === 'submitted' ? 'submitted' : 'done';
   if (metaStage && isStageLegal('academic', metaStage)) return metaStage;
-  return 'todo';
+  return inProgress ? 'in_progress' : 'todo';
 }
 
 /** Re-exported from `@/lib/workboard/dates` (the pool-free module) so existing callers of
@@ -232,6 +242,11 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
     );
 
     for (const r of rows) {
+      // Derive the stage first, then derive work_status FROM the stage (rather than
+      // separately from deriveAcademicStatus) so normaliseStage(work_stage) === work_status
+      // holds by construction for every row, regardless of which write path (v2's
+      // in_progress-only PATCH, or a later task's work_stage-aware one) produced it.
+      const stage = deriveAcademicStage(r.status, r.work_stage, r.in_progress);
       items.push({
         source:          spec.source,
         id:              r.entry_id,
@@ -244,8 +259,8 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
         project_id:      null,
         user_subject_id: r.user_subject_id,
         priority:        priorityFromUrgency(r.urgency),
-        work_status:     deriveAcademicStatus(r.status, r.in_progress),
-        work_stage:      deriveAcademicStage(r.status, r.work_stage),
+        work_status:     normaliseStage(stage),
+        work_stage:      stage,
         due_at:          r.deadline ? String(r.deadline).slice(0, 10) : null,
         deadline_time:   r.deadline_time,
         start_date:      r.start_date ? String(r.start_date).slice(0, 10) : null,
