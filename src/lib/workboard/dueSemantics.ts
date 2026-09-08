@@ -1,4 +1,4 @@
-import { dueDateOf } from '@/lib/workboard/dates';
+import { addDays, dueDateOf } from '@/lib/workboard/dates';
 import type { WorkItem } from '@/lib/workboard/workItems';
 
 export type DueState = 'none' | 'upcoming' | 'due_today' | 'overdue' | 'completed' | 'completed_late';
@@ -60,6 +60,12 @@ export function formatDueLabel(item: WorkItem, todayStr: string): string | null 
     case 'completed_late': return date ? 'Completed late · ' + date : 'Completed late';
     case 'overdue':        return date ? 'Overdue · ' + date : 'Overdue';
     case 'due_today':      return 'Due today';
-    case 'upcoming':       return date ? 'Due ' + date : null;
+    // Tomorrow is a label distinction, not a state distinction: it groups and colours
+    // exactly like any other upcoming item, so it lives here rather than as a seventh
+    // `DueState` member six consumers would have to handle.
+    case 'upcoming': {
+      if (dueDateOf(item) === addDays(todayStr, 1)) return 'Due tomorrow';
+      return date ? 'Due ' + date : null;
+    }
   }
 }
