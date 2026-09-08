@@ -114,13 +114,15 @@ export function deriveAcademicStatus(
  * the entry is done, the overlay only decides *which* done-ish label to show.
  *
  * `inProgress` is the legacy `workboard_entry_meta.in_progress` flag, used only as a
- * fallback when no legal `work_stage` is present. The live v2 PATCH route
- * (`patchAcademicItem`) still only writes `in_progress` and never `work_stage`, so an
- * academic item marked in-progress through that route would otherwise fall all the way
- * through to `'todo'` here while `deriveAcademicStatus` (below) correctly reports
- * `'in_progress'` — breaking the stage/status invariant. `work_stage` still outranks the
- * flag whenever it is present and legal (e.g. `'ready_to_submit'` written with
- * `in_progress = 0` by a later task is not clobbered back to `'todo'`).
+ * fallback when no legal `work_stage` is present. As of Task 10 the PATCH route
+ * (`patchAcademicItem`) writes both columns together, so rows it touches always carry a
+ * stage and never reach this fallback; it exists for rows written *before* that release,
+ * when the route wrote only `in_progress`. Without it such a row — marked in-progress
+ * through the old path — would fall all the way through to `'todo'` here while
+ * `deriveAcademicStatus` (below) correctly reports `'in_progress'`, breaking the
+ * stage/status invariant. `work_stage` still outranks the flag whenever it is present and
+ * legal (e.g. `'ready_to_submit'`, which the write path deliberately stores alongside
+ * `in_progress = 0`, is not clobbered back to `'todo'`).
  */
 export function deriveAcademicStage(
   entryStatus: string | null | undefined,

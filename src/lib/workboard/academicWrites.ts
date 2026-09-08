@@ -4,7 +4,7 @@ import {
   ACADEMIC_TABLES, urgencyFromPriority,
   type AcademicSource, type WorkPriority,
 } from '@/lib/workboard/workItems';
-import { normaliseStage, type WorkStage, type WorkStatus } from '@/lib/workboard/workContexts';
+import { isStageLegal, normaliseStage, type WorkStage, type WorkStatus } from '@/lib/workboard/workContexts';
 import { normaliseDeadlineTime } from '@/lib/workboard/dates';
 import { todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
 
@@ -46,17 +46,26 @@ export async function patchAcademicItem(
   if (!spec) throw new AcademicItemNotFoundError();
 
   // Ownership: never trust the id in the URL — walk the entry back to this user's subjects.
-  // Also grab the entry's *current* status alongside the ownership check, so a patch that
-  // merely re-sends the dialog's seeded `work_status` (unchanged) doesn't re-stamp
-  // `accomplished_at` — see Finding 1 of the whole-branch review.
+  // The inner JOIN through `user_subjects` is the 404 gate and stays exactly as it was; the
+  // LEFT JOIN to the overlay is additive and cannot admit a row the gate would reject.
+  // Two current values ride along with the ownership check:
+  //   - `current_status`, so a patch that merely re-sends the dialog's seeded `work_status`
+  //     (unchanged) doesn't re-stamp `accomplished_at` — see Finding 1 of the whole-branch
+  //     review;
+  //   - `current_stage`, so the same re-send can't flatten a finer stored stage — see
+  //     Fix 1 of the Task 10 review.
   const [owns] = await pool.execute<RowDataPacket[]>(
-    `SELECT t.\`${spec.pk}\` AS id, t.status AS current_status FROM \`${spec.table}\` t
-     JOIN user_subjects us ON us.user_subject_id = t.user_subject_id
-     WHERE t.\`${spec.pk}\` = ? AND us.user_id = ?`,
-    [entryId, userId],
+    `SELECT t.\`${spec.pk}\` AS id, t.status AS current_status, m.work_stage AS current_stage
+       FROM \`${spec.table}\` t
+       JOIN user_subjects us ON us.user_subject_id = t.user_subject_id
+       LEFT JOIN workboard_entry_meta m
+         ON m.\`${spec.metaCol}\` = t.\`${spec.pk}\` AND m.user_id = ?
+      WHERE t.\`${spec.pk}\` = ? AND us.user_id = ?`,
+    [userId, entryId, userId],
   );
   if (!owns.length) throw new AcademicItemNotFoundError();
   const currentStatus = owns[0].current_status as string;
+  const currentStage  = owns[0].current_stage as string | null;
 
   // A stage implies its status; a bare status (v2 callers) implies the matching stage —
   // 'todo', 'in_progress' and 'done' are all legal academic stage names, so the cast is
@@ -69,6 +78,22 @@ export async function patchAcademicItem(
 
   const incomingStatus = status === 'done' ? 'Done' : status !== undefined ? 'Pending' : undefined;
   const statusChanging = incomingStatus !== undefined && incomingStatus !== currentStatus;
+
+  // The stage counterpart of that gate. A bare `work_status` — which both the edit dialog
+  // (it resends the whole form) and `WorkItemRow.setWorkStatus` send — must not flatten a
+  // finer stored stage it never meant to touch: `ready_to_submit` normalises to
+  // 'in_progress', so an unchanged status would otherwise rewrite it to plain
+  // 'in_progress'. Write the stage only when an explicit `work_stage` asked for it, when
+  // there is no usable stored stage to preserve, or when the normalised status genuinely
+  // moved (making the stored stage stale). Same shape as the work-items route's gate.
+  const usableStoredStage: WorkStage | null =
+    currentStage !== null && isStageLegal('academic', currentStage) ? currentStage : null;
+  const stageChanging =
+    stage !== undefined && (
+      patch.work_stage !== undefined ||
+      usableStoredStage === null ||
+      normaliseStage(usableStoredStage) !== status
+    );
 
   const conn = await pool.getConnection();
   try {
@@ -113,8 +138,10 @@ export async function patchAcademicItem(
     // row written by this path always has one.
     const overlayCols: string[] = [];
     const overlayVals: (string | number | null)[] = [];
-    if (stage !== undefined) {
-      overlayCols.push('work_stage'); overlayVals.push(stage);
+    // Both columns move together or neither does, so the mirror can never be left
+    // describing a stage the row no longer has.
+    if (stageChanging) {
+      overlayCols.push('work_stage'); overlayVals.push(stage!);
       overlayCols.push('in_progress'); overlayVals.push(stage === 'in_progress' ? 1 : 0);
     }
     if (patch.deadline_time !== undefined) {

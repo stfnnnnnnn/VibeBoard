@@ -43,8 +43,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ source:
     return Response.json(
       { error: `"${body.work_stage}" is not a valid stage for academic work` }, { status: 400 });
   }
-  if ('deadline_time' in body && deadlineTime !== null && deadlineTime !== undefined
-      && !TIME_PATTERN.test(deadlineTime)) {
+  if ('deadline_time' in body && deadlineTime !== null && !TIME_PATTERN.test(deadlineTime)) {
     return Response.json({ error: 'deadline_time must be HH:MM or HH:MM:SS' }, { status: 400 });
   }
 
@@ -52,7 +51,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ source:
   if ('work_status' in body)     patch.work_status     = body.work_status;
   if ('work_stage' in body)      patch.work_stage      = body.work_stage;
   if ('due_at' in body)          patch.due_at          = body.due_at || null;
-  if ('deadline_time' in body)   patch.deadline_time   = deadlineTime ?? null;
+  if ('deadline_time' in body)   patch.deadline_time   = deadlineTime;
   if ('priority' in body)        patch.priority        = body.priority;
   if ('estimated_hours' in body) patch.estimated_hours = body.estimated_hours ?? null;
   if ('start_date' in body)      patch.start_date      = body.start_date || null;
