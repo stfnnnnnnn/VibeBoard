@@ -4,7 +4,7 @@ import pool from '@/lib/db';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import { WORK_CATEGORIES } from '@/lib/workboard/workItems';
 import { manilaNowDatetime } from '@/lib/workboard/dates';
-import { checkReferences } from '../route';
+import { checkReferences } from '@/lib/workboard/ownership';
 
 const PATCHABLE = ['title', 'note', 'category', 'project_id', 'user_subject_id',
                    'priority', 'work_status', 'due_at', 'start_date', 'estimated_hours'] as const;
@@ -38,11 +38,11 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     return Response.json({ error: 'Invalid work_status' }, { status: 400 });
   }
 
-  const refError = await checkReferences(
-    userId,
-    'project_id' in body ? body.project_id : undefined,
-    'user_subject_id' in body ? body.user_subject_id : undefined,
-  );
+  const refError = await checkReferences(userId, {
+    projectId:      'project_id' in body ? body.project_id : undefined,
+    userSubjectId:  'user_subject_id' in body ? body.user_subject_id : undefined,
+    organizationId: 'organization_id' in body ? body.organization_id : undefined,
+  });
   if (refError) return Response.json({ error: refError }, { status: 400 });
 
   const sets: string[] = [];

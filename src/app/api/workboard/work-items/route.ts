@@ -1,35 +1,14 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import pool from '@/lib/db';
-import type { RowDataPacket, ResultSetHeader } from 'mysql2';
+import type { ResultSetHeader } from 'mysql2';
 import { ensureWorkboardV2Schema } from '@/lib/migrate';
 import { WORK_CATEGORIES } from '@/lib/workboard/workItems';
 import { manilaNowDatetime } from '@/lib/workboard/dates';
+import { checkReferences } from '@/lib/workboard/ownership';
 
 const PRIORITIES = ['high', 'normal', 'low'];
 const STATUSES   = ['todo', 'in_progress', 'done'];
-
-/** Returns null when the reference is absent or valid; returns an error string when the
- *  client supplied an id that isn't theirs. Never trust an id from the request body. */
-export async function checkReferences(
-  userId: number, projectId: unknown, userSubjectId: unknown,
-): Promise<string | null> {
-  if (projectId !== null && projectId !== undefined) {
-    const [rows] = await pool.execute<RowDataPacket[]>(
-      'SELECT id FROM workboard_projects WHERE id = ? AND user_id = ?',
-      [projectId as string | number, userId],
-    );
-    if (!rows.length) return 'That project was not found';
-  }
-  if (userSubjectId !== null && userSubjectId !== undefined) {
-    const [rows] = await pool.execute<RowDataPacket[]>(
-      'SELECT user_subject_id FROM user_subjects WHERE user_subject_id = ? AND user_id = ?',
-      [userSubjectId as string | number, userId],
-    );
-    if (!rows.length) return 'That subject was not found';
-  }
-  return null;
-}
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -41,7 +20,7 @@ export async function POST(req: NextRequest) {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     return Response.json({ error: 'Body must be an object' }, { status: 400 });
   }
-  const { category, title, note, project_id, user_subject_id,
+  const { category, title, note, project_id, user_subject_id, organization_id,
           priority, work_status, due_at, start_date, estimated_hours } = body;
 
   if (!WORK_CATEGORIES.includes(category)) {
@@ -57,7 +36,9 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'work_status must be todo, in_progress, or done' }, { status: 400 });
   }
 
-  const refError = await checkReferences(userId, project_id, user_subject_id);
+  const refError = await checkReferences(userId, {
+    projectId: project_id, userSubjectId: user_subject_id, organizationId: organization_id,
+  });
   if (refError) return Response.json({ error: refError }, { status: 400 });
 
   const status = work_status ?? 'todo';
