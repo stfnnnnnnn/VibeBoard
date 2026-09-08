@@ -2,28 +2,31 @@ import type { WorkItem, WorkCategory } from '@/lib/workboard/workItems';
 import { addDays, dueDateOf } from '@/lib/workboard/dates';
 
 export interface TimeframeGroups {
+  overdue:   WorkItem[];
   today:     WorkItem[];
   upcoming:  WorkItem[];
   later:     WorkItem[];
 }
 
 /**
- * Today = due today OR overdue (an overdue item belongs at the top of the list, not buried
- * in a past section that doesn't exist). Upcoming = due in the 7 days after today, inclusive
- * of day 7. Later = everything else, including every undated item.
- * Done items are excluded from all three groups — the List view shows open work.
+ * Overdue is its own section (spec §6). v2 folded overdue items into Today on the
+ * reasoning that a past section "doesn't exist"; v3 gives it one, because burying a
+ * late item among today's work hides exactly the thing that most needs attention.
+ * Today = due today. Upcoming = due in the 7 days after today, inclusive of day 7.
+ * Later = everything else, including every undated item. Done items appear in none.
  */
 export function groupByTimeframe(items: WorkItem[], todayStr: string): TimeframeGroups {
   const horizon = addDays(todayStr, 7);
-  const groups: TimeframeGroups = { today: [], upcoming: [], later: [] };
+  const groups: TimeframeGroups = { overdue: [], today: [], upcoming: [], later: [] };
 
   for (const item of items) {
     if (item.work_status === 'done') continue;
     const due = dueDateOf(item);
-    if (due === null)             groups.later.push(item);
-    else if (due <= todayStr)     groups.today.push(item);
-    else if (due <= horizon)      groups.upcoming.push(item);
-    else                          groups.later.push(item);
+    if (due === null)          groups.later.push(item);
+    else if (due < todayStr)   groups.overdue.push(item);
+    else if (due === todayStr) groups.today.push(item);
+    else if (due <= horizon)   groups.upcoming.push(item);
+    else                       groups.later.push(item);
   }
   return groups;
 }
