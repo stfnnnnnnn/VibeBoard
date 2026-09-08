@@ -77,3 +77,41 @@ export function isStageLegal(context: WorkContext, stage: string): stage is Work
 export function defaultStage(context: WorkContext): WorkStage {
   return 'todo';
 }
+
+/** Projects (unlike work items) have no 'life' context — a project is academic,
+ *  standalone, or organizational. */
+export const PROJECT_CONTEXTS = ['academic', 'project', 'organization'] as const;
+export type ProjectContext = typeof PROJECT_CONTEXTS[number];
+
+/**
+ * Validates the conditional parent rule for a Workboard project: an academic project
+ * requires a course and forbids an organization; an organization project requires an
+ * organization and forbids a course; a standalone project forbids both. Returns an
+ * error message, or null when the parent shape is legal. Pool-free by design — both
+ * the POST and PATCH routes call this so the rule can never diverge between them.
+ */
+export function validateProjectParent(
+  context: string,
+  userSubjectId: number | null | undefined,
+  organizationId: number | null | undefined,
+): string | null {
+  if (!(PROJECT_CONTEXTS as readonly string[]).includes(context)) {
+    return 'context must be academic, project, or organization';
+  }
+  if (context === 'academic' && !userSubjectId) {
+    return 'An academic project requires a course';
+  }
+  if (context === 'organization' && !organizationId) {
+    return 'An organization project requires an organization';
+  }
+  if (context === 'project' && (userSubjectId || organizationId)) {
+    return 'A standalone project cannot have a course or organization parent';
+  }
+  if (context === 'academic' && organizationId) {
+    return 'An academic project cannot have an organization parent';
+  }
+  if (context === 'organization' && userSubjectId) {
+    return 'An organization project cannot have a course parent';
+  }
+  return null;
+}
