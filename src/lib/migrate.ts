@@ -13,6 +13,7 @@ let _ranHabitsV7 = false;
 let _ranHabitsV8 = false;
 let _ranWorkboard = false;
 let _ranWorkboardV2 = false;
+let _ranWorkboardV3 = false;
 
 /** Add accomplished_at column to entry tables if not already present. */
 export async function ensureAccomplishedAt(): Promise<void> {
@@ -641,4 +642,162 @@ export async function ensureWorkboardV2Schema(): Promise<void> {
   `);
 
   _ranWorkboardV2 = true;
+}
+
+/** Workboard v3: per-context hierarchy (organizations, scoped projects, Life areas),
+ *  multi-link resources, flat subtasks, first-class deadline time, and per-context
+ *  status stages. Study Pulse's own tables are never altered — academic deadline time
+ *  and stage live on the workboard_entry_meta overlay. */
+export async function ensureWorkboardV3Schema(): Promise<void> {
+  if (_ranWorkboardV3) return;
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS workboard_organizations (
+      id          INT AUTO_INCREMENT PRIMARY KEY,
+      user_id     INT NOT NULL,
+      name        VARCHAR(120) NOT NULL,
+      status      ENUM('active','archived') NOT NULL DEFAULT 'active',
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_user_org_name (user_id, name),
+      FOREIGN KEY (user_id) REFERENCES user_login(user_id) ON DELETE CASCADE
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS workboard_item_links (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      user_id         INT NOT NULL,
+      work_item_id    INT NULL,
+      activity_id     INT NULL,
+      quiz_id         INT NULL,
+      exam_id         INT NULL,
+      grade_entry_id  INT NULL,
+      label           VARCHAR(120) NOT NULL,
+      url             VARCHAR(2048) NOT NULL,
+      link_type       ENUM('canvas','drive','docs','github','figma','website','portal','form','other')
+                        NOT NULL DEFAULT 'other',
+      position        SMALLINT NOT NULL DEFAULT 0,
+      created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_link_work_item (work_item_id),
+      KEY idx_link_user (user_id),
+      FOREIGN KEY (user_id) REFERENCES user_login(user_id) ON DELETE CASCADE,
+      FOREIGN KEY (work_item_id) REFERENCES workboard_work_items(id) ON DELETE CASCADE,
+      FOREIGN KEY (activity_id) REFERENCES activities(activity_id) ON DELETE CASCADE,
+      FOREIGN KEY (quiz_id) REFERENCES quizzes(quiz_id) ON DELETE CASCADE,
+      FOREIGN KEY (exam_id) REFERENCES exams(exam_id) ON DELETE CASCADE,
+      FOREIGN KEY (grade_entry_id) REFERENCES grade_entries(entry_id) ON DELETE CASCADE,
+      CONSTRAINT chk_link_one_owner CHECK (
+        (work_item_id IS NOT NULL) + (activity_id IS NOT NULL) + (quiz_id IS NOT NULL) +
+        (exam_id IS NOT NULL) + (grade_entry_id IS NOT NULL) = 1
+      )
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS workboard_subtasks (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      user_id         INT NOT NULL,
+      work_item_id    INT NULL,
+      activity_id     INT NULL,
+      quiz_id         INT NULL,
+      exam_id         INT NULL,
+      grade_entry_id  INT NULL,
+      title           VARCHAR(255) NOT NULL,
+      is_done         TINYINT(1) NOT NULL DEFAULT 0,
+      position        SMALLINT NOT NULL DEFAULT 0,
+      created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_subtask_work_item (work_item_id),
+      KEY idx_subtask_user (user_id),
+      FOREIGN KEY (user_id) REFERENCES user_login(user_id) ON DELETE CASCADE,
+      FOREIGN KEY (work_item_id) REFERENCES workboard_work_items(id) ON DELETE CASCADE,
+      FOREIGN KEY (activity_id) REFERENCES activities(activity_id) ON DELETE CASCADE,
+      FOREIGN KEY (quiz_id) REFERENCES quizzes(quiz_id) ON DELETE CASCADE,
+      FOREIGN KEY (exam_id) REFERENCES exams(exam_id) ON DELETE CASCADE,
+      FOREIGN KEY (grade_entry_id) REFERENCES grade_entries(entry_id) ON DELETE CASCADE,
+      CONSTRAINT chk_subtask_one_owner CHECK (
+        (work_item_id IS NOT NULL) + (activity_id IS NOT NULL) + (quiz_id IS NOT NULL) +
+        (exam_id IS NOT NULL) + (grade_entry_id IS NOT NULL) = 1
+      )
+    )
+  `);
+
+  // --- workboard_projects: context scoping + optional parent ---
+  const projectCols: [string, string][] = [
+    ['context', `ADD COLUMN context ENUM('academic','project','organization') NOT NULL DEFAULT 'project'`],
+    ['user_subject_id', `ADD COLUMN user_subject_id INT NULL`],
+    ['organization_id', `ADD COLUMN organization_id INT NULL`],
+  ];
+  for (const [col, clause] of projectCols) {
+    if (!(await columnExists('workboard_projects', col))) {
+      await pool.query(`ALTER TABLE workboard_projects ${clause}`);
+    }
+  }
+  if (!(await constraintExists('workboard_projects', 'fk_project_subject'))) {
+    await pool.query(`ALTER TABLE workboard_projects
+      ADD CONSTRAINT fk_project_subject FOREIGN KEY (user_subject_id)
+      REFERENCES user_subjects(user_subject_id) ON DELETE CASCADE`);
+  }
+  if (!(await constraintExists('workboard_projects', 'fk_project_org'))) {
+    await pool.query(`ALTER TABLE workboard_projects
+      ADD CONSTRAINT fk_project_org FOREIGN KEY (organization_id)
+      REFERENCES workboard_organizations(id) ON DELETE CASCADE`);
+  }
+
+  // --- workboard_work_items: life area, organization, deadline time, stage ---
+  const itemCols: [string, string][] = [
+    ['life_area', `ADD COLUMN life_area ENUM('personal','household','errands','finance','health','other') NULL`],
+    ['organization_id', `ADD COLUMN organization_id INT NULL`],
+    ['deadline_time', `ADD COLUMN deadline_time TIME NULL`],
+    ['work_stage', `ADD COLUMN work_stage VARCHAR(24) NULL`],
+  ];
+  for (const [col, clause] of itemCols) {
+    if (!(await columnExists('workboard_work_items', col))) {
+      await pool.query(`ALTER TABLE workboard_work_items ${clause}`);
+    }
+  }
+  if (!(await constraintExists('workboard_work_items', 'fk_item_org'))) {
+    await pool.query(`ALTER TABLE workboard_work_items
+      ADD CONSTRAINT fk_item_org FOREIGN KEY (organization_id)
+      REFERENCES workboard_organizations(id) ON DELETE SET NULL`);
+  }
+
+  // --- workboard_entry_meta: academic deadline time + stage ---
+  for (const [col, clause] of [
+    ['deadline_time', `ADD COLUMN deadline_time TIME NULL`],
+    ['work_stage', `ADD COLUMN work_stage VARCHAR(24) NULL`],
+  ] as [string, string][]) {
+    if (!(await columnExists('workboard_entry_meta', col))) {
+      await pool.query(`ALTER TABLE workboard_entry_meta ${clause}`);
+    }
+  }
+
+  // --- One-time data migrations, each idempotent by construction ---
+
+  // 1. Existing overlay in_progress flags become the equivalent stage.
+  //    `in_progress` is retained and kept in sync for one release (see the spec's
+  //    Migration section) so a rollback loses nothing.
+  await pool.query(`
+    UPDATE workboard_entry_meta
+    SET work_stage = 'in_progress'
+    WHERE in_progress = 1 AND work_stage IS NULL
+  `);
+
+  // 2. Owned items get a stage derived from their existing normalised status.
+  await pool.query(`
+    UPDATE workboard_work_items
+    SET work_stage = work_status
+    WHERE work_stage IS NULL
+  `);
+
+  // 3. Any owned item whose due_at carries a non-midnight time moves that time into
+  //    deadline_time and zeroes the time component, so "due at midnight" and "no time
+  //    set" stop being indistinguishable. Guarded on deadline_time IS NULL so a second
+  //    run cannot clobber a time the user has since edited.
+  await pool.query(`
+    UPDATE workboard_work_items
+    SET deadline_time = TIME(due_at), due_at = DATE(due_at)
+    WHERE due_at IS NOT NULL AND TIME(due_at) <> '00:00:00' AND deadline_time IS NULL
+  `);
+
+  _ranWorkboardV3 = true;
 }
