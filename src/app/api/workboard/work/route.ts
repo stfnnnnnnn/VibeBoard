@@ -1,5 +1,5 @@
 import { auth } from '@/auth';
-import { ensureWorkboardV2Schema } from '@/lib/migrate';
+import { ensureWorkboardV2Schema, ensureWorkboardV3Schema } from '@/lib/migrate';
 import { getWorkItems } from '@/lib/workboard/workItems';
 import { computeStats, computeWorkloadChart } from '@/lib/workboard/workStats';
 import { mondayOf, todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
@@ -8,6 +8,7 @@ export async function GET() {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   await ensureWorkboardV2Schema();
+  await ensureWorkboardV3Schema();
 
   const userId    = parseInt(session.user.id);
   const payload   = await getWorkItems(userId);
