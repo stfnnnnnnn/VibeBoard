@@ -2,8 +2,10 @@ import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
 import {
   ACADEMIC_TABLES, urgencyFromPriority,
-  type AcademicSource, type WorkPriority, type WorkStatus,
+  type AcademicSource, type WorkPriority,
 } from '@/lib/workboard/workItems';
+import { normaliseStage, type WorkStage, type WorkStatus } from '@/lib/workboard/workContexts';
+import { normaliseDeadlineTime } from '@/lib/workboard/dates';
 import { todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
 
 /** "YYYY-MM-DD" for today in Manila time — never derive "today" from `new Date()`'s own
@@ -20,7 +22,9 @@ export class AcademicItemNotFoundError extends Error {
 
 export interface AcademicPatch {
   work_status?:      WorkStatus;
+  work_stage?:       WorkStage;
   due_at?:           string | null;
+  deadline_time?:    string | null;
   priority?:         WorkPriority;
   estimated_hours?:  number | null;
   start_date?:       string | null;
@@ -28,9 +32,10 @@ export interface AcademicPatch {
 
 /**
  * Routes each field of a patch to its correct home: done-ness and deadline and urgency go
- * back to the Study Pulse entry itself (it remains the source of truth); in_progress,
- * estimated_hours and start_date go to the workboard_entry_meta overlay, because Study
- * Pulse has no columns for them and its schema is deliberately not being changed.
+ * back to the Study Pulse entry itself (it remains the source of truth); work_stage,
+ * in_progress, deadline_time, estimated_hours and start_date go to the
+ * workboard_entry_meta overlay, because Study Pulse has no columns for them and its
+ * schema is deliberately not being changed.
  *
  * Everything runs in one transaction so a half-applied patch is impossible.
  */
@@ -52,7 +57,17 @@ export async function patchAcademicItem(
   );
   if (!owns.length) throw new AcademicItemNotFoundError();
   const currentStatus = owns[0].current_status as string;
-  const incomingStatus = patch.work_status === 'done' ? 'Done' : patch.work_status !== undefined ? 'Pending' : undefined;
+
+  // A stage implies its status; a bare status (v2 callers) implies the matching stage —
+  // 'todo', 'in_progress' and 'done' are all legal academic stage names, so the cast is
+  // sound for every value the route lets through. `stage` is what the overlay stores;
+  // `status` is what Study Pulse gets. Both `submitted` and `done` normalise to 'done',
+  // so either one marks the entry complete while the overlay remembers which it was.
+  const stage: WorkStage | undefined =
+    patch.work_stage ?? (patch.work_status ? patch.work_status as WorkStage : undefined);
+  const status: WorkStatus | undefined = stage ? normaliseStage(stage) : patch.work_status;
+
+  const incomingStatus = status === 'done' ? 'Done' : status !== undefined ? 'Pending' : undefined;
   const statusChanging = incomingStatus !== undefined && incomingStatus !== currentStatus;
 
   const conn = await pool.getConnection();
@@ -67,7 +82,7 @@ export async function patchAcademicItem(
     // Status field, so an unconditional write here would re-stamp (or clear) `accomplished_at`
     // on every save. See Finding 1 of the whole-branch review.
     if (statusChanging) {
-      if (patch.work_status === 'done') {
+      if (status === 'done') {
         entrySets.push('status = ?', 'accomplished_at = ?');
         entryValues.push('Done', todayManilaDateString());
       } else {
@@ -90,14 +105,21 @@ export async function patchAcademicItem(
       );
     }
 
-    // Overlay fields. `in_progress` is derived from work_status: only the literal
-    // 'in_progress' sets it; both 'done' and 'todo' clear it, so a stale flag can never
-    // survive to contradict the entry's own status.
+    // Overlay fields. `work_stage` is the authoritative stage column that
+    // `deriveAcademicStage` reads; `in_progress` is the legacy v2 mirror, retained and
+    // kept in sync for one release (see the spec's Migration section) so a rollback loses
+    // nothing. The mirror is deliberately lossy — 'ready_to_submit' stores in_progress = 0
+    // — because the reader only consults the flag when `work_stage` is absent, and a
+    // row written by this path always has one.
     const overlayCols: string[] = [];
     const overlayVals: (string | number | null)[] = [];
-    if (patch.work_status !== undefined) {
-      overlayCols.push('in_progress');
-      overlayVals.push(patch.work_status === 'in_progress' ? 1 : 0);
+    if (stage !== undefined) {
+      overlayCols.push('work_stage'); overlayVals.push(stage);
+      overlayCols.push('in_progress'); overlayVals.push(stage === 'in_progress' ? 1 : 0);
+    }
+    if (patch.deadline_time !== undefined) {
+      overlayCols.push('deadline_time');
+      overlayVals.push(patch.deadline_time ? normaliseDeadlineTime(patch.deadline_time) : null);
     }
     if (patch.estimated_hours !== undefined) {
       overlayCols.push('estimated_hours'); overlayVals.push(patch.estimated_hours);
