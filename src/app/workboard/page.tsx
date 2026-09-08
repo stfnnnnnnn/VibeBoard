@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
-import { ensureWorkboardSchema, ensureWorkboardV2Schema } from '@/lib/migrate';
+import { ensureWorkboardSchema, ensureWorkboardV3Schema } from '@/lib/migrate';
 import { getWorkboardWeek, mondayOf, todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
 import { getWorkItems } from '@/lib/workboard/workItems';
 import { computeStats, computeWorkloadChart } from '@/lib/workboard/workStats';
@@ -11,7 +11,10 @@ export default async function WorkboardPage() {
   if (!session?.user?.id) redirect('/login');
 
   await ensureWorkboardSchema();
-  await ensureWorkboardV2Schema();
+  // v3 chains v2 itself. getWorkItems below reads v3 columns and tables
+  // (work_stage, deadline_time, life_area, organization_id, and the link/subtask
+  // counts), so v2 alone would 500 this page on a fresh database.
+  await ensureWorkboardV3Schema();
 
   const userId    = parseInt(session.user.id);
   const weekStart = mondayOf(todayInManilaAsUtcDate());
