@@ -10,7 +10,10 @@ import type { WorkItem, WorkStatus } from '@/lib/workboard/workItems';
 // imported and reused here rather than rebuilt, per this task's brief.
 import { setWorkStatus } from '../WorkItemRow';
 import { courseColor } from '@/lib/workboard/color';
-import { addDays, dueDateOf } from '@/lib/workboard/dates';
+import { dueDateOf } from '@/lib/workboard/dates';
+// The single source of due-label truth. It is pool-free — it imports only `dates.ts`,
+// which has no imports at all, plus a type-only `WorkItem` that erases at compile time.
+import { formatDueLabel } from '@/lib/workboard/dueSemantics';
 
 const FONT      = "'Inter','DM Sans','Segoe UI',sans-serif";
 const DM_FONT   = "'DM Sans','Segoe UI',sans-serif";
@@ -34,22 +37,11 @@ const COLUMNS: { key: WorkStatus; label: string; emptyText: string }[] = [
   { key: 'done',        label: 'Done',         emptyText: 'Nothing completed yet' },
 ];
 
-/** "Due today" / "Due tomorrow" / "Overdue" / "Due Sep 12" — same convention as
- *  `WorkItemRow.tsx`'s `formatDueLabel`, duplicated here (it isn't exported there) rather
- *  than imported, following `WorkboardRail.tsx`'s precedent: this file must stay independent
- *  of any module that could later grow a `pool` import. */
-function formatDueLabel(due: string, todayStr: string): string {
-  if (due < todayStr) return 'Overdue';
-  if (due === todayStr) return 'Due today';
-  if (due === addDays(todayStr, 1)) return 'Due tomorrow';
-  const d = new Date(`${due}T00:00:00Z`);
-  const month = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
-  return `Due ${month} ${d.getUTCDate()}`;
-}
-
 function buildMeta(item: WorkItem, todayStr: string): { text: string | null; overdue: boolean } {
   const due = dueDateOf(item);
-  const dueLabel = due !== null ? formatDueLabel(due, todayStr) : null;
+  // Status-aware: a card completed before its deadline reads "Completed · Sep 7",
+  // never "Overdue". The old local copy keyed off the date alone.
+  const dueLabel = formatDueLabel(item, todayStr);
   const estimateLabel = item.estimated_hours !== null ? `${item.estimated_hours}h` : null;
   const parts = [dueLabel, estimateLabel].filter((p): p is string => p !== null);
   const overdue = due !== null && due < todayStr && item.work_status !== 'done';

@@ -7,7 +7,10 @@ import { BarChart3, CalendarClock } from 'lucide-react';
 import type { WorkItem } from '@/lib/workboard/workItems';
 import type { WorkloadDay } from '@/lib/workboard/workStats';
 import { WORK_CATEGORIES, type WorkCategory } from '@/lib/workboard/workCategories';
-import { addDays, dueDateOf } from '@/lib/workboard/dates';
+import { dueDateOf } from '@/lib/workboard/dates';
+// The single source of due-label truth. It is pool-free — it imports only `dates.ts`,
+// which has no imports at all, plus a type-only `WorkItem` that erases at compile time.
+import { formatDueLabel } from '@/lib/workboard/dueSemantics';
 
 /** Direction doc §11/§12: the shell's outer-panel and rail-panel glass treatment, matched
  *  to `WorkboardWeekView.tsx`'s `GLASS` constant exactly rather than reinvented. */
@@ -30,19 +33,6 @@ const CATEGORY_HUE: Record<WorkCategory, string> = {
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const CHART_HEIGHT = 64; // px, the tallest bar's height when a day equals the week's max
-
-/** "Due today" / "Due tomorrow" / "Overdue" / "Due Sep 12" — same convention as
- *  `WorkItemRow.tsx`'s `formatDueLabel`, duplicated here (it isn't exported there) rather
- *  than imported, since this file must stay independent of any module that could later grow
- *  a `pool` import. */
-function formatDueLabel(due: string, todayStr: string): string {
-  if (due < todayStr) return 'Overdue';
-  if (due === todayStr) return 'Due today';
-  if (due === addDays(todayStr, 1)) return 'Due tomorrow';
-  const d = new Date(`${due}T00:00:00Z`);
-  const month = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
-  return `Due ${month} ${d.getUTCDate()}`;
-}
 
 function PanelHeader({ Icon, children }: { Icon: typeof BarChart3; children: React.ReactNode }) {
   return (
@@ -167,7 +157,7 @@ function UpcomingDeadlines({ items, todayStr }: { items: WorkItem[]; todayStr: s
           <span style={{
             flexShrink: 0, fontFamily: FONT, fontSize: '0.7rem', fontWeight: 600, color: '#5c6b80',
           }}>
-            {formatDueLabel(dueDateOf(item)!, todayStr)}
+            {formatDueLabel(item, todayStr)}
           </span>
         </div>
       ))}
