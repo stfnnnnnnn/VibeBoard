@@ -1,17 +1,23 @@
 'use client';
 
-import { CheckCircle2, Link2, SearchX, Table2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { CheckCircle2, ChevronDown, ChevronUp, Link2, SearchX, Table2 } from 'lucide-react';
 // Type-only import from `workItems.ts` — that module imports `pool` (mysql2) at module scope,
 // so a *value* import here would drag the driver into this client bundle and 500 the page.
 // Same hazard documented in `WorkboardShell.tsx`, `WorkItemRow.tsx` and `WorkBoardView.tsx`.
 import type { WorkItem } from '@/lib/workboard/workItems';
 // Pool-free by construction (`workContexts.ts` has no imports at all), so these are safe as
 // runtime imports from a client component.
-import { CONTEXT_LABELS, STAGE_LABELS, type WorkContext, type WorkStage } from '@/lib/workboard/workContexts';
+import {
+  CONTEXT_LABELS, STAGES_BY_CONTEXT, STAGE_LABELS, normaliseStage,
+  type WorkContext, type WorkStage, type WorkStatus,
+} from '@/lib/workboard/workContexts';
 // Task 17's column projections. Also pool-free: its only runtime imports are `workContexts`
 // and `dueSemantics`, and `dueSemantics` reaches only the import-free `dates.ts`.
-import { COLUMNS_BY_CONTEXT, cellValue, type TableColumn } from '@/lib/workboard/tableColumns';
+import { COLUMNS_BY_CONTEXT, cellValue, type ColumnKey, type TableColumn } from '@/lib/workboard/tableColumns';
 import { dueStateOf, type DueState } from '@/lib/workboard/dueSemantics';
+// Pool-free by design — see the module header in `dates.ts` for the incident that put it there.
+import { dueDateOf } from '@/lib/workboard/dates';
 
 const FONT    = "'Inter','DM Sans','Segoe UI',sans-serif";
 const DM_FONT = "'DM Sans','Segoe UI',sans-serif";
@@ -87,6 +93,131 @@ function itemKey(item: Pick<WorkItem, 'source' | 'id'>): string {
   return `${item.source}-${item.id}`;
 }
 
+/* ─── Sorting ──────────────────────────────────────────────────────────────────────────
+ * Everything below sorts *items*. It never touches `columns`: `COLUMNS_BY_CONTEXT`'s arrays
+ * and their `TableColumn` objects are shared by reference across contexts (`WORK` is the
+ * same object in four of them), so an in-place sort of a column array would reorder every
+ * other context's header row for the rest of the session — a bug that would only surface
+ * after switching tabs. `tableColumns.ts` marks them `readonly` to make that a build error.
+ */
+
+type SortDir = 'asc' | 'desc';
+
+/** `null` — the state, not a member of this type — means "no explicit sort", which is where
+ *  the third click on a column lands. The cycle is ascending → descending → default order,
+ *  not a two-state flip that can never be undone. */
+interface SortState {
+  key: ColumnKey;
+  dir: SortDir;
+}
+
+/** A comparator takes the direction rather than being wrapped in a `-1 *` at the call site,
+ *  because two of the rules are deliberately direction-*independent*: an item with no
+ *  deadline and an item with no estimate sort last ascending AND descending. Negating a
+ *  whole comparator to get the descending pass would float exactly those to the top.
+ *  Every comparator returns a number for every pair, including two absent values (0). */
+type Comparator = (a: WorkItem, b: WorkItem, dir: SortDir) => number;
+
+const signed = (result: number, dir: SortDir): number => (dir === 'asc' ? result : -result);
+
+/** Builds a comparator over a *present* value, with absent values pinned last in both
+ *  directions. The direction is applied only to the value-vs-value result and never to the
+ *  null branches — that asymmetry is the entire point of this helper. */
+function nullsLast<T>(
+  read: (item: WorkItem) => T | null,
+  compare: (a: T, b: T) => number,
+): Comparator {
+  return (a, b, dir) => {
+    const va = read(a);
+    const vb = read(b);
+    if (va === null) return vb === null ? 0 : 1;
+    if (vb === null) return -1;
+    return signed(compare(va, vb), dir);
+  };
+}
+
+/** ISO-ish "YYYY-MM-DD" strings compare correctly as plain strings; `localeCompare` would
+ *  work too but costs a collator for values that are pure digits and hyphens. */
+const compareIso = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** Ruling 5. `dueDateOf` returns null for an undated item, and `nullsLast` keeps it below
+ *  every dated one in both directions — an item with no deadline is not "earliest". */
+const compareDeadline: Comparator = nullsLast(dueDateOf, compareIso);
+
+/** `cellValue` renders an absent text value as an em dash, and an em dash is punctuation,
+ *  which `localeCompare` sorts *before* every letter — so comparing the rendered string
+ *  directly would open the ascending pass with a block of blank-looking cells. That is the
+ *  same mistake ruling 5 names for deadlines, so the dash reads as absent here and the row
+ *  pins last in both directions; real values still compare with `localeCompare`. */
+function textOf(item: WorkItem, key: ColumnKey): string | null {
+  const value = cellValue(item, key);
+  return value === null || value === DASH ? null : value;
+}
+
+const compareText = (key: ColumnKey): Comparator =>
+  nullsLast(item => textOf(item, key), (a, b) => a.localeCompare(b));
+
+/** High → normal → low ascending, which is the order the column is actually read in. */
+const PRIORITY_RANK: Record<WorkItem['priority'], number> = { high: 0, normal: 1, low: 2 };
+
+/** My Work mixes all four stage vocabularies, and they have no common order — `submitted`
+ *  and `review` are not comparable — so it sorts by the normalised three-value status, the
+ *  one vocabulary every context shares. A single context sorts by its own stage list. */
+const NORMALISED_ORDER: readonly WorkStatus[] = ['todo', 'in_progress', 'done'];
+
+function statusRank(item: WorkItem, context: TableContext): number {
+  const stage = stageOf(item);
+  if (context === 'all') return NORMALISED_ORDER.indexOf(normaliseStage(stage));
+  const order = STAGES_BY_CONTEXT[context];
+  const index = order.indexOf(stage);
+  // `work_stage` is a free-form VARCHAR(24), so a stage outside its context's vocabulary is
+  // storable. `indexOf`'s -1 would sort such a row *above* every legal stage; ranking it
+  // past the end keeps the comparator total without inventing a position for it.
+  return index === -1 ? order.length : index;
+}
+
+/** Per column key, never generic — the point of the whole exercise is that `deadline`,
+ *  `status` and `priority` each mean something the rendered string does not. */
+function comparatorFor(key: ColumnKey, context: TableContext): Comparator {
+  switch (key) {
+    case 'work':     return (a, b, dir) => signed(a.title.localeCompare(b.title), dir);
+    case 'status':   return (a, b, dir) => signed(statusRank(a, context) - statusRank(b, context), dir);
+    case 'priority': return (a, b, dir) => signed(PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority], dir);
+    case 'deadline': return compareDeadline;
+    // Sorted on the stored "HH:MM:SS", not on the rendered "11:59 PM" — 12-hour text sorts
+    // "11:59 PM" above "9:00 AM", which is exactly backwards. Absent times pin last.
+    case 'time':     return nullsLast(item => item.deadline_time, compareIso);
+    case 'estimate': return nullsLast(item => item.estimated_hours, (a, b) => a - b);
+    // Zero links is a real value, not an absent one, so this is a plain numeric compare.
+    case 'links':    return (a, b, dir) => signed(a.link_count - b.link_count, dir);
+    case 'context':
+    case 'course':
+    case 'organization':
+    case 'area':
+    case 'project':  return compareText(key);
+    default: {
+      // A thirteenth `ColumnKey` fails the build here rather than silently sorting by nothing.
+      const unhandled: never = key;
+      return unhandled;
+    }
+  }
+}
+
+/** The order with no column selected: overdue first, then deadline ascending, undated last —
+ *  Focus's intuition, so switching views does not reshuffle the same work.
+ *
+ *  The overdue rank is not redundant with deadline-ascending: `dueStateOf` calls a *done*
+ *  item with a past deadline `completed`/`completed_late`, never `overdue`, so on deadline
+ *  alone last month's finished work would sit above this week's genuinely late work. */
+function defaultComparator(todayStr: string): (a: WorkItem, b: WorkItem) => number {
+  return (a, b) => {
+    const ra = dueStateOf(a, todayStr) === 'overdue' ? 0 : 1;
+    const rb = dueStateOf(b, todayStr) === 'overdue' ? 0 : 1;
+    if (ra !== rb) return ra - rb;
+    return compareDeadline(a, b, 'asc');
+  };
+}
+
 export interface WorkTableViewProps {
   /** Already filtered by category and search — see `WorkboardShell`'s `visibleItems`. */
   items:       WorkItem[];
@@ -105,14 +236,14 @@ export interface WorkTableViewProps {
    *  inside this context" (offering a create button there would be wrong advice), since
    *  `isFiltered` is true for *any* non-My-Work tab. */
   isSearching?: boolean;
-  /** Kept for the prop shape Tasks 19–24 will use for inline mutations. Unused today: this task
+  /** Kept for the prop shape Tasks 20–24 will use for inline mutations. Unused today: this task
    *  renders non-interactive cells only. */
   onChanged:   () => void | Promise<void>;
   /** Opens the create/edit dialog in create mode — wired to this view's own empty states. */
   onNewItem:   () => void;
 }
 
-// `onChanged` is deliberately not destructured — it is part of the contract Tasks 19–24 build
+// `onChanged` is deliberately not destructured — it is part of the contract Tasks 20–24 build
 // on, but this task renders nothing that mutates, so pulling it out would only be an unused
 // binding.
 export default function WorkTableView({
@@ -120,8 +251,35 @@ export default function WorkTableView({
 }: WorkTableViewProps) {
   // Never sorted or filtered in place — `COLUMNS_BY_CONTEXT`'s arrays and their `TableColumn`
   // objects are `readonly` precisely because the same object is shared across contexts, and a
-  // write through one would corrupt the others for the rest of the session.
+  // write through one would corrupt the others for the rest of the session. Sorting reorders
+  // the rows below, never this array.
   const columns: readonly TableColumn[] = COLUMNS_BY_CONTEXT[context];
+
+  // Both hooks sit above the three empty-state returns: a `return` before a hook is the one
+  // way to break the rules of hooks in a component that otherwise looks linear.
+  const [sort, setSort] = useState<SortState | null>(null);
+
+  const sortedItems = useMemo(() => {
+    // `[...items]` on every path. `Array.prototype.sort` sorts in place and `items` is a
+    // prop — sorting it directly would mutate the shell's memoised `visibleItems` array,
+    // which React would not see as a change, so other views would render stale order.
+    // The copy is also why stability is safe to rely on: V8's sort is stable, and every
+    // comparator returns 0 for a tie rather than inventing a tiebreak, so equal rows keep
+    // the order they arrived in.
+    const rows = [...items];
+    if (sort === null) return rows.sort(defaultComparator(todayStr));
+    const compare = comparatorFor(sort.key, context);
+    return rows.sort((a, b) => compare(a, b, sort.dir));
+  }, [items, sort, context, todayStr]);
+
+  /** Ascending → descending → back to the default order. The third click clears the sort
+   *  rather than re-sorting ascending, so the default is reachable without a page reload. */
+  const toggleSort = (key: ColumnKey) => {
+    setSort(current => {
+      if (current === null || current.key !== key) return { key, dir: 'asc' };
+      return current.dir === 'asc' ? { key, dir: 'desc' } : null;
+    });
+  };
 
   // Three distinct empty states, resolved in this order:
   //   1. nothing is narrowing the view at all      -> the board itself is empty
@@ -208,37 +366,78 @@ export default function WorkTableView({
         </caption>
         <thead>
           <tr>
-            {columns.map(col => (
+            {columns.map(col => {
+              // `null` when this column is not the sorted one — which is also what makes
+              // `aria-sort` *absent* rather than `"none"` on the other eleven headers.
+              const dir: SortDir | null = sort !== null && sort.key === col.key ? sort.dir : null;
+              return (
               // `position: sticky` lives on the `<th>`, never on `<thead>` — sticky on a
               // table section is unreliable across browsers, on the cells it is not.
               <th
                 key={col.key}
                 scope="col"
+                // Set on the active column only. This attribute — not the caret — is what
+                // makes the sort perceivable to a screen reader; the caret is `aria-hidden`
+                // decoration on top of it. `"none"` on every other header would announce
+                // twelve sort states per row of headers, so the others carry nothing.
+                aria-sort={dir === null ? undefined : dir === 'asc' ? 'ascending' : 'descending'}
                 style={{
                   position: 'sticky', top: 0, zIndex: 1,
                   textAlign: col.align === 'right' ? 'right' : 'left',
-                  padding: '9px 12px', whiteSpace: 'nowrap',
+                  // Vertical padding moved onto the button so the whole 27px-tall strip is
+                  // the click target (WCAG 2.2 Target Size wants ≥24px) rather than a 13px
+                  // ribbon of text inside a padded cell. 2 + 7 + 7 + 2 keeps the header's
+                  // rendered height exactly where it was.
+                  padding: '2px 12px', whiteSpace: 'nowrap',
                   background: 'rgba(255,255,255,0.95)',
                   // An inset shadow, not `borderBottom`: under `border-collapse: collapse`
                   // the border belongs to the table rather than the cell, so it does not
                   // travel with a sticky `<th>` — on scroll the background would stick while
                   // the rule scrolled away, leaving the header sitting on rows undivided.
                   boxShadow: 'inset 0 -1px 0 rgba(200,210,230,0.55)',
-                  fontFamily: DM_FONT, fontSize: '0.68rem', fontWeight: 800,
-                  letterSpacing: '0.04em', textTransform: 'uppercase',
-                  // §8: a column header is load-bearing information, so it takes the
-                  // AA-passing meta colour, not one of the lighter decorative shades.
-                  color: '#5c6b80',
                 }}
               >
-                {col.label}
+                {/* A real `<button>`, not an `onClick` on the `<th>`: a click handler on a
+                    cell is not keyboard reachable and is announced as static text, so the
+                    sort would exist only for mouse users. */}
+                <button
+                  type="button"
+                  className={dir === null ? 'vb-th-sort' : 'vb-th-sort vb-th-sort-on'}
+                  onClick={() => toggleSort(col.key)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '4px',
+                    padding: '7px 0', border: 'none', background: 'none', cursor: 'pointer',
+                    // Typography stated rather than inherited: a `<button>`'s UA style
+                    // overrides the inherited font, so leaving it off would drop the header
+                    // to 13px Arial. §1's micro-label, unchanged from before this task.
+                    fontFamily: DM_FONT, fontSize: '0.68rem', fontWeight: 800,
+                    letterSpacing: '0.04em', textTransform: 'uppercase',
+                    // Colour is deliberately NOT set here — it lives in the styled-jsx rules
+                    // below, because an inline colour would win over `:hover`.
+                  }}
+                >
+                  {col.label}
+                  {/* The slot is always rendered, empty when inactive, so toggling a caret
+                      in and out cannot change a column's width and shift the whole table. */}
+                  <span
+                    aria-hidden
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      flex: '0 0 12px', width: '12px', height: '12px',
+                    }}
+                  >
+                    {dir === 'asc'  ? <ChevronUp   size={12} strokeWidth={2.75} /> : null}
+                    {dir === 'desc' ? <ChevronDown size={12} strokeWidth={2.75} /> : null}
+                  </span>
+                </button>
               </th>
-            ))}
+              );
+            })}
           </tr>
         </thead>
         <tbody>
-          {items.map((item, rowIdx) => {
-            const isLast  = rowIdx === items.length - 1;
+          {sortedItems.map((item, rowIdx) => {
+            const isLast  = rowIdx === sortedItems.length - 1;
             const isDone  = item.work_status === 'done';
             const divider = isLast ? 'none' : DIVIDER;
 
@@ -292,7 +491,7 @@ export default function WorkTableView({
                       );
 
                     case 'status':
-                      // Plain text, not a pill: Task 19 replaces this with the existing status
+                      // Plain text, not a pill: Task 20 replaces this with the existing status
                       // select, and a pill here would only have to be unbuilt.
                       return (
                         <td key={col.key} style={{ ...base, fontWeight: 600 }}>
@@ -366,15 +565,33 @@ export default function WorkTableView({
       </table>
 
       <style jsx>{`
-        /* Both rules target elements rendered by *this* component, so they carry this
-           component's styled-jsx scope hash — a rule for a child component's markup placed
-           here would compile fine and match nothing. */
+        /* Every rule here targets an element rendered by *this* component — including the
+           header buttons — so they all carry this component's styled-jsx scope hash. A rule
+           for a child component's markup placed here would compile fine and match nothing. */
         .vb-table-row:hover {
           background: rgba(255,255,255,0.45);
         }
         .vb-table-scroll:focus-visible {
           outline: 2px solid #2a7fa8;
           outline-offset: 2px;
+        }
+        /* §8: a column header is load-bearing information, so it takes the AA-passing meta
+           colour, not one of the lighter decorative shades. The sorted column darkens to the
+           body-text shade so the active column reads as active without the caret alone. */
+        .vb-th-sort {
+          color: #5c6b80;
+          transition: color 150ms ease;
+        }
+        .vb-th-sort:hover,
+        .vb-th-sort-on {
+          color: #2d3748;
+        }
+        /* §9's ring, on the darker blue, applied via :focus-visible so a mouse click on a
+           header does not leave a ring nobody asked for. */
+        .vb-th-sort:focus-visible {
+          outline: 2px solid #2a7fa8;
+          outline-offset: 2px;
+          border-radius: 4px;
         }
       `}</style>
     </div>
