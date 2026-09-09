@@ -44,6 +44,21 @@ const PRIORITY_LABEL: Record<WorkItem['priority'], string> = {
  *  Table cannot contradict Focus about whether a date is late. Values are `WorkItemRow.tsx`'s
  *  `META_COLOR` exactly: §6's overdue red, §2a's darkened amber (the only AA-passing amber text
  *  colour in this system) for completed-late, §1's ordinary meta colour otherwise. */
+const VISUALLY_HIDDEN: React.CSSProperties = {
+  position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px',
+  overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
+};
+
+/** The textual half of the lateness signal. In Focus the colour is a *second* cue because
+ *  `formatDueLabel` already puts "Overdue" in the string; the Table's Deadline cell is a
+ *  bare date, so without this the state would be conveyed by colour alone — unreadable to a
+ *  screen reader and to anyone with a red deficiency. The Status column shows the stage,
+ *  not lateness, so it cannot stand in. */
+const DEADLINE_SR_SUFFIX: Partial<Record<DueState, string>> = {
+  overdue:        ' (overdue)',
+  completed_late: ' (completed late)',
+};
+
 const DEADLINE_COLOR: Record<DueState, string> = {
   none:           '#5c6b80',
   upcoming:       '#5c6b80',
@@ -204,7 +219,11 @@ export default function WorkTableView({
                   textAlign: col.align === 'right' ? 'right' : 'left',
                   padding: '9px 12px', whiteSpace: 'nowrap',
                   background: 'rgba(255,255,255,0.95)',
-                  borderBottom: '1px solid rgba(200,210,230,0.55)',
+                  // An inset shadow, not `borderBottom`: under `border-collapse: collapse`
+                  // the border belongs to the table rather than the cell, so it does not
+                  // travel with a sticky `<th>` — on scroll the background would stick while
+                  // the rule scrolled away, leaving the header sitting on rows undivided.
+                  boxShadow: 'inset 0 -1px 0 rgba(200,210,230,0.55)',
                   fontFamily: DM_FONT, fontSize: '0.68rem', fontWeight: 800,
                   letterSpacing: '0.04em', textTransform: 'uppercase',
                   // §8: a column header is load-bearing information, so it takes the
@@ -311,12 +330,16 @@ export default function WorkTableView({
                         </td>
                       );
 
-                    case 'deadline':
+                    case 'deadline': {
+                      const dueState = dueStateOf(item, todayStr);
+                      const srSuffix = DEADLINE_SR_SUFFIX[dueState];
                       return (
-                        <td key={col.key} style={{ ...base, color: DEADLINE_COLOR[dueStateOf(item, todayStr)], fontWeight: 600 }}>
+                        <td key={col.key} style={{ ...base, color: DEADLINE_COLOR[dueState], fontWeight: 600 }}>
                           {value ?? DASH}
+                          {srSuffix ? <span style={VISUALLY_HIDDEN}>{srSuffix}</span> : null}
                         </td>
                       );
+                    }
 
                     case 'context':
                     case 'course':
