@@ -3,19 +3,42 @@
 import { useEffect, useRef, useState } from 'react';
 import { MoreVertical } from 'lucide-react';
 import type { WorkItem, WorkStatus, WorkCategory } from '@/lib/workboard/workItems';
+// Pool-free by construction (`workContexts.ts` has no imports at all), so a `WorkStage` value
+// import cannot drag mysql2 into this client bundle the way `workItems.ts` would.
+import type { WorkStage } from '@/lib/workboard/workContexts';
 import { courseColor } from '@/lib/workboard/color';
 import { dueStateOf, formatDueLabel, type DueState } from '@/lib/workboard/dueSemantics';
 
 /** Owned items and Study-Pulse-sourced items have different write endpoints. This is the
  *  single place that decision is made — no view should build these URLs itself. */
-export async function setWorkStatus(item: WorkItem, next: WorkStatus): Promise<Response> {
-  const url = item.source === 'owned'
+function writeUrl(item: WorkItem): string {
+  return item.source === 'owned'
     ? `/api/workboard/work-items/${item.id}`
     : `/api/workboard/academic/${item.source}/${item.id}`;
-  return fetch(url, {
+}
+
+export async function setWorkStatus(item: WorkItem, next: WorkStatus): Promise<Response> {
+  return fetch(writeUrl(item), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ work_status: next }),
+  });
+}
+
+/**
+ * The stage-level sibling of `setWorkStatus`, sharing its endpoint routing so the Board never
+ * builds a URL of its own. Both endpoints keep `work_stage` and `work_status` in sync by
+ * construction, so a stage write must NOT also send `work_status`: on the owned route a
+ * status equal to the item's current one is dropped from the update set (and a body that
+ * contained only that would 400 "No fields to update"), and on the academic route an explicit
+ * `work_stage` deliberately outranks a bare `work_status` — sending both would just add a
+ * value that loses. Sending the stage alone is the whole message on both paths.
+ */
+export async function setWorkStage(item: WorkItem, next: WorkStage): Promise<Response> {
+  return fetch(writeUrl(item), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ work_stage: next }),
   });
 }
 

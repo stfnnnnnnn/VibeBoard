@@ -5,10 +5,16 @@ import { LayoutGrid, MoreVertical, SearchX } from 'lucide-react';
 // Type-only imports from `workItems.ts` — that module imports `pool` (mysql2) at module
 // scope for its DB-access exports, so a runtime import here would drag mysql2 into this
 // client bundle (see WorkboardShell.tsx's and WorkItemRow.tsx's comments on the same hazard).
-import type { WorkItem, WorkStatus } from '@/lib/workboard/workItems';
-// `setWorkStatus` is the single place owned-vs-academic endpoint routing lives (Task 11) —
+import type { WorkItem } from '@/lib/workboard/workItems';
+// `setWorkStage` is the single place owned-vs-academic endpoint routing lives (Tasks 11/16) —
 // imported and reused here rather than rebuilt, per this task's brief.
-import { setWorkStatus } from '../WorkItemRow';
+import { setWorkStage } from '../WorkItemRow';
+// The stage vocabulary. Pool-free by construction — `workContexts.ts` has no imports at all —
+// so these are safe as runtime (not type-only) imports from a client component.
+import {
+  STAGES_BY_CONTEXT, STAGE_LABELS, isStageLegal, normaliseStage,
+  type WorkContext, type WorkStage, type WorkStatus,
+} from '@/lib/workboard/workContexts';
 import { courseColor } from '@/lib/workboard/color';
 import { dueDateOf } from '@/lib/workboard/dates';
 // The single source of due-label truth. It is pool-free — it imports only `dates.ts`,
@@ -31,11 +37,56 @@ const CATEGORY_META: Record<WorkItem['category'], { label: string; bg: string; t
   life:         { label: 'Life',         bg: 'rgba(242,167,192,0.16)', text: '#8a4468' },
 };
 
-const COLUMNS: { key: WorkStatus; label: string; emptyText: string }[] = [
-  { key: 'todo',        label: 'To Do',        emptyText: 'No work queued' },
-  { key: 'in_progress', label: 'In Progress',  emptyText: 'Nothing in progress' },
-  { key: 'done',        label: 'Done',         emptyText: 'Nothing completed yet' },
-];
+/** `'all'` is the shell's My Work tab — every context at once, which is exactly the case that
+ *  has no single stage vocabulary to draw columns from. */
+export type BoardContext = WorkContext | 'all';
+
+/** Spec §17: My Work's columns are the three *normalised* statuses, not the union of every
+ *  context's stages. Typed `WorkStatus[]` rather than `WorkStage[]` so this can only ever hold
+ *  the normalised three — and assignable to `WorkStage[]` below because all three are
+ *  themselves legal stages in all four contexts, which is what makes a My Work drop
+ *  (`todo`/`in_progress`/`done`) incapable of producing an illegal stage for any item. */
+const MY_WORK_STAGES: WorkStatus[] = ['todo', 'in_progress', 'done'];
+
+/** A `Record<WorkStage, …>` so a stage added to `workContexts.ts` cannot reach the Board
+ *  without someone deciding what its empty column says. */
+const STAGE_EMPTY_TEXT: Record<WorkStage, string> = {
+  backlog:         'Nothing in the backlog',
+  todo:            'No work queued',
+  in_progress:     'Nothing in progress',
+  ready_to_submit: 'Nothing ready to submit',
+  submitted:       'Nothing submitted',
+  review:          'Nothing in review',
+  blocked:         'Nothing blocked',
+  done:            'Nothing completed yet',
+};
+
+interface BoardColumn { key: WorkStage; label: string; emptyText: string }
+
+function buildColumns(context: BoardContext): BoardColumn[] {
+  const stages: WorkStage[] = context === 'all' ? MY_WORK_STAGES : STAGES_BY_CONTEXT[context];
+  return stages.map(key => ({ key, label: STAGE_LABELS[key], emptyText: STAGE_EMPTY_TEXT[key] }));
+}
+
+/** `work_stage` is typed `WorkStage` but stored in a free-form `VARCHAR(24)` — the type is a
+ *  compile-time assertion over DB text, not a runtime guarantee (`workContexts.ts` says as
+ *  much). Falling back to `work_status` keeps a row with an unrecognised stage visible on the
+ *  board instead of silently belonging to no column at all; every `WorkStatus` is a legal
+ *  stage in every context, so the fallback is always placeable. */
+function stageOf(item: WorkItem): WorkStage {
+  const raw: string = item.work_stage;
+  return raw in STAGE_LABELS ? (raw as WorkStage) : item.work_status;
+}
+
+/** Which column a card sits in for the current column set: its own stage under a specific
+ *  context, its normalised status under My Work. */
+function columnKeyOf(item: WorkItem, context: BoardContext): WorkStage {
+  const stage = stageOf(item);
+  if (context === 'all') return normaliseStage(stage);
+  // A stage outside this context's vocabulary can only come from data written before the
+  // item was moved between contexts; the normalised status is always in-vocabulary.
+  return isStageLegal(context, stage) ? stage : item.work_status;
+}
 
 function buildMeta(item: WorkItem, todayStr: string): { text: string | null; overdue: boolean } {
   const due = dueDateOf(item);
@@ -53,21 +104,24 @@ function itemKey(item: Pick<WorkItem, 'source' | 'id'>): string {
 }
 
 /** Card overflow menu — the keyboard-guaranteed "Move to" path required alongside drag
- *  (`dragging-alternative`, WCAG 2.2 AA). Unlike `WorkItemRow`'s single-action menu, this one
- *  holds up to two items (the columns the card isn't already in), so arrow-key movement and
- *  open-focus matter here in a way they didn't yet for a one-item menu. */
+ *  (`dragging-alternative`, WCAG 2.2 AA), and deliberately the *same* `setWorkStage` call the
+ *  drop handler makes rather than a reduced fallback. It lists every column of the current set
+ *  except the one the card is already in: two entries under My Work, four under Academic,
+ *  five under Projects. */
 function BoardCardMenu({
-  item, onMove,
+  item, columns, currentKey, onMove,
 }: {
   item: WorkItem;
-  onMove: (next: WorkStatus) => void;
+  columns: BoardColumn[];
+  currentKey: WorkStage;
+  onMove: (next: WorkStage) => void;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  const targets = COLUMNS.filter(c => c.key !== item.work_status);
+  const targets = columns.filter(c => c.key !== currentKey);
 
   useEffect(() => {
     if (!open) return;
@@ -169,14 +223,20 @@ function BoardCardMenu({
 }
 
 function BoardCard({
-  item, todayStr, dragging, onDragStart, onDragEnd, onMove,
+  item, todayStr, columns, currentKey, blocked, dragging, onDragStart, onDragEnd, onMove,
 }: {
   item: WorkItem;
   todayStr: string;
+  columns: BoardColumn[];
+  currentKey: WorkStage;
+  /** True only in My Work, where `blocked` collapses into In Progress and would otherwise
+   *  disappear; under Projects/Organization the stage has a column of its own and the badge
+   *  would just repeat the heading. */
+  blocked: boolean;
   dragging: boolean;
   onDragStart: (e: React.DragEvent) => void;
   onDragEnd: () => void;
-  onMove: (next: WorkStatus) => void;
+  onMove: (next: WorkStage) => void;
 }) {
   const meta = buildMeta(item, todayStr);
   const edgeColor = EDGE_COLOR[item.priority];
@@ -207,17 +267,33 @@ function BoardCard({
         >
           {item.title}
         </span>
-        <BoardCardMenu item={item} onMove={onMove} />
+        <BoardCardMenu item={item} columns={columns} currentKey={currentKey} onMove={onMove} />
       </div>
 
-      {item.priority === 'high' && (
-        <span style={{
-          display: 'inline-flex', alignItems: 'center', borderRadius: '999px', padding: '2px 9px',
-          background: 'rgba(224,96,124,0.15)', color: '#922e48', fontFamily: FONT, fontSize: '0.64rem',
-          fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', marginTop: '6px',
-        }}>
-          High
-        </span>
+      {(item.priority === 'high' || blocked) && (
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+        {item.priority === 'high' && (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', borderRadius: '999px', padding: '2px 9px',
+            background: 'rgba(224,96,124,0.15)', color: '#922e48', fontFamily: FONT, fontSize: '0.64rem',
+            fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', marginTop: '6px',
+          }}>
+            High
+          </span>
+        )}
+        {blocked && (
+          // §2a's darkened amber on its own tint — the only AA-passing amber text colour in
+          // this system. Deliberately not the overdue alert red, which means "past its
+          // deadline"; blocked is held, not late, and the two can be true at once.
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', borderRadius: '999px', padding: '2px 9px',
+            background: 'rgba(240,163,92,0.16)', color: '#8a5010', fontFamily: FONT, fontSize: '0.64rem',
+            fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', marginTop: '6px',
+          }}>
+            Blocked
+          </span>
+        )}
+      </div>
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
@@ -253,6 +329,12 @@ function BoardCard({
 export interface WorkBoardViewProps {
   /** Already filtered by category and search — see `WorkboardShell`'s `visibleItems`. */
   items:      WorkItem[];
+  /** The shell's active context tab, `'all'` for My Work — the same value the Table view is
+   *  given in Task 18, which is the task that owns the shell edit wiring `category` through.
+   *  Optional and defaulting to `'all'` because the shell does not pass it yet and this task's
+   *  scope is these two files: the default reproduces today's three-column behaviour exactly,
+   *  and the per-context columns light up the moment the prop is supplied. */
+  context?:   BoardContext;
   /** "YYYY-MM-DD" — `work.generated_at`, so cards agree with List on what "today" is. */
   todayStr:   string;
   /** True when the shell's category tab or search query is currently narrowing `items` —
@@ -264,11 +346,11 @@ export interface WorkBoardViewProps {
   onNewItem:  () => void;
 }
 
-export default function WorkBoardView({ items, todayStr, isFiltered, onChanged, onNewItem }: WorkBoardViewProps) {
+export default function WorkBoardView({ items, context = 'all', todayStr, isFiltered, onChanged, onNewItem }: WorkBoardViewProps) {
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
-  const [dragOverCol, setDragOverCol] = useState<WorkStatus | null>(null);
+  const [dragOverCol, setDragOverCol] = useState<WorkStage | null>(null);
 
-  const byColumn = (status: WorkStatus) => items.filter(i => i.work_status === status);
+  const columns = buildColumns(context);
 
   const handleDragStart = (e: React.DragEvent, item: WorkItem) => {
     e.dataTransfer.setData('text/plain', JSON.stringify({ source: item.source, id: item.id }));
@@ -281,9 +363,12 @@ export default function WorkBoardView({ items, todayStr, isFiltered, onChanged, 
     setDragOverCol(null);
   };
 
-  const moveItem = async (item: WorkItem, next: WorkStatus) => {
-    if (item.work_status === next) return;
-    const res = await setWorkStatus(item, next);
+  /** The single move path — both the drop handler and the card's "Move to" menu land here, so
+   *  the keyboard route is the drag route rather than an approximation of it. Never sends
+   *  `work_status`: the endpoints derive it from the stage. */
+  const moveItem = async (item: WorkItem, next: WorkStage) => {
+    if (columnKeyOf(item, context) === next) return;
+    const res = await setWorkStage(item, next);
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       alert(body?.error ?? 'Failed to move item');
@@ -292,7 +377,7 @@ export default function WorkBoardView({ items, todayStr, isFiltered, onChanged, 
     await onChanged();
   };
 
-  const handleDrop = async (e: React.DragEvent, next: WorkStatus) => {
+  const handleDrop = async (e: React.DragEvent, next: WorkStage) => {
     e.preventDefault();
     setDragOverCol(null);
     const raw = e.dataTransfer.getData('text/plain');
@@ -341,8 +426,8 @@ export default function WorkBoardView({ items, todayStr, isFiltered, onChanged, 
 
   return (
     <div className="vb-board" style={{ display: 'flex', gap: '14px', alignItems: 'flex-start', overflowX: 'auto', paddingBottom: '4px' }}>
-      {COLUMNS.map(col => {
-        const colItems = byColumn(col.key);
+      {columns.map(col => {
+        const colItems = items.filter(i => columnKeyOf(i, context) === col.key);
         const isOver = dragOverCol === col.key;
         return (
           <div
@@ -387,6 +472,9 @@ export default function WorkBoardView({ items, todayStr, isFiltered, onChanged, 
                   key={itemKey(item)}
                   item={item}
                   todayStr={todayStr}
+                  columns={columns}
+                  currentKey={col.key}
+                  blocked={context === 'all' && stageOf(item) === 'blocked'}
                   dragging={draggingKey === itemKey(item)}
                   onDragStart={e => handleDragStart(e, item)}
                   onDragEnd={handleDragEnd}
