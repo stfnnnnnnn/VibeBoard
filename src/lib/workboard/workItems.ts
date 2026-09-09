@@ -34,7 +34,8 @@ export interface WorkItem {
   /** First-class project name, independent of `chip_label`'s collapsed chain — the
    *  Academic table needs Course and Project as two separate columns. Populated for owned
    *  rows of any context, so an owned academic item can carry both this and `course_code`;
-   *  null only for rows read live from Study Pulse, which have no Workboard project. */
+   *  null when the row has no linked project, which is always the case for rows read live
+   *  from Study Pulse. */
   project_name:     string | null;
   /** First-class course code, independent of `chip_label`. */
   course_code:      string | null;

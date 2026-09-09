@@ -7,12 +7,18 @@ export type ColumnKey =
   | 'context' | 'course' | 'organization' | 'area' | 'project'
   | 'work' | 'status' | 'priority' | 'deadline' | 'time' | 'estimate' | 'links';
 
+/** `readonly` throughout, and the arrays below are readonly too, because the column
+ *  objects are shared by reference across contexts — `WORK` is the same object in four
+ *  of them. A consumer that did responsive dropping by writing `col.priority`, or that
+ *  sorted a context's array in place, would corrupt the other contexts for the rest of
+ *  the session, and the symptom would only appear after switching context. This makes
+ *  that a compile error instead. */
 export interface TableColumn {
-  key:      ColumnKey;
-  label:    string;
+  readonly key:      ColumnKey;
+  readonly label:    string;
   /** Columns dropped first when width is short. Spec §29 keeps Work, Status, Deadline. */
-  priority: 'essential' | 'high' | 'low';
-  align?:   'right';
+  readonly priority: 'essential' | 'high' | 'low';
+  readonly align?:   'right';
 }
 
 const WORK:     TableColumn = { key: 'work',     label: 'Work',     priority: 'essential' };
@@ -23,7 +29,7 @@ const LINKS:    TableColumn = { key: 'links',    label: 'Links',    priority: 'l
 const PRIORITY: TableColumn = { key: 'priority', label: 'Priority', priority: 'high' };
 
 /** Fixed per context — the user never configures these (spec §7, §34). */
-export const COLUMNS_BY_CONTEXT: Record<WorkContext | 'all', TableColumn[]> = {
+export const COLUMNS_BY_CONTEXT: Record<WorkContext | 'all', readonly TableColumn[]> = {
   all: [
     { key: 'context', label: 'Context', priority: 'high' },
     WORK, STATUS, PRIORITY, DEADLINE, TIME, LINKS,
@@ -65,14 +71,29 @@ const DASH = '—';
  */
 export function cellValue(item: WorkItem, key: ColumnKey): string | null {
   switch (key) {
-    case 'context':      return CONTEXT_LABELS[item.context];
+    // `context` and `life_area` are read straight from free-form DB columns, so these
+    // lookups can miss on a legacy or hand-edited row. Without the `?? DASH` the miss
+    // returns `undefined` through a `string | null` signature and React renders nothing —
+    // a silently blank cell, which is exactly what this function promises cannot happen.
+    case 'context':      return CONTEXT_LABELS[item.context] ?? DASH;
     case 'course':       return item.course_code ?? DASH;
     case 'organization': return item.organization_name ?? DASH;
-    case 'area':         return item.life_area ? LIFE_AREA_LABELS[item.life_area] : DASH;
+    case 'area':         return item.life_area ? (LIFE_AREA_LABELS[item.life_area] ?? DASH) : DASH;
     case 'project':      return item.project_name ?? DASH;
     case 'deadline':     return formatDeadline(item) ?? DASH;
     case 'time':         return formatDeadlineTime(item);
     case 'estimate':     return item.estimated_hours === null ? DASH : item.estimated_hours + 'h';
-    default:             return null;
+    // The four component-rendered columns, listed explicitly rather than caught by
+    // `default`, so a thirteenth ColumnKey added later fails the build here instead of
+    // falling through to `null` — which a row reads as "render a component" and would
+    // draw as an empty cell for a key that has none.
+    case 'work':
+    case 'status':
+    case 'priority':
+    case 'links':        return null;
+    default: {
+      const unhandled: never = key;
+      return unhandled;
+    }
   }
 }
