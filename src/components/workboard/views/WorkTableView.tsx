@@ -182,7 +182,14 @@ function comparatorFor(key: ColumnKey, context: TableContext): Comparator {
   switch (key) {
     case 'work':     return (a, b, dir) => signed(a.title.localeCompare(b.title), dir);
     case 'status':   return (a, b, dir) => signed(statusRank(a, context) - statusRank(b, context), dir);
-    case 'priority': return (a, b, dir) => signed(PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority], dir);
+    // `?? PRIORITY_RANK.normal` for the same reason `statusRank` maps an unknown stage to
+    // `order.length`: an out-of-union stored value would otherwise index to `undefined`, and
+    // `undefined - n` is `NaN`, which a comparator returns as an arbitrary order rather than
+    // an error. The POST route whitelists priority, so this needs hand-edited data.
+    case 'priority': return (a, b, dir) => signed(
+      (PRIORITY_RANK[a.priority] ?? PRIORITY_RANK.normal) - (PRIORITY_RANK[b.priority] ?? PRIORITY_RANK.normal),
+      dir,
+    );
     case 'deadline': return compareDeadline;
     // Sorted on the stored "HH:MM:SS", not on the rendered "11:59 PM" — 12-hour text sorts
     // "11:59 PM" above "9:00 AM", which is exactly backwards. Absent times pin last.
@@ -259,6 +266,14 @@ export default function WorkTableView({
   // way to break the rules of hooks in a component that otherwise looks linear.
   const [sort, setSort] = useState<SortState | null>(null);
 
+  // The sort a column *no longer present in this context* would apply is derived away rather
+  // than cleared: switching from Projects (sorted by Estimate) to Academic, which has no
+  // Estimate column, would otherwise leave rows in an order no visible header explains, since
+  // `aria-sort` lives on a header that is gone. Deriving rather than clearing in an effect
+  // avoids an extra render pass and a one-frame flash of the stale order — and it restores
+  // the sort if the user switches back to a context that does have the column.
+  const activeSort = sort !== null && columns.some(c => c.key === sort.key) ? sort : null;
+
   const sortedItems = useMemo(() => {
     // `[...items]` on every path. `Array.prototype.sort` sorts in place and `items` is a
     // prop — sorting it directly would mutate the shell's memoised `visibleItems` array,
@@ -267,10 +282,10 @@ export default function WorkTableView({
     // comparator returns 0 for a tie rather than inventing a tiebreak, so equal rows keep
     // the order they arrived in.
     const rows = [...items];
-    if (sort === null) return rows.sort(defaultComparator(todayStr));
-    const compare = comparatorFor(sort.key, context);
-    return rows.sort((a, b) => compare(a, b, sort.dir));
-  }, [items, sort, context, todayStr]);
+    if (activeSort === null) return rows.sort(defaultComparator(todayStr));
+    const compare = comparatorFor(activeSort.key, context);
+    return rows.sort((a, b) => compare(a, b, activeSort.dir));
+  }, [items, activeSort, context, todayStr]);
 
   /** Ascending → descending → back to the default order. The third click clears the sort
    *  rather than re-sorting ascending, so the default is reachable without a page reload. */
@@ -369,7 +384,9 @@ export default function WorkTableView({
             {columns.map(col => {
               // `null` when this column is not the sorted one — which is also what makes
               // `aria-sort` *absent* rather than `"none"` on the other eleven headers.
-              const dir: SortDir | null = sort !== null && sort.key === col.key ? sort.dir : null;
+              // `activeSort`, not `sort`: the header must agree with the order actually
+              // applied, so a sort derived away by a context switch shows no caret either.
+              const dir: SortDir | null = activeSort !== null && activeSort.key === col.key ? activeSort.dir : null;
               return (
               // `position: sticky` lives on the `<th>`, never on `<thead>` — sticky on a
               // table section is unreliable across browsers, on the cells it is not.
@@ -402,6 +419,11 @@ export default function WorkTableView({
                     sort would exist only for mouse users. */}
                 <button
                   type="button"
+                  // Without this the accessible name is the bare column label — and since
+                  // `aria-sort` is correctly absent on inactive headers, a screen-reader user
+                  // tabbing the header row gets no cue that the button sorts at all. The
+                  // visible label is contained in the name, so WCAG 2.5.3 still holds.
+                  aria-label={`Sort by ${col.label}`}
                   className={dir === null ? 'vb-th-sort' : 'vb-th-sort vb-th-sort-on'}
                   onClick={() => toggleSort(col.key)}
                   style={{
