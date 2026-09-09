@@ -2,10 +2,11 @@
 
 import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, List, Columns3, GanttChart, CalendarDays, Search } from 'lucide-react';
+import { ArrowLeft, List, Table2, Columns3, GanttChart, CalendarDays, Search } from 'lucide-react';
 import WorkboardWeekView from './WorkboardWeekView';
 import WorkListView from './views/WorkListView';
 import WorkBoardView from './views/WorkBoardView';
+import WorkTableView from './views/WorkTableView';
 import WorkTimelineView from './views/WorkTimelineView';
 import WorkboardStats from './WorkboardStats';
 import WorkboardRail from './WorkboardRail';
@@ -27,10 +28,14 @@ export interface WorkPayload {
   workload:      WorkloadDay[];
 }
 
-export type ViewKey = 'list' | 'board' | 'timeline' | 'calendar';
+export type ViewKey = 'list' | 'table' | 'board' | 'timeline' | 'calendar';
 
 const VIEWS: { key: ViewKey; label: string; Icon: typeof List }[] = [
   { key: 'list',     label: 'List',     Icon: List },
+  // Spec §7-§9's central new feature, placed directly after Focus/List because it is the other
+  // "work through everything" surface — the spec's own Views section lists it in exactly this
+  // position. Calendar keeps its slot until the task that removes it from the selector.
+  { key: 'table',    label: 'Table',    Icon: Table2 },
   { key: 'board',    label: 'Board',    Icon: Columns3 },
   { key: 'timeline', label: 'Timeline', Icon: GanttChart },
   { key: 'calendar', label: 'Calendar', Icon: CalendarDays },
@@ -139,6 +144,11 @@ export default function WorkboardShell(
   }, [work.items, category, query]);
 
   const isFiltered = category !== 'all' || query.trim() !== '';
+  /** The narrower half of `isFiltered`. The Table has three empty states rather than two, and
+   *  `isFiltered` alone cannot separate "this context has no work yet" (where offering the
+   *  create button is right) from "the search matched nothing in this context" (where it is
+   *  not), because it is true for every non-My-Work tab regardless of the search box. */
+  const isSearching = query.trim() !== '';
 
   /** The Overdue card's subtitle wants "oldest from <date>" (direction doc §6's example).
    *  Derived from the whole-board `work.items` (never `visibleItems`) so it never moves as
@@ -315,9 +325,27 @@ export default function WorkboardShell(
                   onNewItem={openCreateDialog}
                 />
               )}
+              {view === 'table' && (
+                <WorkTableView
+                  items={visibleItems}
+                  context={category}
+                  todayStr={work.generated_at}
+                  isFiltered={isFiltered}
+                  isSearching={isSearching}
+                  onChanged={refreshWork}
+                  onNewItem={openCreateDialog}
+                />
+              )}
               {view === 'board' && (
                 <WorkBoardView
                   items={visibleItems}
+                  // The SAME value `visibleItems` is filtered by, deliberately: the Board judges
+                  // a drop's stage legality against the board's context rather than each item's
+                  // own, which is only sound while the two agree. Task 16 shipped this prop
+                  // optional (defaulting to 'all'), so its absence would not have failed the
+                  // build — the Board would just have kept My Work's three columns under every
+                  // tab, invisibly, until someone opened Projects looking for Backlog.
+                  context={category}
                   todayStr={work.generated_at}
                   isFiltered={isFiltered}
                   onChanged={refreshWork}
