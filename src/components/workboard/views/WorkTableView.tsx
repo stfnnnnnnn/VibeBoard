@@ -18,6 +18,11 @@ import { COLUMNS_BY_CONTEXT, cellValue, type ColumnKey, type TableColumn } from 
 import { dueStateOf, type DueState } from '@/lib/workboard/dueSemantics';
 // Pool-free by design — see the module header in `dates.ts` for the incident that put it there.
 import { dueDateOf } from '@/lib/workboard/dates';
+// Task 20's one interactive cell. It owns its own `<td>` — partly so its select's hover and
+// focus rules can live in the same component (styled-jsx scopes per component, so they would
+// match nothing from here), partly so the vertical padding that keeps a 26px control from
+// inflating the row is decided next to the control that sets the height.
+import StatusCell from '../table/StatusCell';
 
 const FONT    = "'Inter','DM Sans','Segoe UI',sans-serif";
 const DM_FONT = "'DM Sans','Segoe UI',sans-serif";
@@ -243,18 +248,16 @@ export interface WorkTableViewProps {
    *  inside this context" (offering a create button there would be wrong advice), since
    *  `isFiltered` is true for *any* non-My-Work tab. */
   isSearching?: boolean;
-  /** Kept for the prop shape Tasks 20–24 will use for inline mutations. Unused today: this task
-   *  renders non-interactive cells only. */
+  /** Re-pulls the whole work payload after an inline mutation, so the stats, the workload
+   *  chart and every other view reconcile with what the Status cell just wrote. Tasks 21–24
+   *  take the same prop for priority, links and the detail panel. */
   onChanged:   () => void | Promise<void>;
   /** Opens the create/edit dialog in create mode — wired to this view's own empty states. */
   onNewItem:   () => void;
 }
 
-// `onChanged` is deliberately not destructured — it is part of the contract Tasks 20–24 build
-// on, but this task renders nothing that mutates, so pulling it out would only be an unused
-// binding.
 export default function WorkTableView({
-  items, context, todayStr, isFiltered, isSearching, onNewItem,
+  items, context, todayStr, isFiltered, isSearching, onChanged, onNewItem,
 }: WorkTableViewProps) {
   // Never sorted or filtered in place — `COLUMNS_BY_CONTEXT`'s arrays and their `TableColumn`
   // objects are `readonly` precisely because the same object is shared across contexts, and a
@@ -513,12 +516,13 @@ export default function WorkTableView({
                       );
 
                     case 'status':
-                      // Plain text, not a pill: Task 20 replaces this with the existing status
-                      // select, and a pill here would only have to be unbuilt.
+                      // The cell offers the *item's own* context's stages, not this table's —
+                      // five options on an Academic row and three on a Life row even when the
+                      // two sit side by side under My Work. The displayed value has always
+                      // followed the item's own stage (`stageOf`, still the cell's own
+                      // fallback); the editable vocabulary now matches it.
                       return (
-                        <td key={col.key} style={{ ...base, fontWeight: 600 }}>
-                          {STAGE_LABELS[stageOf(item)]}
-                        </td>
+                        <StatusCell key={col.key} item={item} style={{ ...base, fontWeight: 600 }} onChanged={onChanged} />
                       );
 
                     case 'priority':
