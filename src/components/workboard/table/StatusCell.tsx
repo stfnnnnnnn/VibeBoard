@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 // Type-only import from `workItems.ts` — that module imports `pool` (mysql2) at module scope,
 // so a *value* import here would drag the driver into this client bundle and 500 the page.
 // Same hazard documented in `WorkboardShell.tsx`, `WorkItemRow.tsx` and `WorkTableView.tsx`.
@@ -61,6 +61,14 @@ export default function StatusCell({ item, style, onChanged }: StatusCellProps) 
   const stage = stageOf(item);
 
   const [pending, setPending] = useState(false);
+  // `disabled={pending}` (ruling 5) is what stops the race, but browsers blur an element the
+  // instant it becomes disabled — a keyboard user who just changed this select is dropped to
+  // `document.body` for the round trip, and nothing puts them back by default. `wasFocused`
+  // records whether *this* select owned focus at the moment it disabled, so re-enabling
+  // restores it there and only there — a user who tabbed away in the meantime, or a select
+  // that disabled from some other row's action, must not steal focus back.
+  const selectRef = useRef<HTMLSelectElement>(null);
+  const wasFocused = useRef(false);
   /** The optimistic override, tagged with the stage it was applied *over*. Reconciliation is
    *  therefore pure — no effect, no render-phase `setState`: once the refreshed payload
    *  arrives with a different `stage`, the tag no longer matches and the override falls away
@@ -80,11 +88,23 @@ export default function StatusCell({ item, style, onChanged }: StatusCellProps) 
   // but cannot be chosen back and rejected with a 400.
   const stray = stages.includes(shown) ? null : shown;
 
+  // Runs on every `pending` transition, not only false→true→false in one breath, because
+  // React may batch across the round trip. Firing only when the select was the one focused
+  // when it disabled means an unrelated row's request finishing, or a user who has since
+  // tabbed elsewhere, cannot steal focus onto this cell.
+  useEffect(() => {
+    if (!pending && wasFocused.current) {
+      selectRef.current?.focus();
+      wasFocused.current = false;
+    }
+  }, [pending]);
+
   const handleChange = async (next: WorkStage) => {
     // Belt-and-braces behind `disabled={pending}`: ruling 5's guarantee that a fast double
     // change cannot produce two racing PATCHes whose responses land out of order.
     if (pending || next === shown) return;
 
+    wasFocused.current = document.activeElement === selectRef.current;
     setOptimistic({ over: stage, value: next });
     setPending(true);
     try {
@@ -133,6 +153,7 @@ export default function StatusCell({ item, style, onChanged }: StatusCellProps) 
       }}
     >
       <select
+        ref={selectRef}
         className="vb-status-select"
         value={shown}
         disabled={pending}
