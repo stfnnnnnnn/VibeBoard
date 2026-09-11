@@ -23,6 +23,11 @@ import { dueDateOf } from '@/lib/workboard/dates';
 // match nothing from here), partly so the vertical padding that keeps a 26px control from
 // inflating the row is decided next to the control that sets the height.
 import StatusCell from '../table/StatusCell';
+// Task 21's cell, on the same terms as Task 20's and for the same reasons: it owns its own
+// `<td>` so its select's hover and focus rules can live in the same component (styled-jsx
+// scopes per component, so they would match nothing from here), and so the vertical padding
+// that keeps a 26px control from inflating the row is decided next to the control.
+import PriorityCell from '../table/PriorityCell';
 
 const FONT    = "'Inter','DM Sans','Segoe UI',sans-serif";
 const DM_FONT = "'DM Sans','Segoe UI',sans-serif";
@@ -40,16 +45,11 @@ const EDGE_COLOR: Record<WorkItem['priority'], string> = {
   low:    '#d3dbe6',
 };
 
-/** §4's second half: a pill renders if and only if `priority === 'high'`. `normal`/`low` still
- *  need *something* in a column literally headed "Priority" — an em dash there would report a
- *  real, set value as absent, which is the one thing §7's "never blank" rule exists to prevent —
- *  so they render as plain meta text rather than as a muted pill. The rule §4 is protecting is
- *  "no pill on two-thirds of rows", and plain text does not reintroduce that noise. */
-const PRIORITY_LABEL: Record<WorkItem['priority'], string> = {
-  high:   'High',
-  normal: 'Normal',
-  low:    'Low',
-};
+/** §4's second half used to render here as a pill for `high` and plain text otherwise. Both now
+ *  live in `PriorityCell`, which owns the column: the labels moved with the control that shows
+ *  them, and the pill's alert red moved onto that control's text so the "this one is urgent"
+ *  reading survives the pill's removal. `EDGE_COLOR` above — §4's *first* half, the coloured
+ *  left edge — still renders from here on every row, unchanged. */
 
 /** The Deadline cell's colour, keyed by the same `DueState` the rest of the module uses, so the
  *  Table cannot contradict Focus about whether a date is late. Values are `WorkItemRow.tsx`'s
@@ -526,21 +526,11 @@ export default function WorkTableView({
                       );
 
                     case 'priority':
+                      // High/normal/low, the same three in every context — priority is not a
+                      // per-context vocabulary the way stages are, so unlike `StatusCell` this
+                      // cell needs nothing from the item beyond its current value.
                       return (
-                        <td key={col.key} style={base}>
-                          {item.priority === 'high' ? (
-                            <span style={{
-                              display: 'inline-flex', alignItems: 'center', borderRadius: '999px',
-                              padding: '2px 9px', background: 'rgba(224,96,124,0.15)', color: '#922e48',
-                              fontSize: '0.64rem', fontWeight: 700, textTransform: 'uppercase',
-                              letterSpacing: '0.03em',
-                            }}>
-                              {PRIORITY_LABEL.high}
-                            </span>
-                          ) : (
-                            PRIORITY_LABEL[item.priority]
-                          )}
-                        </td>
+                        <PriorityCell key={col.key} item={item} style={{ ...base, fontWeight: 600 }} onChanged={onChanged} />
                       );
 
                     case 'links':

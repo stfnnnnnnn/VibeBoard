@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { MoreVertical } from 'lucide-react';
-import type { WorkItem, WorkStatus, WorkCategory } from '@/lib/workboard/workItems';
+import type { WorkItem, WorkStatus, WorkCategory, WorkPriority } from '@/lib/workboard/workItems';
 // Pool-free by construction (`workContexts.ts` has no imports at all), so a `WorkStage` value
 // import cannot drag mysql2 into this client bundle the way `workItems.ts` would.
 import type { WorkStage } from '@/lib/workboard/workContexts';
@@ -39,6 +39,29 @@ export async function setWorkStage(item: WorkItem, next: WorkStage): Promise<Res
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ work_stage: next }),
+  });
+}
+
+/**
+ * The third sibling, sharing the same endpoint routing so the Table's priority cell never
+ * builds a URL of its own. `priority` is the whole message: both routes treat a PATCH body
+ * as a sparse patch, so sending anything else here would put a second field's fate in this
+ * function's hands.
+ *
+ * The two routes store it in different places, and that asymmetry is intended rather than
+ * incidental. An owned item's priority is its own `workboard_work_items.priority` column. An
+ * academic item has no Workboard column for it: `patchAcademicItem` maps the value through
+ * `urgencyFromPriority` into **Study Pulse's own `urgency` column** — the same column
+ * `priorityFromUrgency` reads it back out of — not into the `workboard_entry_meta` overlay.
+ * A priority change on an academic row is therefore visible inside Study Pulse too. That is
+ * the existing, deliberate mapping (Study Pulse stays the source of truth for the fields it
+ * owns), but it makes this the one inline Table edit that writes outside Workboard's tables.
+ */
+export async function setPriority(item: WorkItem, next: WorkPriority): Promise<Response> {
+  return fetch(writeUrl(item), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ priority: next }),
   });
 }
 

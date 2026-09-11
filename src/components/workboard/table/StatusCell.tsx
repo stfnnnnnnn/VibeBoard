@@ -13,6 +13,11 @@ import { setWorkStage } from '../WorkItemRow';
 // Pool-free by construction (`workContexts.ts` has no imports at all), so these are safe as
 // runtime imports from a client component.
 import { STAGES_BY_CONTEXT, STAGE_LABELS, type WorkStage } from '@/lib/workboard/workContexts';
+// The module's one failure surface, shared with `PriorityCell`. Task 20 shipped a bare
+// `alert()` here as an accepted stopgap and its report asked for this extraction the moment a
+// second cell became interactive; the behaviour is identical (`alert` under the hood), but
+// "how a table cell reports failure" is now one decision rather than one per cell.
+import { reportTableCellError } from './tableCellError';
 
 const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
 
@@ -115,7 +120,7 @@ export default function StatusCell({ item, style, onChanged }: StatusCellProps) 
 
       if (res === null) {
         setOptimistic(null);
-        alert(NETWORK_ERROR);
+        reportTableCellError(NETWORK_ERROR);
         return;
       }
       if (!res.ok) {
@@ -129,7 +134,7 @@ export default function StatusCell({ item, style, onChanged }: StatusCellProps) 
             ? (body as { error: string }).error
             : GENERIC_ERROR;
         setOptimistic(null);
-        alert(message);
+        reportTableCellError(message);
         return;
       }
       // Ruling 3's reconcile half: the optimistic value made the control feel instant, this
