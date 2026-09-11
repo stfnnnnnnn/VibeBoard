@@ -65,6 +65,42 @@ export async function setPriority(item: WorkItem, next: WorkPriority): Promise<R
   });
 }
 
+/**
+ * The fourth and last sibling, sharing the same endpoint routing so the Table's deadline cell
+ * never builds a URL of its own.
+ *
+ * **One PATCH, both fields, always.** The date and the time are two halves of one deadline, and
+ * both routes treat a body as a sparse patch — so two separate requests could interleave with
+ * another edit and land in an order that stores a time against a date the user never paired it
+ * with. Both keys are written out literally rather than spread from `next`, so neither can go
+ * missing: on both routes an *absent* key means "leave this column alone", a `null` means
+ * "clear it", and this function must never leave which of those it meant to the caller's object
+ * shape. (`JSON.stringify` drops `undefined` values but keeps `null`s, which is precisely the
+ * distinction that matters here.)
+ *
+ * `due_at` is deliberately `null` rather than `''` for a cleared date: the owned route passes
+ * `due_at` straight through its `PATCHABLE` loop as `body[field] ?? null`, so an empty string
+ * would reach a DATETIME column as `''` — a strict-mode error, or a `0000-00-00` row in a
+ * lenient one. Only `deadline_time` is normalised from `''` to NULL by both routes.
+ *
+ * The two routes store the pair in different places, and the asymmetry is intended. An owned
+ * item keeps both on its own row (`due_at` DATETIME at midnight, `deadline_time` TIME). An
+ * academic item's *date* goes back to Study Pulse's own `deadline` column — date-only, sliced
+ * to 10 characters by `patchAcademicItem`, so Study Pulse's column never acquires a time
+ * component — while the *time* goes to the `workboard_entry_meta` overlay, because Study Pulse
+ * has no column for it and its schema is deliberately not being changed.
+ */
+export async function setDeadline(
+  item: WorkItem,
+  next: { due_at: string | null; deadline_time: string | null },
+): Promise<Response> {
+  return fetch(writeUrl(item), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ due_at: next.due_at, deadline_time: next.deadline_time }),
+  });
+}
+
 const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
 
 const CATEGORY_META: Record<WorkCategory, { label: string; bg: string; text: string }> = {

@@ -15,7 +15,7 @@ import {
 // Task 17's column projections. Also pool-free: its only runtime imports are `workContexts`
 // and `dueSemantics`, and `dueSemantics` reaches only the import-free `dates.ts`.
 import { COLUMNS_BY_CONTEXT, cellValue, type ColumnKey, type TableColumn } from '@/lib/workboard/tableColumns';
-import { dueStateOf, type DueState } from '@/lib/workboard/dueSemantics';
+import { dueStateOf } from '@/lib/workboard/dueSemantics';
 // Pool-free by design — see the module header in `dates.ts` for the incident that put it there.
 import { dueDateOf } from '@/lib/workboard/dates';
 // Task 20's one interactive cell. It owns its own `<td>` — partly so its select's hover and
@@ -28,6 +28,12 @@ import StatusCell from '../table/StatusCell';
 // scopes per component, so they would match nothing from here), and so the vertical padding
 // that keeps a 26px control from inflating the row is decided next to the control.
 import PriorityCell from '../table/PriorityCell';
+// Task 22's cell — the first that is a popover editor rather than a plain `<select>`, and the
+// first that renders *two* columns. `DeadlineCell` draws the Deadline `<td>` and the Time `<td>`
+// from one component, and `useDeadlineEditor` (called once, below) is the editor's single home:
+// both cells read the same open-state, the same in-flight flag and the same optimistic override,
+// so the two columns are two views of one editor rather than two editors that can disagree.
+import DeadlineCell, { useDeadlineEditor } from '../table/DeadlineCell';
 
 const FONT    = "'Inter','DM Sans','Segoe UI',sans-serif";
 const DM_FONT = "'DM Sans','Segoe UI',sans-serif";
@@ -51,33 +57,11 @@ const EDGE_COLOR: Record<WorkItem['priority'], string> = {
  *  reading survives the pill's removal. `EDGE_COLOR` above — §4's *first* half, the coloured
  *  left edge — still renders from here on every row, unchanged. */
 
-/** The Deadline cell's colour, keyed by the same `DueState` the rest of the module uses, so the
- *  Table cannot contradict Focus about whether a date is late. Values are `WorkItemRow.tsx`'s
- *  `META_COLOR` exactly: §6's overdue red, §2a's darkened amber (the only AA-passing amber text
- *  colour in this system) for completed-late, §1's ordinary meta colour otherwise. */
-const VISUALLY_HIDDEN: React.CSSProperties = {
-  position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px',
-  overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
-};
-
-/** The textual half of the lateness signal. In Focus the colour is a *second* cue because
- *  `formatDueLabel` already puts "Overdue" in the string; the Table's Deadline cell is a
- *  bare date, so without this the state would be conveyed by colour alone — unreadable to a
- *  screen reader and to anyone with a red deficiency. The Status column shows the stage,
- *  not lateness, so it cannot stand in. */
-const DEADLINE_SR_SUFFIX: Partial<Record<DueState, string>> = {
-  overdue:        ' (overdue)',
-  completed_late: ' (completed late)',
-};
-
-const DEADLINE_COLOR: Record<DueState, string> = {
-  none:           '#5c6b80',
-  upcoming:       '#5c6b80',
-  due_today:      '#5c6b80',
-  completed:      '#5c6b80',
-  completed_late: '#8a5010',
-  overdue:        '#922e48',
-};
+/** The Deadline cell's colour (`DEADLINE_COLOR`), its visually-hidden overdue suffix
+ *  (`DEADLINE_SR_SUFFIX`) and the `VISUALLY_HIDDEN` style that carried it all moved into
+ *  `DeadlineCell` with the cell that renders them — same move `PriorityCell` made for the High
+ *  pill's labels and colour. They are unchanged in value; they simply live next to the markup
+ *  they style now that the Deadline column is a control rather than a string. */
 
 const DASH = '—';
 
@@ -268,6 +252,13 @@ export default function WorkTableView({
   // Both hooks sit above the three empty-state returns: a `return` before a hook is the one
   // way to break the rules of hooks in a component that otherwise looks linear.
   const [sort, setSort] = useState<SortState | null>(null);
+
+  // The Deadline/Time editor's single home, called once for the whole table and read by both of
+  // every row's two `DeadlineCell` instances. It sits here, above the empty-state returns, for
+  // the same reason `useState` above does — a `return` before a hook breaks the rules of hooks —
+  // and it is lifted this high rather than per-row because "which popover is open" is a property
+  // of the table, not of a cell: only one can be, and either of a row's two cells can open it.
+  const deadlineEditor = useDeadlineEditor(onChanged);
 
   // The sort a column *no longer present in this context* would apply is derived away rather
   // than cleared: switching from Projects (sorted by Estimate) to Academic, which has no
@@ -545,25 +536,33 @@ export default function WorkTableView({
                         </td>
                       );
 
-                    case 'deadline': {
-                      const dueState = dueStateOf(item, todayStr);
-                      const srSuffix = DEADLINE_SR_SUFFIX[dueState];
+                    case 'deadline':
+                    case 'time':
+                      // Both columns, one component, one editor. The `column` prop is the only
+                      // difference between the two render calls: it decides which value the cell
+                      // shows and which trigger the shared popover anchors to. `cellValue`'s
+                      // string is deliberately unused for these two now — the cell formats from
+                      // the *shown* values (stored, or the optimistic override) through the same
+                      // `formatDeadline`/`formatDeadlineTime` that `cellValue` calls, so an
+                      // in-flight edit moves the date and the time together.
                       return (
-                        <td key={col.key} style={{ ...base, color: DEADLINE_COLOR[dueState], fontWeight: 600 }}>
-                          {value ?? DASH}
-                          {srSuffix ? <span style={VISUALLY_HIDDEN}>{srSuffix}</span> : null}
-                        </td>
+                        <DeadlineCell
+                          key={col.key}
+                          item={item}
+                          column={col.key}
+                          style={base}
+                          todayStr={todayStr}
+                          editor={deadlineEditor}
+                        />
                       );
-                    }
 
                     case 'context':
                     case 'course':
                     case 'organization':
                     case 'area':
                     case 'project':
-                    case 'time':
                     case 'estimate':
-                      // `cellValue` already guarantees a non-empty string for all seven — the
+                      // `cellValue` already guarantees a non-empty string for all six — the
                       // `?? DASH` is belt-and-braces against a future signature change, never a
                       // reachable path today.
                       return <td key={col.key} style={base}>{value ?? DASH}</td>;
