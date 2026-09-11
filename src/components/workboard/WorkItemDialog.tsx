@@ -5,9 +5,10 @@ import { X } from 'lucide-react';
 // Types only — `workItems.ts` imports `@/lib/db` (mysql2) at module scope, so a runtime
 // import from it here would drag mysql2 into this client component's bundle (the landmine
 // that broke `/workboard` twice before; see WorkItemRow.tsx's own note on the same rule).
-// `WorkCategory`/`WORK_CATEGORIES` come from the pool-free `workCategories.ts` instead.
+// `WorkContext`/`WORK_CONTEXTS`/`CONTEXT_LABELS` come from the pool-free `workContexts.ts`
+// instead (zero imports of its own, so pulling values from it is safe here).
 import type { WorkItem, WorkPriority, WorkStatus, ProjectSummary } from '@/lib/workboard/workItems';
-import { WORK_CATEGORIES, type WorkCategory } from '@/lib/workboard/workCategories';
+import { WORK_CONTEXTS, CONTEXT_LABELS, type WorkContext } from '@/lib/workboard/workContexts';
 
 const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
 const HEADER_FONT = "'DM Sans','Segoe UI',sans-serif";
@@ -19,7 +20,9 @@ export type DialogTarget =
 export interface WorkItemDialogProps {
   target:            DialogTarget;
   /** `work.projects` from the shell — kept in sync locally via `onProjectCreated` so an
-   *  inline-created project shows up in the select without waiting for a full refetch. */
+   *  inline-created project shows up in the select without waiting for a full refetch.
+   *  The select itself now lives in the Projects branch of `renderContextFields` (Task 29),
+   *  so this prop and `onProjectCreated` are held, not dropped. */
   projects:          ProjectSummary[];
   onClose:           () => void;
   /** Called after a successful create/update so the shell can `refreshWork()`. */
@@ -33,13 +36,6 @@ interface SubjectOption {
   subject_name:    string;
 }
 
-const CATEGORY_LABEL: Record<WorkCategory, string> = {
-  academic:     'Academic',
-  project:      'Projects',
-  organization: 'Organization',
-  life:         'Life',
-};
-
 const STATUS_LABEL: Record<WorkStatus, string> = {
   todo:        'To Do',
   in_progress: 'In Progress',
@@ -52,6 +48,9 @@ const PRIORITY_LABEL: Record<WorkPriority, string> = {
   low:    'Low',
 };
 
+/** Sentinel value for the project select's inline "＋ New project…" option. The picker it
+ *  belongs to is now part of the Projects branch of `renderContextFields` (Task 29); this
+ *  and `handleCreateProject` stay put so that branch can wire straight back into them. */
 const NEW_PROJECT_SENTINEL = '__new__';
 
 const LABEL_STYLE: React.CSSProperties = {
@@ -166,7 +165,10 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   const isAcademicEdit = editingItem !== null && editingItem.source !== 'owned';
 
   const [title, setTitle]                     = useState(editingItem?.title ?? '');
-  const [category, setCategory]               = useState<WorkCategory>(editingItem?.category ?? 'project');
+  // Create mode starts with NO context selected — the per-context section renders nothing
+  // until one is picked, so the modal opens short and grows (progressive disclosure). An
+  // item being edited always has a context already, so edit mode pre-fills from it.
+  const [context, setContext]                 = useState<WorkContext | ''>(editingItem?.category ?? '');
   const [projectId, setProjectId]             = useState<number | ''>(editingItem?.project_id ?? '');
   const [subjectId, setSubjectId]             = useState<number | ''>(editingItem?.user_subject_id ?? '');
   const [priority, setPriority]               = useState<WorkPriority>(editingItem?.priority ?? 'normal');
@@ -192,8 +194,10 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   const firstFieldRef = useRef<HTMLInputElement & HTMLSelectElement>(null);
 
   // Owned-item forms (create, or editing an owned item) can offer a subject picker once
-  // `category === 'academic'`; an academic-sourced item never needs this list at all, so
-  // skip the fetch entirely for that case.
+  // the context is `academic`; an academic-sourced item never needs this list at all, so
+  // skip the fetch entirely for that case. The picker these three state values feed now
+  // belongs to the academic branch of `renderContextFields` (Task 26) — the fetch stays
+  // here so that branch has the list ready the moment it is added.
   useEffect(() => {
     if (isAcademicEdit) return;
     let cancelled = false;
@@ -252,6 +256,41 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     }
   }
 
+  /**
+   * The single seam where switching context clears the outgoing context's fields.
+   *
+   * Without it, editing a Projects item and switching it to Life would keep the populated
+   * `projectId` in state and save a project reference onto a Life item — an invalid
+   * combination the service layer would reject, or worse, silently persist.
+   *
+   * TASKS 26 / 28 / 29 / 30: each of you introduces new per-context state (an academic
+   * organisation id, a life area, and so on). Add a reset for it HERE as you add it —
+   * every per-context field must appear in this list, or it leaks across a context switch.
+   * Today the only per-context state that exists is the project and subject ids.
+   */
+  function handleContextChange(next: WorkContext | '') {
+    setContext(next);
+    setProjectId('');
+    setSubjectId('');
+    // Also drop any half-finished inline "new project" entry — it belonged to the
+    // context being left behind.
+    setShowNewProject(false);
+    setNewProjectName('');
+    setProjectError(null);
+  }
+
+  /**
+   * The per-context section. Renders `null` for every context in this task by design:
+   * Tasks 26 (academic), 28 (organization), 29 (projects) and 30 (life) each add exactly
+   * one branch here, one task at a time. Declared inside the component so those branches
+   * close over the existing form state (`projectId`, `subjectId`, `projects`, the subject
+   * list) without any prop threading.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  function renderContextFields(context: WorkContext): React.ReactNode {
+    return null;
+  }
+
   async function parseErrorMessage(res: Response): Promise<string> {
     try {
       const data = await res.json();
@@ -288,11 +327,19 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (isAcademicEdit) {
-      // No title validation needed — this branch never touches title.
-    } else if (!title.trim()) {
-      setFormError('Title is required.');
-      return;
+    if (!isAcademicEdit) {
+      // The academic-edit branch renders neither a Title nor a Context input (its context
+      // is fixed by its Study Pulse source), so neither is validated for it.
+      if (!title.trim()) {
+        setFormError('Title is required.');
+        return;
+      }
+      if (context === '') {
+        // Create mode deliberately starts with no context selected, so an unpicked context
+        // has to fail here rather than POST `category: ''` to the server.
+        setFormError('Please choose a context.');
+        return;
+      }
     }
     setFormError(null);
     setSubmitting(true);
@@ -313,10 +360,15 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
       } else {
         const body = {
           title:            title.trim(),
-          category,
+          // The wire key stays `category` — the endpoint and the DB column are unchanged.
+          // "Context" is the domain term and lives in `workContexts.ts`; this boundary is
+          // deliberately not crossed here. The cast is safe: the guard at the top of this
+          // function returns early on `context === ''` for every non-academic-edit path,
+          // which is the only path that reaches this body.
+          category:         context as WorkContext,
           note:             note.trim() || null,
           project_id:       projectId === '' ? null : projectId,
-          user_subject_id:  category === 'academic' && subjectId !== '' ? subjectId : null,
+          user_subject_id:  context === 'academic' && subjectId !== '' ? subjectId : null,
           priority,
           work_status:      workStatus,
           due_at:           dueAt || null,
@@ -410,92 +462,22 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
                 />
               </Field>
 
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div style={{ flex: 1 }}>
-                  <Field label="Category">
-                    <select
-                      className="vb-dialog-control"
-                      style={CONTROL_STYLE}
-                      value={category}
-                      onChange={e => setCategory(e.target.value as WorkCategory)}
-                    >
-                      {WORK_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>)}
-                    </select>
-                  </Field>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <Field label="Project">
-                    {!showNewProject ? (
-                      <select
-                        className="vb-dialog-control"
-                        style={CONTROL_STYLE}
-                        value={projectId === '' ? '' : String(projectId)}
-                        onChange={e => {
-                          if (e.target.value === NEW_PROJECT_SENTINEL) { setShowNewProject(true); return; }
-                          setProjectId(e.target.value === '' ? '' : Number(e.target.value));
-                        }}
-                      >
-                        <option value="">No project</option>
-                        {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        <option value={NEW_PROJECT_SENTINEL}>＋ New project…</option>
-                      </select>
-                    ) : (
-                      <div>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <input
-                            type="text"
-                            className="vb-dialog-control"
-                            style={CONTROL_STYLE}
-                            value={newProjectName}
-                            onChange={e => setNewProjectName(e.target.value)}
-                            placeholder="Project name"
-                            autoFocus
-                          />
-                          <button
-                            type="button"
-                            className="vb-dialog-control vb-dialog-inline-btn"
-                            onClick={handleCreateProject}
-                            disabled={creatingProject || !newProjectName.trim()}
-                            style={{ width: 'auto', padding: '8px 14px', background: '#256f92', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}
-                          >
-                            {creatingProject ? 'Adding…' : 'Add'}
-                          </button>
-                          <button
-                            type="button"
-                            className="vb-dialog-control vb-dialog-inline-btn"
-                            onClick={() => { setShowNewProject(false); setNewProjectName(''); setProjectError(null); }}
-                            style={{ width: 'auto', padding: '8px 14px', background: 'transparent', color: '#5c6b80', border: '1px solid rgba(200,210,230,0.6)', cursor: 'pointer' }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                        {projectError && (
-                          <p style={{ margin: '6px 0 0', fontFamily: FONT, fontSize: '0.76rem', color: '#922e48' }}>{projectError}</p>
-                        )}
-                      </div>
-                    )}
-                  </Field>
-                </div>
-              </div>
+              <Field label="Context" hint="Pick a context to see the fields that only apply to it.">
+                <select
+                  className="vb-dialog-control"
+                  style={CONTROL_STYLE}
+                  value={context}
+                  onChange={e => handleContextChange(e.target.value as WorkContext | '')}
+                >
+                  {/* An explicit placeholder so "no context yet" is a visible, selectable
+                      state rather than an invisible default that silently means Projects. */}
+                  <option value="">Choose a context…</option>
+                  {WORK_CONTEXTS.map(c => <option key={c} value={c}>{CONTEXT_LABELS[c]}</option>)}
+                </select>
+              </Field>
 
-              {category === 'academic' && (
-                <Field label="Subject" hint={subjectsError ?? undefined}>
-                  <select
-                    className="vb-dialog-control"
-                    style={CONTROL_STYLE}
-                    value={subjectId === '' ? '' : String(subjectId)}
-                    onChange={e => setSubjectId(e.target.value === '' ? '' : Number(e.target.value))}
-                    disabled={subjectsLoading}
-                  >
-                    <option value="">{subjectsLoading ? 'Loading subjects…' : 'No subject'}</option>
-                    {subjects?.map(s => (
-                      <option key={s.user_subject_id} value={s.user_subject_id}>
-                        {s.course_code} — {s.subject_name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              )}
+              {/* The per-context section — nothing until a context is picked. */}
+              {context !== '' && renderContextFields(context)}
 
               <div style={{ display: 'flex', gap: '12px' }}>
                 <div style={{ flex: 1 }}>
