@@ -322,7 +322,15 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
         setProjectError(typeof data.error === 'string' ? data.error : 'Failed to create project.');
         return;
       }
-      const created: ProjectSummary = { id: data.project_id, name, color: null, status: 'active' };
+      // The POST above sends only `{ name }`, so the server defaults it to a plain
+      // `context: 'project'` project with no parent — this literal has to describe
+      // whatever the server actually stored, not the shape a later task's inline-creation
+      // call here might send instead. Task 26/29 must update both together if they add a
+      // context/parent to this request.
+      const created: ProjectSummary = {
+        id: data.project_id, name, color: null, status: 'active',
+        context: 'project', user_subject_id: null, organization_id: null,
+      };
       onProjectCreated(created);
       setProjectId(created.id);
       setShowNewProject(false);

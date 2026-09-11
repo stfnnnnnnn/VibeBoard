@@ -70,6 +70,14 @@ export interface ProjectSummary {
   name:    string;
   color:   string | null;
   status:  'active' | 'archived';
+  /** The three dialog branches that let a user attach a project (Academic, Organization,
+   *  Projects) each list only projects whose own context matches and whose parent matches
+   *  the chosen course/organization — a course's project list must not show another
+   *  course's projects. `context` and the two parent ids are what makes that filter
+   *  possible client-side without a second request per keystroke. */
+  context:         WorkContext;
+  user_subject_id: number | null;
+  organization_id: number | null;
 }
 
 export interface WorkItemsPayload {
@@ -167,12 +175,13 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
   const cutoff = addDays(today, -14);   // done items older than this are out of the payload
 
   const [projectRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, name, color, status FROM workboard_projects
-     WHERE user_id = ? ORDER BY status ASC, name ASC`,
+    `SELECT id, name, color, status, context, user_subject_id, organization_id
+     FROM workboard_projects WHERE user_id = ? ORDER BY status ASC, name ASC`,
     [userId],
   );
   const projects: ProjectSummary[] = projectRows.map(r => ({
     id: r.id, name: r.name, color: r.color, status: r.status,
+    context: r.context, user_subject_id: r.user_subject_id, organization_id: r.organization_id,
   }));
 
   const [ownedRows] = await pool.execute<RowDataPacket[]>(
