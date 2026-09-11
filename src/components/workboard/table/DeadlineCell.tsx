@@ -594,7 +594,16 @@ export default function DeadlineCell({ item, column, style, todayStr, editor }: 
     // Capture phase: the table's own scroll container is what usually moves, and its scroll
     // events do not bubble to `window`. A fixed panel would otherwise stay put while its row
     // slid away underneath it.
-    const handleScroll = () => closeEditor();
+    //
+    // Unlike the outside-click case, this dismissal is not the user choosing to leave the
+    // control, so focus is returned to the trigger — exactly as Escape and Save already do —
+    // rather than left to fall to `document.body`, where the next Tab would restart at the
+    // top of the page. `triggerRef` is a stable ref container, so reading `.current` here is
+    // safe even though this closure is recreated only when the effect's own deps change.
+    const handleScroll = () => {
+      closeEditor();
+      triggerRef.current?.focus();
+    };
     document.addEventListener('mousedown', handlePointerDown);
     window.addEventListener('scroll', handleScroll, true);
     window.addEventListener('resize', handleScroll);
