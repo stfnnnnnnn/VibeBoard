@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { CheckCircle2, ChevronDown, ChevronUp, Link2, SearchX, Table2 } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronUp, SearchX, Table2 } from 'lucide-react';
 // Type-only import from `workItems.ts` — that module imports `pool` (mysql2) at module scope,
 // so a *value* import here would drag the driver into this client bundle and 500 the page.
 // Same hazard documented in `WorkboardShell.tsx`, `WorkItemRow.tsx` and `WorkBoardView.tsx`.
@@ -34,6 +34,11 @@ import PriorityCell from '../table/PriorityCell';
 // both cells read the same open-state, the same in-flight flag and the same optimistic override,
 // so the two columns are two views of one editor rather than two editors that can disagree.
 import DeadlineCell, { useDeadlineEditor } from '../table/DeadlineCell';
+// Task 23's cell — the fourth and last interactive column, and the only one that is not an
+// editor in its own right: it renders a summary and a trigger, and `LinksPopover` (a
+// standalone component the detail panel reuses unchanged) does the editing. It owns its own
+// `<td>` on the same terms as the three above.
+import LinksCell from '../table/LinksCell';
 
 const FONT    = "'Inter','DM Sans','Segoe UI',sans-serif";
 const DM_FONT = "'DM Sans','Segoe UI',sans-serif";
@@ -525,15 +530,15 @@ export default function WorkTableView({
                       );
 
                     case 'links':
+                      // The bare count this cell used to render is now only its *unloaded*
+                      // state. `link_count` is all the payload carries — one COUNT subquery per
+                      // item, deliberately, rather than one list query per row — so the cell
+                      // shows "3 links" until that owner's labels are in the shared store, then
+                      // upgrades to "Canvas · GitHub · +1". Nothing about that fetch blocks this
+                      // render: the cell asks for it on pointer-enter or focus, and the popover
+                      // asks for it on open.
                       return (
-                        <td key={col.key} style={base}>
-                          {item.link_count > 0 ? (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
-                              <Link2 size={13} aria-hidden />
-                              {item.link_count}
-                            </span>
-                          ) : DASH}
-                        </td>
+                        <LinksCell key={col.key} item={item} style={base} onChanged={onChanged} />
                       );
 
                     case 'deadline':
