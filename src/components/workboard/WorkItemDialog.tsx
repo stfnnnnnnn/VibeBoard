@@ -285,6 +285,13 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
    * one branch here, one task at a time. Declared inside the component so those branches
    * close over the existing form state (`projectId`, `subjectId`, `projects`, the subject
    * list) without any prop threading.
+   *
+   * Called conditionally (`context !== '' && renderContextFields(context)`), so this
+   * function must never contain a hook. Declare new per-context state with the other
+   * `useState` calls at the top of the component instead, and reset it in
+   * `handleContextChange` below — a hook written in here would typecheck cleanly (there is
+   * no ESLint config in this repo to catch it) and only fail at runtime, the moment a user
+   * picks the context whose branch introduced it.
    */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   function renderContextFields(context: WorkContext): React.ReactNode {
@@ -470,8 +477,13 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
                   onChange={e => handleContextChange(e.target.value as WorkContext | '')}
                 >
                   {/* An explicit placeholder so "no context yet" is a visible, selectable
-                      state rather than an invisible default that silently means Projects. */}
-                  <option value="">Choose a context…</option>
+                      state rather than an invisible default that silently means Projects.
+                      Disabled once a real context is set: re-selecting it would run
+                      `handleContextChange('')`, silently clearing `projectId`/`subjectId`
+                      on an item that already had a perfectly good context, with no undo
+                      short of cancelling the whole dialog. It only needs to be reachable
+                      as the *initial* state, never as a way back out of a real choice. */}
+                  <option value="" disabled={context !== ''}>Choose a context…</option>
                   {WORK_CONTEXTS.map(c => <option key={c} value={c}>{CONTEXT_LABELS[c]}</option>)}
                 </select>
               </Field>
