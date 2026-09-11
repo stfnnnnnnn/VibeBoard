@@ -183,7 +183,13 @@ export default function PriorityCell({ item, style, onChanged }: PriorityCellPro
           // control, not two. Deliberately NOT `appearance: none`: the native disclosure
           // arrow is the affordance that says this cell is editable at all.
           boxSizing: 'border-box', minHeight: '26px', borderRadius: '8px',
-          padding: '2px 4px 2px 7px', background: 'rgba(255,255,255,0.6)',
+          padding: '2px 4px 2px 7px',
+          // High gets the pill's own tint back, not just its text colour: the Deadline
+          // column sits immediately to the right and paints the same #922e48 for an
+          // overdue date, so a high-priority overdue row would otherwise show two
+          // identically-red words with nothing but a select border between them. The
+          // tint is what separated "priority" from "lateness" before this was a control.
+          background: shown === 'high' ? 'rgba(224,96,124,0.15)' : 'rgba(255,255,255,0.6)',
           border: '1px solid rgba(200,210,230,0.6)', fontFamily: FONT, fontSize: '0.76rem',
           fontWeight: shown === 'high' ? 700 : 600, color: TEXT_COLOR[shown], lineHeight: 1.2,
           cursor: pending ? 'progress' : 'pointer',
