@@ -7,7 +7,7 @@ import { X } from 'lucide-react';
 // that broke `/workboard` twice before; see WorkItemRow.tsx's own note on the same rule).
 // `WorkContext`/`WORK_CONTEXTS`/`CONTEXT_LABELS` come from the pool-free `workContexts.ts`
 // instead (zero imports of its own, so pulling values from it is safe here).
-import type { WorkItem, WorkPriority, WorkStatus, ProjectSummary } from '@/lib/workboard/workItems';
+import type { WorkItem, WorkPriority, WorkStatus, WorkSource, ProjectSummary } from '@/lib/workboard/workItems';
 import { WORK_CONTEXTS, CONTEXT_LABELS, type WorkContext } from '@/lib/workboard/workContexts';
 
 const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
@@ -46,6 +46,73 @@ const PRIORITY_LABEL: Record<WorkPriority, string> = {
   high:   'High',
   normal: 'Normal',
   low:    'Low',
+};
+
+/**
+ * The three ways an Academic item can come into being. They are genuinely different
+ * operations, not three spellings of "create":
+ *
+ *   'link'        writes NOTHING. Study Pulse already put the item on the board; this path
+ *                 only lets the user find it and see that it is there.
+ *   'graded'      writes a real Study Pulse row via POST /api/workboard/academic/create.
+ *                 Task 27 wires its target picker and its submission; this task only shows
+ *                 that the path is selected and requires a Course.
+ *   'independent' writes an owned `workboard_work_items` row through the same POST/PATCH
+ *                 the Projects/Organization/Life contexts use. The only path of the three
+ *                 whose row has a `project_id` column, which is why Academic Project is
+ *                 offered here and nowhere else.
+ */
+type AcademicSourcePath = 'link' | 'graded' | 'independent';
+
+const ACADEMIC_SOURCE_OPTIONS: { value: AcademicSourcePath; label: string; blurb: string }[] = [
+  {
+    value: 'link',
+    label: 'Link an existing item',
+    blurb: 'Study Pulse already put it on your board. Find it here to confirm — nothing is created.',
+  },
+  {
+    value: 'graded',
+    label: 'New graded work',
+    blurb: 'Writes a real entry in Study Pulse, so it counts toward your grade.',
+  },
+  {
+    value: 'independent',
+    label: 'New independent activity',
+    blurb: 'Revision, reading, practice — study work that only lives on Workboard.',
+  },
+];
+
+/** How each row in the "Link an existing item" picker announces where it came from, so two
+ *  similarly-titled entries stay tellable apart. `owned` is in the list because the picker
+ *  filters by *context*, not by source: an independent activity added here is on the board
+ *  for that course too, and "this is already here" is just as true of it. */
+const WORK_SOURCE_LABEL: Record<WorkSource, string> = {
+  owned:         'Independent',
+  activities:    'Activity',
+  quizzes:       'Quiz',
+  exams:         'Exam',
+  grade_entries: 'Graded item',
+};
+
+/** One row of the "Link an existing item" picker — the handful of `WorkItem` fields the
+ *  picker actually renders, kept narrow so the cache does not pin whole payloads. `key`
+ *  exists because ids repeat across the four Study Pulse tables: `activities` #5 and
+ *  `exams` #5 are different items, so source and id together are the only unique handle. */
+interface LinkableItem {
+  key:    string;
+  source: WorkSource;
+  id:     number;
+  title:  string;
+  due_at: string | null;
+}
+
+const HINT_TEXT_STYLE: React.CSSProperties = {
+  margin: '0 0 16px', fontFamily: FONT, fontSize: '0.74rem', color: '#8a94a6',
+};
+
+const INFO_CARD_STYLE: React.CSSProperties = {
+  marginBottom: '16px', padding: '12px 14px', borderRadius: '12px',
+  background: 'rgba(77,171,245,0.08)', border: '1px solid rgba(77,171,245,0.2)',
 };
 
 /** Sentinel value for the project select's inline "＋ New project…" option. The picker it
@@ -182,6 +249,23 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   const [subjectsLoading, setSubjectsLoading] = useState(false);
   const [subjectsError, setSubjectsError]     = useState<string | null>(null);
 
+  // An item that already exists as an owned row can only ever be an independent activity:
+  // the other two paths describe how a *new* academic item comes into being, and neither is
+  // reachable for a row that is already here (you cannot retroactively turn an owned row
+  // into a Study Pulse entry, and "link an existing item" creates nothing to edit). So edit
+  // mode starts — and resets — on that path, and hides the selector entirely.
+  const defaultAcademicSource: AcademicSourcePath | '' = target.mode === 'edit' ? 'independent' : '';
+
+  // Every piece of academic-branch state below is per-context and therefore reset in
+  // `handleContextChange`.
+  const [academicSource, setAcademicSource]   = useState<AcademicSourcePath | ''>(defaultAcademicSource);
+  /** `${source}:${id}` of the item chosen on the "Link an existing item" path, or ''. */
+  const [linkedItemKey, setLinkedItemKey]     = useState('');
+  /** Path 1's picker rows, cached per `user_subject_id` — see the lazy fetch below. */
+  const [linkableItems, setLinkableItems]     = useState<Record<number, LinkableItem[]>>({});
+  const [linkableLoading, setLinkableLoading] = useState<number | null>(null);
+  const [linkableError, setLinkableError]     = useState<string | null>(null);
+
   const [showNewProject, setShowNewProject]   = useState(false);
   const [newProjectName, setNewProjectName]   = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
@@ -193,23 +277,62 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstFieldRef = useRef<HTMLInputElement & HTMLSelectElement>(null);
 
-  // Owned-item forms (create, or editing an owned item) can offer a subject picker once
-  // the context is `academic`; an academic-sourced item never needs this list at all, so
-  // skip the fetch entirely for that case. The picker these three state values feed now
-  // belongs to the academic branch of `renderContextFields` (Task 26) — the fetch stays
-  // here so that branch has the list ready the moment it is added.
+  // The Course list, fetched only when it can actually be shown. Task 25 removed the field
+  // this fed and left the request firing unconditionally on mount for every context; now
+  // that the academic branch below is the one and only reader, it is gated on
+  // `context === 'academic'`. An academic-*sourced* item never needs the list at all (its
+  // course is fixed by its Study Pulse row), hence the `isAcademicEdit` bail as well.
+  //
+  // Fires on the transition into the academic context — the moment Context is set to
+  // Academic (create mode), or on mount for an owned academic item being edited — and at
+  // most once per dialog: `subjects !== null` short-circuits the re-run this effect's own
+  // `setSubjects` triggers, so leaving Academic and coming back reuses the loaded list.
   useEffect(() => {
-    if (isAcademicEdit) return;
+    if (isAcademicEdit || context !== 'academic' || subjects !== null) return;
     let cancelled = false;
     setSubjectsLoading(true);
+    // Clear a previous attempt's message: a failed fetch leaves `subjects` null, so leaving
+    // Academic and coming back retries — and a retry that succeeds must not still be
+    // apologising underneath a working Course list.
+    setSubjectsError(null);
     fetch('/api/studypulse/subjects')
       .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((data: SubjectOption[]) => { if (!cancelled) setSubjects(data); })
       .catch(() => { if (!cancelled) setSubjectsError('Could not load subjects.'); })
       .finally(() => { if (!cancelled) setSubjectsLoading(false); });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isAcademicEdit, context, subjects]);
+
+  // Path 1's picker: the items the chosen course ALREADY contributes to the board.
+  //
+  // There is no endpoint that returns one subject's activities/quizzes/exams/grade entries
+  // as JSON — Study Pulse's subject page is a server component that queries the DB directly
+  // — so this self-fetches the board's own payload, the same `/api/workboard/work` the shell
+  // loads, and filters it client-side by context and course. No new route, no prop threading.
+  //
+  // Cached per course id. That cache is also the loop guard: this effect writes
+  // `linkableItems`, which it depends on, and the `linkableItems[subjectId]` check makes the
+  // resulting re-run a no-op. Re-picking a course it has already loaded costs nothing.
+  useEffect(() => {
+    if (context !== 'academic' || academicSource !== 'link' || subjectId === '') return;
+    if (linkableItems[subjectId]) return;
+    const courseId = subjectId;
+    let cancelled = false;
+    setLinkableLoading(courseId);
+    setLinkableError(null);
+    fetch('/api/workboard/work')
+      .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((data: { items?: WorkItem[] }) => {
+        if (cancelled) return;
+        const rows: LinkableItem[] = (data.items ?? [])
+          .filter(i => i.context === 'academic' && i.user_subject_id === courseId)
+          .map(i => ({ key: `${i.source}:${i.id}`, source: i.source, id: i.id, title: i.title, due_at: i.due_at }));
+        setLinkableItems(prev => ({ ...prev, [courseId]: rows }));
+      })
+      .catch(() => { if (!cancelled) setLinkableError('Could not load this course’s items.'); })
+      .finally(() => { if (!cancelled) setLinkableLoading(null); });
+    return () => { cancelled = true; };
+  }, [context, academicSource, subjectId, linkableItems]);
 
   useEffect(() => {
     // Restore focus to whatever opened this dialog (a row's "Edit" menu item, the shell's or
@@ -263,10 +386,10 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
    * `projectId` in state and save a project reference onto a Life item — an invalid
    * combination the service layer would reject, or worse, silently persist.
    *
-   * TASKS 26 / 28 / 29 / 30: each of you introduces new per-context state (an academic
-   * organisation id, a life area, and so on). Add a reset for it HERE as you add it —
-   * every per-context field must appear in this list, or it leaks across a context switch.
-   * Today the only per-context state that exists is the project and subject ids.
+   * TASKS 28 / 29 / 30: each of you introduces new per-context state (an organisation id,
+   * a life area, and so on). Add a reset for it HERE as you add it — every per-context
+   * field must appear in this list, or it leaks across a context switch. Task 26 added the
+   * five academic-branch values below; the project and subject ids predate it.
    */
   function handleContextChange(next: WorkContext | '') {
     setContext(next);
@@ -277,24 +400,245 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     setShowNewProject(false);
     setNewProjectName('');
     setProjectError(null);
+    // The academic branch. The cached picker rows go too: they are keyed by course, and a
+    // context switch is exactly the moment a stale answer to "what does this course already
+    // have?" stops being worth holding on to.
+    setAcademicSource(defaultAcademicSource);
+    setLinkedItemKey('');
+    setLinkableItems({});
+    setLinkableLoading(null);
+    setLinkableError(null);
+    // A validation message raised by the outgoing context ("Please choose a course.") names
+    // a field that no longer exists once the context changes — it goes with its fields.
+    setFormError(null);
+  }
+
+  /** Switching source path clears anything the outgoing path owned — the same rule as
+   *  `handleContextChange`, one level down. `projectId` is dropped for every path but
+   *  `independent`, the only one whose row has a column to hold it. */
+  function handleAcademicSourceChange(next: AcademicSourcePath) {
+    setAcademicSource(next);
+    setLinkedItemKey('');
+    setLinkableError(null);
+    setFormError(null);
+    if (next !== 'independent') setProjectId('');
+  }
+
+  /** Both of the values cleared here are scoped to a course: an item belonging to the old
+   *  course, and a project that is filtered by it. Neither may survive a course change. */
+  function handleSubjectChange(next: number | '') {
+    setSubjectId(next);
+    setLinkedItemKey('');
+    setProjectId('');
+    setLinkableError(null);
   }
 
   /**
-   * The per-context section. Renders `null` for every context in this task by design:
-   * Tasks 26 (academic), 28 (organization), 29 (projects) and 30 (life) each add exactly
-   * one branch here, one task at a time. Declared inside the component so those branches
-   * close over the existing form state (`projectId`, `subjectId`, `projects`, the subject
-   * list) without any prop threading.
+   * The Academic branch. NO HOOKS — see `renderContextFields`'s note; this is reached only
+   * when the user has picked Academic, so a hook here would change the hook order between
+   * renders and blow up at runtime. Everything it needs is already state at the top of the
+   * component or a prop.
+   */
+  function renderAcademicFields(): React.ReactNode {
+    const path            = academicSource;
+    const chosenCourseId  = subjectId === '' ? null : subjectId;
+    const courseRows      = chosenCourseId === null ? undefined : linkableItems[chosenCourseId];
+    const loadingRows     = chosenCourseId !== null && linkableLoading === chosenCourseId;
+    const pickedItem      = (courseRows ?? []).find(r => r.key === linkedItemKey) ?? null;
+    // Once an item is chosen the course is no longer a choice — it is a fact about that
+    // item. Clearing the item in the picker below unlocks it again.
+    const courseLocked    = path === 'link' && pickedItem !== null;
+    // The whole reason `ProjectSummary` carries `context` and `user_subject_id`: without
+    // both, this list would show one course's projects while another course is selected.
+    const academicProjects = chosenCourseId === null
+      ? []
+      : projects.filter(p => p.context === 'academic' && p.user_subject_id === chosenCourseId);
+
+    return (
+      <>
+        {target.mode === 'create' && (
+          <fieldset style={{ border: 'none', margin: '0 0 16px', padding: 0 }}>
+            <legend style={{ ...LABEL_STYLE, marginBottom: '4px', padding: 0 }}>Where does this come from?</legend>
+            <p style={{ margin: '0 0 10px', fontFamily: FONT, fontSize: '0.74rem', color: '#8a94a6' }}>
+              Graded work appears in Study Pulse and counts toward your grade. An independent
+              activity is study work that only lives here.
+            </p>
+            <div style={{ display: 'grid', gap: '8px' }}>
+              {ACADEMIC_SOURCE_OPTIONS.map(opt => {
+                const active = path === opt.value;
+                return (
+                  <label
+                    key={opt.value}
+                    style={{
+                      display: 'flex', gap: '10px', alignItems: 'flex-start', cursor: 'pointer',
+                      padding: '10px 12px', borderRadius: '12px',
+                      background: active ? 'rgba(77,171,245,0.08)' : 'rgba(255,255,255,0.6)',
+                      border: `1px solid ${active ? 'rgba(77,171,245,0.45)' : 'rgba(200,210,230,0.6)'}`,
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      className="vb-dialog-control"
+                      name="academicSource"
+                      value={opt.value}
+                      checked={active}
+                      onChange={() => handleAcademicSourceChange(opt.value)}
+                      style={{ marginTop: '3px', accentColor: '#2a7fa8', flexShrink: 0 }}
+                    />
+                    <span>
+                      <span style={{ display: 'block', fontFamily: HEADER_FONT, fontSize: '0.85rem', fontWeight: 700, color: '#2d3748' }}>
+                        {opt.label}
+                      </span>
+                      <span style={{ display: 'block', marginTop: '2px', fontFamily: FONT, fontSize: '0.74rem', color: '#5c6b80' }}>
+                        {opt.blurb}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        )}
+
+        {path !== '' && (
+          <>
+            <Field
+              label="Course"
+              hint={courseLocked ? 'Set by the item you picked — clear the item to change it.' : undefined}
+            >
+              <select
+                className="vb-dialog-control"
+                style={CONTROL_STYLE}
+                value={subjectId === '' ? '' : String(subjectId)}
+                disabled={courseLocked || subjectsLoading}
+                onChange={e => handleSubjectChange(e.target.value === '' ? '' : Number(e.target.value))}
+              >
+                <option value="">{subjectsLoading ? 'Loading courses…' : 'Choose a course…'}</option>
+                {(subjects ?? []).map(s => (
+                  <option key={s.user_subject_id} value={s.user_subject_id}>
+                    {s.course_code} — {s.subject_name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            {subjectsError && (
+              <p style={{ ...HINT_TEXT_STYLE, color: '#922e48', fontWeight: 600 }}>{subjectsError}</p>
+            )}
+
+            {path === 'link' && (
+              chosenCourseId === null ? (
+                <p style={HINT_TEXT_STYLE}>Pick a course to see what it already has on your board.</p>
+              ) : (
+                <>
+                  <Field label="Item" hint="Picking one changes nothing — it is already on your board.">
+                    <select
+                      className="vb-dialog-control"
+                      style={CONTROL_STYLE}
+                      value={linkedItemKey}
+                      disabled={loadingRows || (courseRows?.length ?? 0) === 0}
+                      onChange={e => setLinkedItemKey(e.target.value)}
+                    >
+                      <option value="">
+                        {loadingRows
+                          ? 'Loading…'
+                          : (courseRows?.length ?? 0) === 0
+                            ? 'Nothing on your board for this course yet'
+                            : 'Choose an item…'}
+                      </option>
+                      {(courseRows ?? []).map(r => (
+                        <option key={r.key} value={r.key}>
+                          {WORK_SOURCE_LABEL[r.source]} · {r.title}
+                          {r.due_at ? ` · due ${r.due_at.slice(0, 10)}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  {linkableError && (
+                    <p style={{ ...HINT_TEXT_STYLE, color: '#922e48', fontWeight: 600 }}>{linkableError}</p>
+                  )}
+
+                  {pickedItem && (
+                    <div style={INFO_CARD_STYLE}>
+                      <p style={{ margin: '0 0 4px', fontFamily: HEADER_FONT, fontSize: '0.92rem', fontWeight: 700, color: '#2d3748' }}>
+                        {pickedItem.title}
+                      </p>
+                      <p style={{ margin: 0, fontFamily: FONT, fontSize: '0.76rem', color: '#5c6b80' }}>
+                        {pickedItem.source === 'owned'
+                          ? 'Already here — an independent activity you added to Workboard. There is nothing to create.'
+                          : 'Already here — Study Pulse puts this on your board automatically. There is nothing to create.'}
+                      </p>
+                      <a
+                        href={`/studypulse/${chosenCourseId}`}
+                        className="vb-dialog-link"
+                        style={{ display: 'inline-block', marginTop: '8px', fontFamily: FONT, fontSize: '0.78rem', fontWeight: 700, color: '#256f92' }}
+                      >
+                        Open in Study Pulse →
+                      </a>
+                    </div>
+                  )}
+                </>
+              )
+            )}
+
+            {path === 'graded' && (
+              <div style={INFO_CARD_STYLE}>
+                <p style={{ margin: 0, fontFamily: FONT, fontSize: '0.76rem', color: '#5c6b80' }}>
+                  Choosing what this becomes — an Activity, a Quiz or an Exam, and which grading
+                  period and category it counts under — is not wired up yet. Course is all this
+                  path asks for today.
+                </p>
+              </div>
+            )}
+
+            {path === 'independent' && (
+              <Field
+                label="Academic project"
+                hint={
+                  chosenCourseId === null
+                    ? 'Optional. Choose a course first — projects are listed per course.'
+                    : academicProjects.length === 0
+                      ? 'Optional. This course has no projects yet.'
+                      : 'Optional. Only this course’s projects are listed.'
+                }
+              >
+                <select
+                  className="vb-dialog-control"
+                  style={CONTROL_STYLE}
+                  value={projectId === '' ? '' : String(projectId)}
+                  disabled={chosenCourseId === null || academicProjects.length === 0}
+                  onChange={e => setProjectId(e.target.value === '' ? '' : Number(e.target.value))}
+                >
+                  <option value="">No project</option>
+                  {academicProjects.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </Field>
+            )}
+          </>
+        )}
+      </>
+    );
+  }
+
+  /**
+   * The per-context section. Tasks 28 (organization), 29 (projects) and 30 (life) each add
+   * exactly one branch here, one task at a time; Task 26 added Academic. Declared inside
+   * the component so those branches close over the existing form state (`projectId`,
+   * `subjectId`, `projects`, the subject list) without any prop threading.
    *
    * Called conditionally (`context !== '' && renderContextFields(context)`), so this
-   * function must never contain a hook. Declare new per-context state with the other
-   * `useState` calls at the top of the component instead, and reset it in
-   * `handleContextChange` below — a hook written in here would typecheck cleanly (there is
-   * no ESLint config in this repo to catch it) and only fail at runtime, the moment a user
-   * picks the context whose branch introduced it.
+   * function — and everything it calls, `renderAcademicFields` included — must never
+   * contain a hook. Declare new per-context state with the other `useState` calls at the
+   * top of the component instead, and reset it in `handleContextChange` above — a hook
+   * written in here would typecheck cleanly (there is no ESLint config in this repo to
+   * catch it) and only fail at runtime, the moment a user picks the context whose branch
+   * introduced it.
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   function renderContextFields(context: WorkContext): React.ReactNode {
+    if (context === 'academic') return renderAcademicFields();
     return null;
   }
 
@@ -340,8 +684,42 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     }
   }
 
+  /** "Link an existing item" is the one path with no write behind it. The academic overlay
+   *  table `workboard_entry_meta` has no `project_id`/`organization_id` column, so a
+   *  Study-Pulse-sourced item cannot be attached to anything here — there is genuinely
+   *  nothing to submit, and the footer offers acknowledgement ("Done") instead of Create. */
+  const isLinkExistingPath = context === 'academic' && academicSource === 'link';
+
+  /** Path 2 writes a real Study Pulse row through POST /api/workboard/academic/create, and
+   *  that call does not exist yet — TASK 27 owns it. Until it lands, this path must refuse
+   *  to submit rather than fall through to the owned-item POST below, which would quietly
+   *  store an independent activity: a Workboard-only row, byte-for-byte what path 3
+   *  produces, for a user who asked for something that counts toward their grade. The one
+   *  thing worse than "not yet" is a Save that appears to work and creates the wrong kind
+   *  of thing. TASK 27: delete this guard as you wire the real submission. */
+  const isGradedWorkPath = context === 'academic' && academicSource === 'graded';
+
+  /** Paths 2 and 3 each write a row that hangs off a course, so Course is required for
+   *  both. Path 1 is excluded because it writes nothing at all (it returns before this is
+   *  read), and academic *edit* is excluded separately below: its course is fixed by its
+   *  Study Pulse row and it renders no Course input to satisfy a guard with. */
+  const requiresCourse = context === 'academic'
+    && (academicSource === 'graded' || academicSource === 'independent');
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // Path 1's only exit. Pressing Enter in the Title field submits the form, so this guard
+    // is what stops an implicit submit from POSTing an owned item the user never asked for;
+    // the "Done" button routes through the same close so the two can never diverge. No
+    // `fetch`, and no `onSaved()` — nothing changed for the shell to refresh.
+    if (isLinkExistingPath) {
+      onClose();
+      return;
+    }
+    if (isGradedWorkPath) {
+      setFormError('Creating graded work isn’t wired up yet — pick “New independent activity” for now, or add it in Study Pulse.');
+      return;
+    }
     if (!isAcademicEdit) {
       // The academic-edit branch renders neither a Title nor a Context input (its context
       // is fixed by its Study Pulse source), so neither is validated for it.
@@ -353,6 +731,18 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
         // Create mode deliberately starts with no context selected, so an unpicked context
         // has to fail here rather than POST `category: ''` to the server.
         setFormError('Please choose a context.');
+        return;
+      }
+      if (context === 'academic' && academicSource === '') {
+        // Create mode starts on no path for the same reason it starts on no context, and
+        // the Course field does not even render until one is picked. Without this, Save
+        // with Academic selected and nothing else touched POSTs an owned academic row the
+        // user never chose the shape of.
+        setFormError('Please choose where this comes from.');
+        return;
+      }
+      if (requiresCourse && subjectId === '') {
+        setFormError('Please choose a course.');
         return;
       }
     }
@@ -571,7 +961,10 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
               disabled={submitting}
               style={{ width: 'auto', padding: '10px 20px' }}
             >
-              {submitting ? 'Saving…' : target.mode === 'create' ? 'Create' : 'Save changes'}
+              {/* Path 1 creates nothing, so it must not offer to "Create" — the button
+                  acknowledges what the user just confirmed and closes. `submitting` is
+                  never true on that path (it has no fetch), so the order is moot there. */}
+              {submitting ? 'Saving…' : isLinkExistingPath ? 'Done' : target.mode === 'create' ? 'Create' : 'Save changes'}
             </button>
           </div>
         </form>
