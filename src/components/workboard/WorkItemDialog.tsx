@@ -1764,14 +1764,15 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
               {context !== '' && renderContextFields(context)}
 
               {/* POST /api/workboard/academic/create takes only { title, target_type,
-                  cat_id?, period_id?, deadline, priority } — Start date, Estimated hours
-                  and Note have no column on that path, so a user who fills them in for
-                  graded work would otherwise lose them with no signal at all. Due date and
-                  Priority are unaffected — both map onto fields the route does accept. */}
+                  cat_id?, period_id?, deadline, priority } — Deadline time, Start date,
+                  Estimated hours and Note have no column on that path, so a user who fills
+                  them in for graded work would otherwise lose them with no signal at all.
+                  Due date and Priority are unaffected — both map onto fields the route
+                  does accept. */}
               {isNewGradedPath && (
                 <p style={{ ...HINT_TEXT_STYLE, margin: '-4px 0 16px' }}>
-                  Study Pulse doesn’t have a place for Start date, Estimated hours, or Note
-                  yet — only Due date and Priority are saved for graded work.
+                  Study Pulse doesn’t have a place for Deadline time, Start date, Estimated
+                  hours, or Note yet — only Due date and Priority are saved for graded work.
                 </p>
               )}
 
@@ -1784,17 +1785,15 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
                 {/* The same pairing `AcademicFieldSet` renders, for the owned row: one
                     deadline split into date and time (spec §16), the time optional and
                     sent as null when blank rather than as a midnight nobody chose.
-                    NOTE for whoever touches the graded path next: POST
-                    /api/workboard/academic/create takes a `deadline` DATE and no time, so
-                    a time typed here is dropped on that path. It is left enabled rather
-                    than `disabled={isNewGradedPath}` only because Task 31's scope is the
-                    owned and overlay bodies; if the graded route never gains a time, this
-                    belongs in that hint's list beside Start date and Estimated hours. */}
+                    POST /api/workboard/academic/create takes a `deadline` DATE and no
+                    time, so it joins Start date/Estimated hours/Note in the graded-path
+                    advisory above and disables the same way. */}
                 <div style={{ flex: 1 }}>
                   <Field label="Deadline time" hint="Optional. Blank means any time that day.">
                     <input
                       type="time" className="vb-dialog-control" style={CONTROL_STYLE}
                       value={deadlineTime} onChange={e => setDeadlineTime(e.target.value)}
+                      disabled={isNewGradedPath}
                     />
                   </Field>
                 </div>
