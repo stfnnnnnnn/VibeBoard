@@ -216,6 +216,20 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
   /* ─── Status ─────────────────────────────────────────────────────────────────────────── */
   const stage = stageOf(item);
   const [statusPending, setStatusPending] = useState(false);
+  // `disabled={statusPending}` (below) is what stops the double-PATCH race, but a browser
+  // blurs an element the instant it disables. Outside a modal that is a minor annoyance;
+  // inside this drawer's own focus trap it is a hole — focus falls to `document.body`, which
+  // the trap's `onKeyDown` never reaches, so Escape stops closing the drawer and Tab walks
+  // into the page behind it until something refocuses the panel. `StatusCell`'s fix, ported:
+  // remember whether this select owned focus at the moment it disabled, and restore it there
+  // and only there once the request settles.
+  const statusWasFocused = useRef(false);
+  useEffect(() => {
+    if (!statusPending && statusWasFocused.current) {
+      firstFieldRef.current?.focus();
+      statusWasFocused.current = false;
+    }
+  }, [statusPending]);
   /** `StatusCell`'s tagged optimistic override: reconciliation is pure — once the refreshed
    *  payload arrives with a different `stage` the tag no longer matches and the override falls
    *  away on its own, with no frame in which the old value flashes back. */
@@ -331,6 +345,7 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
     // Belt-and-braces behind `disabled={statusPending}`: a fast double change must not produce
     // two racing PATCHes whose responses land out of order.
     if (statusPending || next === shownStage) return;
+    statusWasFocused.current = document.activeElement === firstFieldRef.current;
     setOptimistic({ over: stage, value: next });
     setStatusPending(true);
     try {
@@ -355,6 +370,16 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
   const afterSubtaskWrite = async () => {
     if (!(await loadSubtasks())) { reportTableCellError(SUBTASK_LIST_ERROR); return; }
     await onChanged();
+  };
+
+  /** A disabled checkbox or button blurs to `document.body` the instant it disables — the same
+   *  hole the Status select's `wasFocused` guard closes above, but here there is no single
+   *  control to remember: a toggle's checkbox survives the round trip, a delete's does not, and
+   *  either can fail before ever reaching `afterSubtaskWrite`. Checking where focus actually
+   *  landed, in every write's `finally`, covers every exit — the two failure returns included —
+   *  with one guard instead of one per call site. */
+  const refocusIfLost = () => {
+    if (document.activeElement === document.body) panelRef.current?.focus();
   };
 
   const addSubtask = async () => {
@@ -382,6 +407,7 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
       await afterSubtaskWrite();
     } finally {
       setAdding(false);
+      refocusIfLost();
     }
   };
 
@@ -403,6 +429,7 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
         next.delete(subtask.id);
         return next;
       });
+      refocusIfLost();
     }
   };
 
@@ -415,15 +442,17 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
       if (res === null) { reportTableCellError(NETWORK_ERROR); return; }
       if (!res.ok) { reportTableCellError(await messageFrom(res, SUBTASK_DELETE_ERROR)); return; }
       await afterSubtaskWrite();
-      // The row that held focus has just been removed from the DOM, which would otherwise drop
-      // the user to `document.body` and restart the next Tab at the top of the page.
-      panelRef.current?.focus();
     } finally {
       setBusyIds(current => {
         const next = new Set(current);
         next.delete(subtask.id);
         return next;
       });
+      // The row that held focus is gone from the DOM the moment this succeeds — unlike the
+      // toggle/add cases, there is no control left to consider restoring focus to, only
+      // somewhere safe to land it. `refocusIfLost` covers that case and the two failure
+      // returns above uniformly, where the checkbox merely re-enables.
+      refocusIfLost();
     }
   };
 
@@ -575,15 +604,22 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
             {/* The progress count reads off the *live* list rather than the payload's
                 `subtask_done`/`subtask_total`, which are a snapshot taken before this drawer's
                 own writes. The payload's pair is what the row underneath shows, and `onChanged`
-                is what keeps the two in step. */}
-            {subtaskStatus === 'ready' && showing.length > 0 && (
+                is what keeps the two in step.
+                Gated on `showing.length` alone, not `subtaskStatus === 'ready'`: `loadSubtasks`
+                never clears `subtasks` when it flips to `'loading'` for a refetch, so `showing`
+                still holds the previous list — every checkbox toggle would otherwise blink the
+                count out and back for no reason, on data that never actually left. */}
+            {showing.length > 0 && (
               <span style={{ fontFamily: FONT, fontSize: '0.74rem', fontWeight: 600, color: '#5c6b80' }}>
                 {doneCount} of {showing.length} done
               </span>
             )}
           </div>
 
-          {subtaskStatus === 'loading' && <p style={NOTE_STYLE}>Loading subtasks…</p>}
+          {/* Same reasoning as the count above: only the true first load has nothing to show
+              yet. A background refetch after a write already has `showing` to keep rendering,
+              so it does not need this line stealing the space above it. */}
+          {subtaskStatus === 'loading' && showing.length === 0 && <p style={NOTE_STYLE}>Loading subtasks…</p>}
 
           {subtaskStatus === 'error' && (
             <div>
@@ -800,10 +836,14 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
         </section>
 
         {/* A dead-end marker for the eye, not for a screen reader: the drawer ends here and the
-            rest of the item is edited elsewhere. */}
+            rest of the item is edited elsewhere. Named specifically as Focus's row menu, not
+            generically as "the row's Edit action" — the Table view has no such action to offer
+            (it takes no `onEdit` prop at all, per `WorkTableView.tsx`'s own note), so a user who
+            opened this drawer from a Table row or a phone card would be pointed at something
+            they cannot reach without switching views. */}
         <p style={{ ...NOTE_STYLE, display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem' }}>
           <Check size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.7 }} />
-          Title, deadline and the rest are edited from the row’s Edit action.
+          Title, deadline and the rest are edited from Focus’s row menu.
         </p>
       </div>
 
