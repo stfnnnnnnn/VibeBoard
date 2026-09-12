@@ -94,6 +94,12 @@ const WORK_SOURCE_LABEL: Record<WorkSource, string> = {
   grade_entries: 'Graded item',
 };
 
+/** The three targets a legacy-mode subject offers, in the order Study Pulse's own pickers
+ *  offer them. Labels come from `WORK_SOURCE_LABEL` so a target reads as the same word here
+ *  as it does in the "Link an existing item" list one field above. */
+const LEGACY_TARGETS = ['activities', 'quizzes', 'exams'] as const;
+type LegacyTarget = typeof LEGACY_TARGETS[number];
+
 /** One row of the "Link an existing item" picker — the handful of `WorkItem` fields the
  *  picker actually renders, kept narrow so the cache does not pin whole payloads. `key`
  *  exists because ids repeat across the four Study Pulse tables: `activities` #5 and
@@ -104,6 +110,25 @@ interface LinkableItem {
   id:     number;
   title:  string;
   due_at: string | null;
+}
+
+interface GradingCategory { cat_id: number; name: string }
+interface GradingPeriod   { period_id: number; name: string; categories: GradingCategory[] }
+
+/**
+ * What the "New graded work" path needs out of `GET /api/studypulse/subjects/[id]/grading`.
+ *
+ * `mode` is the whole point: a legacy subject is graded as Activity/Quiz/Exam, a custom one
+ * as a category inside a grading period, and the create route 400s if the body describes the
+ * wrong one. It is derived exactly as `CanvasAnnouncementBank` derives it — a *real* preset
+ * means custom — which is also how the route's own `getSubjectMode` decides (it JOINs
+ * `grading_presets`, so a `subject_grading` row pointing at a missing preset is legacy on
+ * both sides). Deriving it from `config !== null` instead would disagree with the server on
+ * exactly that row and strand the user on a picker whose every submission is rejected.
+ */
+interface SubjectGrading {
+  mode:    'legacy' | 'custom';
+  periods: GradingPeriod[];
 }
 
 const HINT_TEXT_STYLE: React.CSSProperties = {
@@ -266,6 +291,25 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   const [linkableLoading, setLinkableLoading] = useState<number | null>(null);
   const [linkableError, setLinkableError]     = useState<string | null>(null);
 
+  // Path 2's target picker. Which of the three controls below is live depends on the chosen
+  // course's grading mode, so all three are held at once and only the mode's own are read.
+  /** Legacy mode's target. A closed three-value union with a real default, so "nothing
+   *  picked" is unrepresentable here — the only way to reach Create with no target is for
+   *  `subjectGrading` to be missing, which `handleSubmit` guards separately. */
+  const [gradingTarget, setGradingTarget]     = useState<LegacyTarget>('activities');
+  const [gradingPeriodId, setGradingPeriodId] = useState<number | ''>('');
+  const [gradingCatId, setGradingCatId]       = useState<number | ''>('');
+  /** Grading config cached per `user_subject_id`, same shape and same role as
+   *  `linkableItems`: the picker's data *and* the lazy fetch's loop guard.
+   *
+   *  There is deliberately no `gradingLoading` companion to `linkableLoading`. "In flight"
+   *  is exactly "not in this cache and not failed", and *deriving* it rather than storing it
+   *  closes the gap a stored flag leaves open: the effect that sets the flag runs after the
+   *  paint that follows picking a course, so a stored flag reads false — i.e. "loaded" — for
+   *  one frame on a course nothing has been fetched for yet. */
+  const [subjectGrading, setSubjectGrading]   = useState<Record<number, SubjectGrading>>({});
+  const [gradingError, setGradingError]       = useState<string | null>(null);
+
   const [showNewProject, setShowNewProject]   = useState(false);
   const [newProjectName, setNewProjectName]   = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
@@ -343,6 +387,45 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [context, academicSource, subjectId, linkableItems]);
 
+  // Path 2's grading config: which of the two target pickers the chosen course gets, and
+  // — in custom mode — the periods and categories to fill it with.
+  //
+  // Same shape as `loadLinkableItems` above, for the same reasons: cached per course id so
+  // the effect that calls it cannot loop, pulled out of that effect so a failed load can be
+  // retried by a button (re-picking the course that just failed fires no `change` event),
+  // and cancellable only from the effect, since only the effect can be interrupted by a
+  // course switch or an unmount.
+  //
+  // A failure deliberately writes NOTHING into the cache. Storing a `{ mode: 'legacy' }`
+  // fallback would render the Activity/Quiz/Exam select for a custom-mode subject — a
+  // confident, wrong answer whose every submission the create route rejects.
+  function loadSubjectGrading(courseId: number, cancelledRef?: { current: boolean }) {
+    setGradingError(null);
+    fetch(`/api/studypulse/subjects/${courseId}/grading`)
+      .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((data: { config?: { preset?: { periods?: GradingPeriod[] } | null } | null }) => {
+        if (cancelledRef?.current) return;
+        // `config: null` (no `subject_grading` row) and a config whose `preset` came back
+        // null (a row pointing at a preset that no longer exists) are both legacy — the
+        // second is why this tests `preset`, not `config`. See `SubjectGrading`.
+        const preset  = data.config?.preset ?? null;
+        const grading: SubjectGrading = preset
+          ? { mode: 'custom', periods: preset.periods ?? [] }
+          : { mode: 'legacy', periods: [] };
+        setSubjectGrading(prev => ({ ...prev, [courseId]: grading }));
+      })
+      .catch(() => { if (!cancelledRef?.current) setGradingError('Could not load this course’s grading setup.'); });
+  }
+
+  useEffect(() => {
+    if (context !== 'academic' || academicSource !== 'graded' || subjectId === '') return;
+    if (subjectGrading[subjectId]) return;
+    const cancelledRef = { current: false };
+    loadSubjectGrading(subjectId, cancelledRef);
+    return () => { cancelledRef.current = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [context, academicSource, subjectId, subjectGrading]);
+
   useEffect(() => {
     // Restore focus to whatever opened this dialog (a row's "Edit" menu item, the shell's or
     // the empty state's "New Work Item" button) once it closes — otherwise a keyboard user
@@ -417,9 +500,25 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     setLinkableItems({});
     setLinkableLoading(null);
     setLinkableError(null);
+    // Path 2's target picker, cache included — for the same reason path 1's rows go: it is
+    // keyed by course, and leaving Academic is exactly when a stale answer to "how is this
+    // course graded?" stops being worth holding.
+    resetGradedTarget();
+    setSubjectGrading({});
     // A validation message raised by the outgoing context ("Please choose a course.") names
     // a field that no longer exists once the context changes — it goes with its fields.
     setFormError(null);
+  }
+
+  /** Path 2's *picked* target, which is scoped to one course's grading setup and is
+   *  therefore invalid the moment the course, the source path, or the context changes. The
+   *  cached configs are deliberately NOT cleared here: they are keyed per course and stay
+   *  correct across all three, exactly like `linkableItems`. */
+  function resetGradedTarget() {
+    setGradingTarget('activities');
+    setGradingPeriodId('');
+    setGradingCatId('');
+    setGradingError(null);
   }
 
   /** Switching source path clears anything the outgoing path owned — the same rule as
@@ -429,17 +528,32 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     setAcademicSource(next);
     setLinkedItemKey('');
     setLinkableError(null);
+    // Unconditional, like `setLinkedItemKey` above: leaving 'graded' must drop a target the
+    // other two paths cannot submit, and arriving on 'graded' must start clean rather than
+    // on whatever a previous visit left behind.
+    resetGradedTarget();
     setFormError(null);
     if (next !== 'independent') setProjectId('');
   }
 
-  /** Both of the values cleared here are scoped to a course: an item belonging to the old
-   *  course, and a project that is filtered by it. Neither may survive a course change. */
+  /** Every value cleared here is scoped to a course: an item belonging to the old course, a
+   *  project that is filtered by it, and a graded target — a `period_id`/`cat_id` naming a
+   *  period in the *old* course's preset, which the create route rejects outright, and a
+   *  legacy Activity/Quiz/Exam the new course may not even offer. None may survive. */
   function handleSubjectChange(next: number | '') {
     setSubjectId(next);
     setLinkedItemKey('');
     setProjectId('');
     setLinkableError(null);
+    resetGradedTarget();
+  }
+
+  /** Categories belong to a period, so a category picked under the outgoing period is not
+   *  merely stale — it names a row the create route's ownership join will refuse. Clearing
+   *  it is what makes the second select's emptiness honest rather than a hidden mismatch. */
+  function handleGradingPeriodChange(next: number | '') {
+    setGradingPeriodId(next);
+    setGradingCatId('');
   }
 
   /**
@@ -457,6 +571,12 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     // Once an item is chosen the course is no longer a choice — it is a fact about that
     // item. Clearing the item in the picker below unlocks it again.
     const courseLocked    = path === 'link' && pickedItem !== null;
+    // Path 2's picker data. `undefined` means "not loaded" — never "legacy": the two are
+    // told apart by `gradingError`, which the branch below checks first.
+    const courseGrading   = chosenCourseId === null ? undefined : subjectGrading[chosenCourseId];
+    // The nested period→category shape `CanvasAnnouncementBank` uses: categories are read
+    // off the selected period, so no period means no categories to choose from.
+    const periodCategories = courseGrading?.periods.find(p => p.period_id === gradingPeriodId)?.categories ?? [];
     // The whole reason `ProjectSummary` carries `context` and `user_subject_id`: without
     // both, this list would show one course's projects while another course is selected.
     const academicProjects = chosenCourseId === null
@@ -610,13 +730,90 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
             )}
 
             {path === 'graded' && (
-              <div style={INFO_CARD_STYLE}>
-                <p style={{ margin: 0, fontFamily: FONT, fontSize: '0.76rem', color: '#5c6b80' }}>
-                  Choosing what this becomes — an Activity, a Quiz or an Exam, and which grading
-                  period and category it counts under — is not wired up yet. Course is all this
-                  path asks for today.
+              chosenCourseId === null ? (
+                <p style={HINT_TEXT_STYLE}>Pick a course to choose what this counts toward.</p>
+              ) : gradingError !== null ? (
+                // Checked before the empty-cache branch below, and before anything reads a
+                // mode: a failed load leaves the cache empty too, and an empty cache must
+                // never fall through to the legacy picker — that would quietly offer
+                // Activity/Quiz/Exam for a custom-mode course and have the route reject
+                // every submission made through it.
+                <p style={{ ...HINT_TEXT_STYLE, color: '#922e48', fontWeight: 600 }}>
+                  {gradingError}{' '}
+                  <button
+                    type="button"
+                    className="vb-dialog-link"
+                    onClick={() => loadSubjectGrading(chosenCourseId)}
+                    style={{
+                      background: 'none', border: 'none', padding: 0, font: 'inherit',
+                      color: 'inherit', textDecoration: 'underline', cursor: 'pointer',
+                    }}
+                  >
+                    Try again
+                  </button>
                 </p>
-              </div>
+              ) : courseGrading === undefined ? (
+                // Not in the cache and not failed, so it is in flight — or about to be: the
+                // effect that starts the fetch runs *after* the paint that follows picking a
+                // course, which is why this derives "loading" from the cache miss instead of
+                // from a flag that effect would have to set first.
+                <p style={HINT_TEXT_STYLE}>Loading this course’s grading setup…</p>
+              ) : courseGrading.mode === 'legacy' ? (
+                <Field label="Counts as" hint="This course is graded on the standard Activity / Quiz / Exam categories.">
+                  <select
+                    className="vb-dialog-control"
+                    style={CONTROL_STYLE}
+                    value={gradingTarget}
+                    onChange={e => setGradingTarget(e.target.value as LegacyTarget)}
+                  >
+                    {LEGACY_TARGETS.map(t => <option key={t} value={t}>{WORK_SOURCE_LABEL[t]}</option>)}
+                  </select>
+                </Field>
+              ) : (
+                <>
+                  <Field
+                    label="Grading period"
+                    hint={courseGrading.periods.length === 0
+                      ? 'This course’s grading preset has no periods set up — add them in Study Pulse first.'
+                      : undefined}
+                  >
+                    <select
+                      className="vb-dialog-control"
+                      style={CONTROL_STYLE}
+                      value={gradingPeriodId === '' ? '' : String(gradingPeriodId)}
+                      disabled={courseGrading.periods.length === 0}
+                      onChange={e => handleGradingPeriodChange(e.target.value === '' ? '' : Number(e.target.value))}
+                    >
+                      <option value="">Choose a period…</option>
+                      {courseGrading.periods.map(p => (
+                        <option key={p.period_id} value={p.period_id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  <Field
+                    label="Category"
+                    hint={gradingPeriodId === '' ? 'Choose a grading period first.' : undefined}
+                  >
+                    <select
+                      className="vb-dialog-control"
+                      style={CONTROL_STYLE}
+                      value={gradingCatId === '' ? '' : String(gradingCatId)}
+                      disabled={gradingPeriodId === '' || periodCategories.length === 0}
+                      onChange={e => setGradingCatId(e.target.value === '' ? '' : Number(e.target.value))}
+                    >
+                      <option value="">
+                        {gradingPeriodId !== '' && periodCategories.length === 0
+                          ? 'This period has no categories'
+                          : 'Choose a category…'}
+                      </option>
+                      {periodCategories.map(c => (
+                        <option key={c.cat_id} value={c.cat_id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </Field>
+                </>
+              )
             )}
 
             {path === 'independent' && (() => {
@@ -735,14 +932,13 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
    *  nothing to submit, and the footer offers acknowledgement ("Done") instead of Create. */
   const isLinkExistingPath = context === 'academic' && academicSource === 'link';
 
-  /** Path 2 writes a real Study Pulse row through POST /api/workboard/academic/create, and
-   *  that call does not exist yet — TASK 27 owns it. Until it lands, this path must refuse
-   *  to submit rather than fall through to the owned-item POST below, which would quietly
-   *  store an independent activity: a Workboard-only row, byte-for-byte what path 3
-   *  produces, for a user who asked for something that counts toward their grade. The one
-   *  thing worse than "not yet" is a Save that appears to work and creates the wrong kind
-   *  of thing. TASK 27: delete this guard as you wire the real submission. */
-  const isGradedWorkPath = context === 'academic' && academicSource === 'graded';
+  /** Path 2 writes a real Study Pulse row through POST /api/workboard/academic/create — a
+   *  third kind of request `handleSubmit` can make, alongside the academic-edit PATCH and
+   *  the owned-item POST/PATCH. It has its own body, its own endpoint and its own guards,
+   *  and it must never reach the owned-item body below: that would quietly store an
+   *  independent activity — a Workboard-only row, byte-for-byte what path 3 produces — for
+   *  a user who asked for something that counts toward their grade. */
+  const isNewGradedPath = context === 'academic' && academicSource === 'graded';
 
   /** Paths 2 and 3 each write a row that hangs off a course, so Course is required for
    *  both. Path 1 is excluded because it writes nothing at all (it returns before this is
@@ -761,10 +957,20 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
       onClose();
       return;
     }
-    if (isGradedWorkPath) {
-      setFormError('Creating graded work isn’t wired up yet — pick “New independent activity” for now, or add it in Study Pulse.');
-      return;
-    }
+    /** Path 2's request body, built in the validation block below because that is where the
+     *  values it needs are proven present. Non-null is therefore the signal that the graded
+     *  path validated, and is what the request chain branches on — so the branch cannot be
+     *  taken with a half-filled body, and cannot be skipped into the owned-item POST. */
+    let gradedBody: {
+      user_subject_id: number;
+      title:           string;
+      target_type:     LegacyTarget | 'grade_entries';
+      cat_id?:         number;
+      period_id?:      number;
+      deadline:        string;
+      priority:        WorkPriority;
+    } | null = null;
+
     if (!isAcademicEdit) {
       // The academic-edit branch renders neither a Title nor a Context input (its context
       // is fixed by its Study Pulse source), so neither is validated for it.
@@ -790,6 +996,58 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
         setFormError('Please choose a course.');
         return;
       }
+      if (isNewGradedPath) {
+        // Re-stated rather than inferred from `requiresCourse` above: this is what narrows
+        // `subjectId` to a number for the config lookup and the body.
+        if (subjectId === '') {
+          setFormError('Please choose a course.');
+          return;
+        }
+        const grading = subjectGrading[subjectId];
+        if (grading === undefined) {
+          // No config means no picker was ever rendered, so no target was ever offered —
+          // the load is still in flight, or it failed and the user pressed Create on the
+          // error. Submitting anyway would have to guess the mode, and a wrong guess writes
+          // the wrong kind of Study Pulse row.
+          setFormError(gradingError ?? 'This course’s grading setup hasn’t loaded yet.');
+          return;
+        }
+        // The common section's Due date doubles as this path's deadline, and the create
+        // route requires one (it 400s on a missing or malformed `deadline`). Caught here so
+        // the message names the field the user can see rather than the wire key.
+        if (!dueAt) {
+          setFormError('A deadline is required for graded work.');
+          return;
+        }
+        if (grading.mode === 'custom') {
+          if (gradingPeriodId === '' || gradingCatId === '') {
+            setFormError('Choose a grading period and category.');
+            return;
+          }
+          gradedBody = {
+            user_subject_id: subjectId,
+            title:           title.trim(),
+            target_type:     'grade_entries',
+            cat_id:          gradingCatId,
+            period_id:       gradingPeriodId,
+            deadline:        dueAt,
+            priority,
+          };
+        } else {
+          // `gradingTarget` is a three-value union with a default, so there is no "unpicked"
+          // state to guard on this branch — the legacy select always holds one of the three
+          // the route accepts. `cat_id`/`period_id` are omitted rather than nulled: the
+          // route reads `target_type` to decide which it needs, and a legacy body carrying
+          // a category would misdescribe what was actually chosen.
+          gradedBody = {
+            user_subject_id: subjectId,
+            title:           title.trim(),
+            target_type:     gradingTarget,
+            deadline:        dueAt,
+            priority,
+          };
+        }
+      }
     }
     setFormError(null);
     setSubmitting(true);
@@ -806,6 +1064,17 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
             estimated_hours: estimatedHours === '' ? null : Number(estimatedHours),
             start_date:      startDate || null,
           }),
+        });
+      } else if (gradedBody !== null) {
+        // Path 2. Note what is NOT sent: no status, note, start date, estimated hours or
+        // project. This endpoint writes a Study Pulse row, whose columns are the ones in
+        // `gradedBody` and nothing else — the common fields below belong to
+        // `workboard_work_items`, a table this path never touches. (An overlay row to carry
+        // them can be PATCHed onto the created item afterwards, from the edit dialog.)
+        res = await fetch('/api/workboard/academic/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(gradedBody),
         });
       } else {
         const body = {
