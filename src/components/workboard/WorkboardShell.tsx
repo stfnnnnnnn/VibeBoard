@@ -11,6 +11,7 @@ import WorkTimelineView from './views/WorkTimelineView';
 import WorkboardStats from './WorkboardStats';
 import WorkboardRail from './WorkboardRail';
 import WorkItemDialog, { type DialogTarget } from './WorkItemDialog';
+import WorkItemDetail from './WorkItemDetail';
 import type { WorkboardWeek } from '@/lib/workboard/aggregate';
 import type { WorkItem, ProjectSummary } from '@/lib/workboard/workItems';
 // `WORK_CATEGORIES`/`WorkCategory` come from `workCategories.ts`, not `workItems.ts` — the
@@ -104,6 +105,9 @@ export default function WorkboardShell(
   const [category, setCategory] = useState<CategoryFilter>('all');
   const [query, setQuery] = useState('');
   const [dialogTarget, setDialogTarget] = useState<DialogTarget | null>(null);
+  /** The item whose detail drawer is open, or null. Same shape and same lifetime as
+   *  `dialogTarget` above — the drawer is the dialog's sibling, not a second kind of state. */
+  const [detailItem, setDetailItem] = useState<WorkItem | null>(null);
   const viewTabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const categoryTabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -116,6 +120,22 @@ export default function WorkboardShell(
 
   const openCreateDialog = () => setDialogTarget({ mode: 'create' });
   const openEditDialog = (item: WorkItem) => setDialogTarget({ mode: 'edit', item });
+
+  const openDetail = (item: WorkItem) => setDetailItem(item);
+  const closeDetail = () => setDetailItem(null);
+
+  /** The open item as the *current* payload knows it, not as it was when the title was clicked.
+   *
+   *  The drawer's own writes (a status change, every subtask mutation) end in `refreshWork`, and
+   *  the captured object is a snapshot from before them — a drawer rendering it would show the
+   *  stale status it just changed. Looked up by `source`+`id`, the pair that identifies a row
+   *  across the whole module (ids repeat between the four Study Pulse tables, so neither half is
+   *  a key on its own). Falls back to the snapshot when the lookup misses, which is what keeps
+   *  an item filtered out from under the drawer — a search typed behind it, or a completed item
+   *  leaving List's groups — from blanking the panel the user is still reading. */
+  const detailLive = detailItem === null
+    ? null
+    : work.items.find(i => i.source === detailItem.source && i.id === detailItem.id) ?? detailItem;
 
   /** Keeps the dialog's project select current the moment a project is created inline,
    *  without waiting for the next `refreshWork()` (which only runs after the item itself
@@ -322,6 +342,7 @@ export default function WorkboardShell(
                   isFiltered={isFiltered}
                   onChanged={refreshWork}
                   onEdit={openEditDialog}
+                  onOpenDetail={openDetail}
                   onNewItem={openCreateDialog}
                 />
               )}
@@ -334,6 +355,7 @@ export default function WorkboardShell(
                   isSearching={isSearching}
                   onChanged={refreshWork}
                   onNewItem={openCreateDialog}
+                  onOpenDetail={openDetail}
                 />
               )}
               {view === 'board' && (
@@ -379,6 +401,23 @@ export default function WorkboardShell(
           onClose={() => setDialogTarget(null)}
           onSaved={refreshWork}
           onProjectCreated={handleProjectCreated}
+        />
+      )}
+
+      {/* §26's detail drawer. `onChanged` is the same `refreshWork` the dialog's `onSaved` gets:
+          one refresh function, so a subtask checked in here moves the row's progress counts by
+          exactly the path a dialog save moves its fields.
+
+          Keyed by the owner pair so opening a *different* item remounts the panel rather than
+          reusing it — the drawer holds that item's subtask list and draft text in state, and
+          carrying either across two different work items would be a bug the user sees. */}
+      {detailLive && (
+        <WorkItemDetail
+          key={`${detailLive.source}-${detailLive.id}`}
+          item={detailLive}
+          todayStr={work.generated_at}
+          onClose={closeDetail}
+          onChanged={refreshWork}
         />
       )}
 

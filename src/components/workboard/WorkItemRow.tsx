@@ -188,6 +188,85 @@ function HighPriorityPill() {
   );
 }
 
+const VISUALLY_HIDDEN: React.CSSProperties = {
+  position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px',
+  overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
+};
+
+/**
+ * A work item's title, as the detail drawer's trigger (Task 32) — the Focus row's two layouts and
+ * the Table's Work cell and phone card all render *this*, so the four surfaces cannot drift into
+ * different affordances for the same thing. It lives here for the same reason `setWorkStage` and
+ * its siblings do: this file is already the module's home for row primitives the views share.
+ *
+ * **It is a component rather than a helper returning JSX, and that is load-bearing.** styled-jsx
+ * scopes a rule to the JSX tree the `<style jsx>` tag is part of; JSX built in a `const` inside a
+ * component and spliced in as `{thing}` is a *separate* tree and never receives the scope class,
+ * so the rules below would compile cleanly and match nothing. (That is not hypothetical: this
+ * file's own `checkbox` and `overflowButton` consts have exactly that shape, and their
+ * `.vb-row-checkbox` / `.vb-row-overflow` / `.vb-row-menu-item` rules are inert today for this
+ * reason — see this task's report.) A component with its own `<style jsx>` is the shape that
+ * works, and the shape `CardLinksButton` in `WorkTableView` already uses.
+ *
+ * A real `<button>`, not an `onClick` on the old `<span>`: a click handler on static text is
+ * neither keyboard reachable nor announced as actionable, so the drawer would exist for mouse
+ * users only. The visible title is the whole accessible name bar the appended hidden sentence,
+ * so WCAG 2.5.3 holds.
+ *
+ * Colour and text-decoration are deliberately NOT inline — an inline declaration beats any class
+ * selector, so a `:hover` rule written against an inline colour compiles cleanly and never
+ * applies. `CardLinksButton` carries the same note about its border colour.
+ *
+ * No hooks, and none are needed: everything it renders comes from its props.
+ */
+export function WorkTitleButton({ item, isDone, style, onOpenDetail }: {
+  item:   WorkItem;
+  isDone: boolean;
+  /** The caller's layout box only — flex child, or a `<td>`'s inner block. */
+  style:  React.CSSProperties;
+  onOpenDetail: (item: WorkItem) => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        className={isDone ? 'vb-row-title vb-row-title-done' : 'vb-row-title'}
+        aria-haspopup="dialog"
+        title={item.title}
+        onClick={() => onOpenDetail(item)}
+        style={{
+          ...style,
+          textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+          // Typography stated rather than inherited: a `<button>`'s UA style overrides the
+          // inherited font, so leaving it off would drop the title to 13px Arial.
+          fontFamily: FONT, fontSize: '0.88rem', fontWeight: 600,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}
+      >
+        {item.title}
+        <span style={VISUALLY_HIDDEN}> Open details.</span>
+      </button>
+
+      <style jsx>{`
+        .vb-row-title { color: #2d3748; transition: color 150ms ease; }
+        .vb-row-title-done { color: #9aa4b5; text-decoration-line: line-through; }
+        /* Underline as well as the colour shift, so "this does something" is not carried by
+           colour alone. \`text-decoration-line\` rather than the shorthand, and the done rule
+           last, so a completed item keeps its strike-through while hovered instead of having it
+           replaced by the underline. */
+        .vb-row-title:hover { color: #256f92; text-decoration-line: underline; }
+        .vb-row-title-done:hover { color: #7a8496; text-decoration-line: line-through underline; }
+        /* §9's ring, on the darker blue. */
+        .vb-row-title:focus-visible {
+          outline: 2px solid #2a7fa8;
+          outline-offset: 2px;
+          border-radius: 4px;
+        }
+      `}</style>
+    </>
+  );
+}
+
 export interface WorkItemRowProps {
   item:       WorkItem;
   /** "YYYY-MM-DD" — `work.generated_at`, so every row in the payload agrees on "today". */
@@ -199,9 +278,16 @@ export interface WorkItemRowProps {
   onChanged:  () => void | Promise<void>;
   /** Opens the create/edit dialog (Task 13) in edit mode for this item. */
   onEdit:     (item: WorkItem) => void;
+  /** Opens the detail drawer (Task 32) for this item — the title's own action.
+   *
+   *  Deliberately *additional* to `onEdit`, not a replacement for it: the overflow menu's "Edit"
+   *  still opens the edit dialog, which is where the fields the drawer shows read-only (title,
+   *  deadline, estimate, note) are actually changed. Two complementary entry points, one per
+   *  question the user is asking — "what is this?" and "change this". */
+  onOpenDetail: (item: WorkItem) => void;
 }
 
-export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChanged, onEdit }: WorkItemRowProps) {
+export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChanged, onEdit, onOpenDetail }: WorkItemRowProps) {
   const [pending, setPending] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -263,6 +349,12 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
         style={{ width: '20px', height: '20px', cursor: pending ? 'default' : 'pointer', accentColor: '#256f92' }}
       />
     </label>
+  );
+
+  /** The row's title, in whichever layout is rendering — see `WorkTitleButton` above for why it
+   *  is a component rather than a `const` holding JSX like `checkbox` and `overflowButton`. */
+  const titleButton = (style: React.CSSProperties) => (
+    <WorkTitleButton item={item} isDone={isDone} style={style} onOpenDetail={onOpenDetail} />
   );
 
   // Rendered per the direction doc's §3 row structure (6 of 6 elements). Task 13 wires this
@@ -333,16 +425,7 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
           <div style={{ marginLeft: '3px' }}>{checkbox}</div>
 
           <div style={{ marginLeft: '12px', minWidth: 0, maxWidth: '380px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <span
-              title={item.title}
-              style={{
-                fontFamily: FONT, fontSize: '0.88rem', fontWeight: 600,
-                color: isDone ? '#9aa4b5' : '#2d3748', textDecoration: isDone ? 'line-through' : 'none',
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              }}
-            >
-              {item.title}
-            </span>
+            {titleButton({ display: 'block', width: '100%' })}
             {meta.text && (
               <span style={{ fontFamily: FONT, fontSize: '0.76rem', fontWeight: 500, color: meta.color }}>
                 {meta.text}
@@ -367,16 +450,7 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
         <div style={{ marginLeft: '3px', display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             {checkbox}
-            <span
-              title={item.title}
-              style={{
-                marginLeft: '12px', flex: 1, minWidth: 0, fontFamily: FONT, fontSize: '0.88rem', fontWeight: 600,
-                color: isDone ? '#9aa4b5' : '#2d3748', textDecoration: isDone ? 'line-through' : 'none',
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              }}
-            >
-              {item.title}
-            </span>
+            {titleButton({ marginLeft: '12px', flex: 1, minWidth: 0 })}
             {item.priority === 'high' && <span style={{ marginLeft: '8px' }}><HighPriorityPill /></span>}
             <div style={{ marginLeft: 'auto', paddingLeft: '8px' }}>{overflowButton}</div>
           </div>

@@ -49,6 +49,13 @@ import LinksCell, { summariseLinks } from '../table/LinksCell';
 // to this same standalone popover, so nothing about link editing is re-implemented for phone.
 // Pool-free — `LinksPopover` is a client component with no `@/lib/db` reach of its own.
 import LinksPopover, { cachedOwnerLinks, loadOwnerLinks, useOwnerLinks } from '../LinksPopover';
+// Task 32's title trigger, shared with Focus's rows rather than re-declared here: the Work cell,
+// the phone card and both of `WorkItemRow`'s layouts must offer the same affordance for the same
+// thing, and its `:hover`/`:focus-visible` rules only scope correctly inside the component that
+// renders the element (styled-jsx hashes per component — the trap several tasks here have hit).
+// `WorkItemRow` is already this module's home for row primitives the views share: `setWorkStage`,
+// `setPriority` and `setDeadline` are all imported from it by the Table's own cells.
+import { WorkTitleButton } from '../WorkItemRow';
 
 const FONT    = "'Inter','DM Sans','Segoe UI',sans-serif";
 const DM_FONT = "'DM Sans','Segoe UI',sans-serif";
@@ -495,10 +502,14 @@ export interface WorkTableViewProps {
   onChanged:   () => void | Promise<void>;
   /** Opens the create/edit dialog in create mode — wired to this view's own empty states. */
   onNewItem:   () => void;
+  /** Opens the detail drawer (Task 32) for a given item — the Work cell's title is its trigger,
+   *  in the table and on the phone card alike. The Table has no `onEdit` of its own, so this is
+   *  also the only route from this view to an item's full field set. */
+  onOpenDetail: (item: WorkItem) => void;
 }
 
 export default function WorkTableView({
-  items, context, todayStr, isFiltered, isSearching, onChanged, onNewItem,
+  items, context, todayStr, isFiltered, isSearching, onChanged, onNewItem, onOpenDetail,
 }: WorkTableViewProps) {
   // Never sorted or filtered in place — `COLUMNS_BY_CONTEXT`'s arrays and their `TableColumn`
   // objects are `readonly` precisely because the same object is shared across contexts, and a
@@ -733,18 +744,14 @@ export default function WorkTableView({
                   the same reason it does there and in the Work cell: it is the one element
                   that must never push the line taller. */}
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                <span
-                  title={item.title}
-                  style={{
-                    flex: 1, minWidth: 0,
-                    fontSize: '0.88rem', fontWeight: 600,
-                    color: isDone ? '#9aa4b5' : '#2d3748',
-                    textDecoration: isDone ? 'line-through' : 'none',
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  }}
-                >
-                  {item.title}
-                </span>
+                {/* The card's one *other* control besides its links trigger, and the same
+                    component the table's Work cell renders. */}
+                <WorkTitleButton
+                  item={item}
+                  isDone={isDone}
+                  style={{ flex: 1, minWidth: 0 }}
+                  onOpenDetail={onOpenDetail}
+                />
                 <span style={{
                   flexShrink: 0, fontSize: '0.72rem', fontWeight: 700,
                   color: CARD_PRIORITY_COLOR[item.priority],
@@ -956,19 +963,16 @@ export default function WorkTableView({
                         <td key={col.key} style={{ ...base, whiteSpace: 'normal' }}>
                           {/* Truncation lives on an inner block, not the cell: `max-width` on a
                               `<td>` under `table-layout: auto` is only a hint, on a block child
-                              it is honoured. Task 22 turns this into the detail-view trigger. */}
-                          <span
-                            title={item.title}
-                            style={{
-                              display: 'block', maxWidth: '340px', overflow: 'hidden',
-                              textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                              fontSize: '0.88rem', fontWeight: 600,
-                              color: isDone ? '#9aa4b5' : '#2d3748',
-                              textDecoration: isDone ? 'line-through' : 'none',
-                            }}
-                          >
-                            {item.title}
-                          </span>
+                              it is honoured. That inner block is now the detail drawer's
+                              trigger — the affordance the plan always intended the title to be
+                              (it was pencilled in for Task 22 and landed here with the drawer
+                              itself), and the Table's only route to an item's full field set. */}
+                          <WorkTitleButton
+                            item={item}
+                            isDone={isDone}
+                            style={{ display: 'block', maxWidth: '340px', width: '100%' }}
+                            onOpenDetail={onOpenDetail}
+                          />
                         </td>
                       );
 

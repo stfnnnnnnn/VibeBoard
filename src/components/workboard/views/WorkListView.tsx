@@ -75,11 +75,15 @@ export interface WorkListViewProps {
   onChanged:  () => void | Promise<void>;
   /** Opens the create/edit dialog (Task 13) in edit mode for a given item. */
   onEdit:     (item: WorkItem) => void;
+  /** Opens the detail drawer (Task 32) for a given item — passed straight through to each row,
+   *  whose title is the trigger. Complementary to `onEdit`, not a replacement: the row's overflow
+   *  menu still opens the edit dialog. */
+  onOpenDetail: (item: WorkItem) => void;
   /** Opens the create/edit dialog in create mode — wired to this view's own empty-state button. */
   onNewItem:  () => void;
 }
 
-export default function WorkListView({ items: allItems, todayStr, isFiltered, onChanged, onEdit, onNewItem }: WorkListViewProps) {
+export default function WorkListView({ items: allItems, todayStr, isFiltered, onChanged, onEdit, onOpenDetail, onNewItem }: WorkListViewProps) {
   const groups = useMemo(
     () => groupByTimeframe(allItems, todayStr),
     [allItems, todayStr],
@@ -185,6 +189,7 @@ export default function WorkListView({ items: allItems, todayStr, isFiltered, on
                       isLast={i === items.length - 1}
                       onChanged={onChanged}
                       onEdit={onEdit}
+                      onOpenDetail={onOpenDetail}
                     />
                   ))}
                 </div>
