@@ -316,6 +316,21 @@ export default function WorkboardShell(
         </div>
 
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Addendum §21's discreet entry point to `/workboard/calendar`. Deliberately a plain
+              muted link rather than another entry in `VIEWS`: it leaves the page instead of
+              swapping the tabpanel, so it is neither a `role="tab"` nor styled like one (no
+              pill, no fill, no icon badge). Its wording names the destination — "Week calendar",
+              with the ↗ that marks a navigation away — rather than presenting it as a peer view. */}
+          <Link
+            href="/workboard/calendar"
+            style={{
+              color: '#5c6b80', fontSize: '0.8rem', fontWeight: 600,
+              textDecoration: 'none', whiteSpace: 'nowrap',
+            }}
+          >
+            Week calendar ↗
+          </Link>
+
           <button
             type="button"
             className="vb-btn-pink"
