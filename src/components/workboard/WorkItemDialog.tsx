@@ -8,6 +8,9 @@ import { X } from 'lucide-react';
 // `WorkContext`/`WORK_CONTEXTS`/`CONTEXT_LABELS` come from the pool-free `workContexts.ts`
 // instead (zero imports of its own, so pulling values from it is safe here).
 import type { WorkItem, WorkPriority, WorkStatus, WorkSource, ProjectSummary } from '@/lib/workboard/workItems';
+// Same rule, same reason: `organizations.ts` imports `@/lib/db` at module scope, so this
+// stays `import type` — erased at compile time, so no mysql2 reaches the client bundle.
+import type { OrganizationSummary } from '@/lib/workboard/organizations';
 import { WORK_CONTEXTS, CONTEXT_LABELS, type WorkContext } from '@/lib/workboard/workContexts';
 
 const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
@@ -144,6 +147,12 @@ const INFO_CARD_STYLE: React.CSSProperties = {
  *  belongs to is now part of the Projects branch of `renderContextFields` (Task 29); this
  *  and `handleCreateProject` stay put so that branch can wire straight back into them. */
 const NEW_PROJECT_SENTINEL = '__new__';
+
+/** The Organization select's own inline "＋ New organization…" option, and deliberately a
+ *  *different* string from `NEW_PROJECT_SENTINEL`: the two pickers can end up side by side
+ *  in one branch, and a shared sentinel would make "new project" and "new organization"
+ *  indistinguishable to whichever `onChange` read it. */
+const NEW_ORG_SENTINEL = '__new_org__';
 
 const LABEL_STYLE: React.CSSProperties = {
   display: 'block', fontFamily: FONT, fontSize: '0.78rem', fontWeight: 700,
@@ -310,6 +319,20 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   const [subjectGrading, setSubjectGrading]   = useState<Record<number, SubjectGrading>>({});
   const [gradingError, setGradingError]       = useState<string | null>(null);
 
+  // The organization branch. `organizationId` is per-context and therefore reset in
+  // `handleContextChange`; the fetched list below deliberately is not — see the effect.
+  const [organizationId, setOrganizationId]   = useState<number | ''>(editingItem?.organization_id ?? '');
+  const [organizations, setOrganizations]     = useState<OrganizationSummary[] | null>(null);
+  const [orgsLoading, setOrgsLoading]         = useState(false);
+  const [orgsError, setOrgsError]             = useState<string | null>(null);
+
+  // The inline "＋ New organization…" form, the same four pieces (open / name / in-flight /
+  // error) `showNewProject` and friends below use, for the same flow.
+  const [showNewOrg, setShowNewOrg]           = useState(false);
+  const [newOrgName, setNewOrgName]           = useState('');
+  const [creatingOrg, setCreatingOrg]         = useState(false);
+  const [orgError, setOrgError]               = useState<string | null>(null);
+
   const [showNewProject, setShowNewProject]   = useState(false);
   const [newProjectName, setNewProjectName]   = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
@@ -426,6 +449,40 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [context, academicSource, subjectId, subjectGrading]);
 
+  // The Organization list, on exactly the terms the Course list above is fetched on: lazily,
+  // only for the context that can show it, and at most once per dialog (`organizations !==
+  // null` short-circuits the re-run this effect's own `setOrganizations` triggers, so leaving
+  // Organization and coming back reuses the loaded list — and so does an inline-created
+  // organization appended to it, which a refetch would have clobbered).
+  //
+  // Self-fetched rather than threaded down from `WorkboardShell` as `projects` is, because
+  // the shell has no reason to hold a list only this branch reads — the same call this file
+  // already makes three times (subjects, path 1's linkable items, path 2's grading config).
+  // Nothing has to be told about an inline-created organization either: `onSaved()` refreshes
+  // the shell's whole payload the moment a successful submit closes the dialog.
+  //
+  // Unlike the two course-scoped loads, this one has no prior selection to wait for —
+  // organizations are the top of this branch's chain, so `context` alone gates it.
+  useEffect(() => {
+    if (context !== 'organization' || organizations !== null) return;
+    let cancelled = false;
+    setOrgsLoading(true);
+    // Same reason the subjects fetch clears its message first: a failure leaves the list
+    // null, so re-entering Organization retries, and a retry that succeeds must not still be
+    // apologising above a working picker.
+    setOrgsError(null);
+    fetch('/api/workboard/organizations')
+      .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      // This route wraps its list (`{ organizations }`), where `/api/studypulse/subjects`
+      // returns a bare array — hence the unwrap the subjects fetch above does not need.
+      .then((data: { organizations?: OrganizationSummary[] }) => {
+        if (!cancelled) setOrganizations(data.organizations ?? []);
+      })
+      .catch(() => { if (!cancelled) setOrgsError('Could not load organizations.'); })
+      .finally(() => { if (!cancelled) setOrgsLoading(false); });
+    return () => { cancelled = true; };
+  }, [context, organizations]);
+
   useEffect(() => {
     // Restore focus to whatever opened this dialog (a row's "Edit" menu item, the shell's or
     // the empty state's "New Work Item" button) once it closes — otherwise a keyboard user
@@ -505,6 +562,16 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     // course graded?" stops being worth holding.
     resetGradedTarget();
     setSubjectGrading({});
+    // The organization branch. The selection goes because an `organization_id` on a Life or
+    // Academic row is exactly the invalid combination this seam exists to prevent, and the
+    // half-finished inline entry goes with it, like the project one above. The fetched list
+    // itself stays: it is the user's organizations, not an answer scoped to the context
+    // being left, so it is still correct on the way back in (and re-fetching it would drop
+    // an organization created inline moments ago).
+    setOrganizationId('');
+    setShowNewOrg(false);
+    setNewOrgName('');
+    setOrgError(null);
     // A validation message raised by the outgoing context ("Please choose a course.") names
     // a field that no longer exists once the context changes — it goes with its fields.
     setFormError(null);
@@ -546,6 +613,17 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     setProjectId('');
     setLinkableError(null);
     resetGradedTarget();
+  }
+
+  /** The organization-side twin of `handleSubjectChange`, and the same rule one context
+   *  over: the Project / Initiative list below is filtered by `organization_id`, so a
+   *  project chosen under the outgoing organization belongs to a different parent the
+   *  moment this changes. Left in place it would be submitted — a perfectly storable
+   *  `project_id`/`organization_id` pair that describes something the user never chose,
+   *  and which nothing downstream would flag as wrong. */
+  function handleOrganizationChange(next: number | '') {
+    setOrganizationId(next);
+    setProjectId('');
   }
 
   /** Categories belong to a period, so a category picked under the outgoing period is not
@@ -879,8 +957,157 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
    * catch it) and only fail at runtime, the moment a user picks the context whose branch
    * introduced it.
    */
+  /**
+   * The Organization branch. NO HOOKS, for exactly the reason `renderAcademicFields` has
+   * none — see `renderContextFields`'s note directly below.
+   *
+   * Course is not merely hidden here, it is absent: nothing in this function reads or writes
+   * `subjectId`, `subjects`, or any course-derived value (spec §13 — an organization item
+   * hangs off an organization, never off a course, and offering both would invite a row
+   * claiming to be two things at once).
+   */
+  function renderOrganizationFields(): React.ReactNode {
+    const chosenOrgId = organizationId === '' ? null : organizationId;
+    // The organization-scoped twin of `academicProjects`, and the second reason
+    // `ProjectSummary` carries `context` and both parent ids: without them this list would
+    // offer another organization's initiatives — or a personal project — under this one.
+    const orgProjects = chosenOrgId === null
+      ? []
+      : projects.filter(p => p.context === 'organization' && p.organization_id === chosenOrgId);
+    // The same hazard the academic project picker guards, for the same reason: an item being
+    // edited can hold a `project_id` this filter would never offer (another organization's
+    // initiative, or one created before the filter existed). A `<select value>` matching no
+    // `<option>` displays the *first* one — "No project" — which would misreport a value
+    // that is still about to be submitted, and strand it once an empty list disables the
+    // control. Surfaced as its own disabled option instead, with "No project" one click away.
+    const outOfScope = projectId !== '' && !orgProjects.some(p => p.id === projectId)
+      ? projects.find(p => p.id === projectId)
+      : undefined;
+
+    return (
+      <>
+        <Field
+          label="Organization"
+          hint={showNewOrg ? undefined : 'Optional. The club, org, or team this belongs to.'}
+        >
+          {!showNewOrg ? (
+            <select
+              className="vb-dialog-control"
+              style={CONTROL_STYLE}
+              value={organizationId === '' ? '' : String(organizationId)}
+              disabled={orgsLoading}
+              onChange={e => {
+                if (e.target.value === NEW_ORG_SENTINEL) { setShowNewOrg(true); return; }
+                handleOrganizationChange(e.target.value === '' ? '' : Number(e.target.value));
+              }}
+            >
+              {/* Optional, so the empty state is a real choice ("No organization") rather
+                  than an unfillable placeholder — unlike Academic's required Course. */}
+              <option value="">{orgsLoading ? 'Loading organizations…' : 'No organization'}</option>
+              {(organizations ?? []).map(o => (
+                <option key={o.id} value={o.id}>
+                  {o.name}{o.status === 'archived' ? ' (archived)' : ''}
+                </option>
+              ))}
+              <option value={NEW_ORG_SENTINEL}>＋ New organization…</option>
+            </select>
+          ) : (
+            <div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <input
+                  type="text"
+                  className="vb-dialog-control"
+                  style={CONTROL_STYLE}
+                  value={newOrgName}
+                  onChange={e => setNewOrgName(e.target.value)}
+                  // Enter inside a form fires the form's submit button, which here is
+                  // "Create" — so without this, finishing the organization name the obvious
+                  // way would submit the whole work item instead, with no organization set.
+                  onKeyDown={e => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    if (!creatingOrg && newOrgName.trim()) handleCreateOrganization();
+                  }}
+                  placeholder="Organization name"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className="vb-dialog-control"
+                  onClick={handleCreateOrganization}
+                  disabled={creatingOrg || !newOrgName.trim()}
+                  style={{
+                    width: 'auto', padding: '8px 14px', background: '#256f92', color: '#fff',
+                    border: 'none', fontWeight: 700, cursor: 'pointer',
+                  }}
+                >
+                  {creatingOrg ? 'Adding…' : 'Add'}
+                </button>
+                <button
+                  type="button"
+                  className="vb-dialog-control"
+                  onClick={() => { setShowNewOrg(false); setNewOrgName(''); setOrgError(null); }}
+                  style={{
+                    width: 'auto', padding: '8px 14px', background: 'transparent', color: '#5c6b80',
+                    border: '1px solid rgba(200,210,230,0.6)', cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+              {/* Whatever the route said, verbatim — "You already have an organization with
+                  that name" is already the sentence a user needs, so `parseErrorMessage`
+                  passes it straight through rather than any branch special-casing it. */}
+              {orgError && (
+                <p style={{ margin: '6px 0 0', fontFamily: FONT, fontSize: '0.76rem', color: '#922e48' }}>
+                  {orgError}
+                </p>
+              )}
+            </div>
+          )}
+        </Field>
+
+        {orgsError && (
+          <p style={{ ...HINT_TEXT_STYLE, margin: '-10px 0 16px', color: '#922e48', fontWeight: 600 }}>
+            {orgsError}
+          </p>
+        )}
+
+        <Field
+          label="Project / Initiative"
+          hint={
+            outOfScope
+              ? 'This project isn’t part of the chosen organization. Pick “No project” to clear it.'
+              : chosenOrgId === null
+                ? 'Optional. Choose an organization first — initiatives are listed per organization.'
+                : orgProjects.length === 0
+                  ? 'Optional. This organization has no initiatives yet.'
+                  : 'Optional. Only this organization’s initiatives are listed.'
+          }
+        >
+          <select
+            className="vb-dialog-control"
+            style={CONTROL_STYLE}
+            value={projectId === '' ? '' : String(projectId)}
+            disabled={chosenOrgId === null || (orgProjects.length === 0 && !outOfScope)}
+            onChange={e => setProjectId(e.target.value === '' ? '' : Number(e.target.value))}
+          >
+            <option value="">No project</option>
+            {outOfScope && (
+              <option value={outOfScope.id} disabled>{outOfScope.name} (not in this organization)</option>
+            )}
+            {orgProjects.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </Field>
+      </>
+    );
+  }
+
   function renderContextFields(context: WorkContext): React.ReactNode {
-    if (context === 'academic') return renderAcademicFields();
+    if (context === 'academic')     return renderAcademicFields();
+    if (context === 'organization') return renderOrganizationFields();
     return null;
   }
 
@@ -923,6 +1150,52 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
       setNewProjectName('');
     } finally {
       setCreatingProject(false);
+    }
+  }
+
+  /**
+   * Inline organization creation — `handleCreateProject`'s shape one context over, with two
+   * deliberate differences:
+   *
+   *  - the created row is appended to this dialog's OWN list, not handed to the shell.
+   *    There is no `onOrganizationCreated` because there is nothing upstream holding an
+   *    organization list to keep in sync: `onSaved()` refreshes the shell's whole payload
+   *    the moment the submit that follows succeeds.
+   *  - the failure path goes through `parseErrorMessage`, so the route's own sentence
+   *    ("You already have an organization with that name", its 400 on a duplicate) reaches
+   *    the user unaltered instead of being flattened into a generic "Failed to create".
+   */
+  async function handleCreateOrganization() {
+    const name = newOrgName.trim();
+    if (!name) return;
+    setCreatingOrg(true);
+    setOrgError(null);
+    try {
+      const res = await fetch('/api/workboard/organizations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        // Read before the success branch touches the body: a `Response` can only be
+        // consumed once, and only one of the two branches ever does.
+        setOrgError(await parseErrorMessage(res));
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      // This literal has to describe what the server actually stored. The POST sends only
+      // `{ name }`, and `createOrganization` inserts exactly that — `status` defaults to
+      // 'active' in the schema.
+      const created: OrganizationSummary = { id: data.organization_id, name, status: 'active' };
+      setOrganizations(prev => [...(prev ?? []), created]);
+      // Through the change handler, not `setOrganizationId`: selecting a brand-new
+      // organization has to drop any project held from the previous one, which by
+      // definition cannot belong to an organization created a moment ago.
+      handleOrganizationChange(created.id);
+      setShowNewOrg(false);
+      setNewOrgName('');
+    } finally {
+      setCreatingOrg(false);
     }
   }
 
@@ -1096,6 +1369,11 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
           note:             note.trim() || null,
           project_id:       projectId === '' ? null : projectId,
           user_subject_id:  context === 'academic' && subjectId !== '' ? subjectId : null,
+          // Gated on the context for the same reason `user_subject_id` is: state survives a
+          // context switch only through `handleContextChange`, and this keeps a stale id
+          // out of the body even if that seam ever misses one. Sent on PATCH too, so
+          // clearing the picker clears the column rather than leaving the old value.
+          organization_id:  context === 'organization' && organizationId !== '' ? organizationId : null,
           priority,
           work_status:      workStatus,
           due_at:           dueAt || null,
