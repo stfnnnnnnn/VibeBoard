@@ -350,13 +350,13 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstFieldRef = useRef<HTMLInputElement & HTMLSelectElement>(null);
 
+  useEffect(() => { contextRef.current = context; }, [context]);
+
   // The Course list, fetched only when it can actually be shown. Task 25 removed the field
   // this fed and left the request firing unconditionally on mount for every context; now
   // that the academic branch below is the one and only reader, it is gated on
   // `context === 'academic'`. An academic-*sourced* item never needs the list at all (its
   // course is fixed by its Study Pulse row), hence the `isAcademicEdit` bail as well.
-  useEffect(() => { contextRef.current = context; }, [context]);
-
   //
   // Fires on the transition into the academic context — the moment Context is set to
   // Academic (create mode), or on mount for an owned academic item being edited — and at
