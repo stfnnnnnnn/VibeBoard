@@ -24,8 +24,9 @@ export interface WorkItemDialogProps {
   target:            DialogTarget;
   /** `work.projects` from the shell — kept in sync locally via `onProjectCreated` so an
    *  inline-created project shows up in the select without waiting for a full refetch.
-   *  The select itself now lives in the Projects branch of `renderContextFields` (Task 29),
-   *  so this prop and `onProjectCreated` are held, not dropped. */
+   *  Read by all three project-bearing branches of `renderContextFields`, each filtering it
+   *  by context (and, for Academic and Organization, by parent) rather than by a list of
+   *  its own: one payload, three views of it. */
   projects:          ProjectSummary[];
   onClose:           () => void;
   /** Called after a successful create/update so the shell can `refreshWork()`. */
@@ -143,9 +144,9 @@ const INFO_CARD_STYLE: React.CSSProperties = {
   background: 'rgba(77,171,245,0.08)', border: '1px solid rgba(77,171,245,0.2)',
 };
 
-/** Sentinel value for the project select's inline "＋ New project…" option. The picker it
- *  belongs to is now part of the Projects branch of `renderContextFields` (Task 29); this
- *  and `handleCreateProject` stay put so that branch can wire straight back into them. */
+/** Sentinel value for the project select's inline "＋ New project…" option, read by the
+ *  Project picker in `renderProjectFields` — the Projects branch of `renderContextFields`,
+ *  and the only picker in this dialog that offers inline project creation. */
 const NEW_PROJECT_SENTINEL = '__new__';
 
 /** The Organization select's own inline "＋ New organization…" option, and deliberately a
@@ -1105,9 +1106,141 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     );
   }
 
+  /**
+   * The Projects branch. NO HOOKS, for exactly the reason the two branches above have none
+   * — see `renderContextFields`'s note directly below.
+   *
+   * The one branch whose per-context field is genuinely REQUIRED. Spec §14: independent
+   * one-off work with no project belongs in Life, so `Context = Projects, Project = No
+   * project` — a pairing v2 allowed, and which nothing downstream could tell apart from a
+   * deliberate choice — stops being producible here. It stops being producible by
+   * *construction*: there is no "No project" option to produce it with. The placeholder
+   * below is a prompt, not an answer (hence `disabled` once a real project is picked, the
+   * same reasoning the Context select's own placeholder carries), and `requiresProject` in
+   * `handleSubmit` is what stops the never-picked case reaching a fetch.
+   *
+   * Neither Course nor Organization is read here, and that is the rule rather than an
+   * omission: `validateProjectParent` forbids a `context: 'project'` project BOTH parents,
+   * so there is no parent to scope this list by — filtering on the context alone is exact,
+   * where the Academic and Organization branches must additionally filter by their parent.
+   */
+  function renderProjectFields(): React.ReactNode {
+    const standaloneProjects = projects.filter(p => p.context === 'project');
+    // The mount-time shape of the hazard the two branches above guard live: an item being
+    // edited can hold a `project_id` this filter does not offer, because the project it
+    // names was re-parented onto a course or an organization after the item was linked to
+    // it. A `<select value>` matching no `<option>` displays the *first* one — here the
+    // placeholder — so the field would read as unfilled while a real id sat in state,
+    // waiting to be silently re-submitted by a Save that the required-field guard happily
+    // waves through. Surfaced as its own disabled option instead, so what is about to be
+    // saved stays visible; unlike the sibling branches there is no "No project" escape, so
+    // the fix is to pick a real project (or move the item to Life).
+    const outOfScope = projectId !== '' && !standaloneProjects.some(p => p.id === projectId)
+      ? projects.find(p => p.id === projectId)
+      : undefined;
+
+    return (
+      <Field
+        label="Project"
+        hint={
+          showNewProject
+            ? undefined
+            : outOfScope
+              ? 'This project now belongs to a course or organization. Choose one of your projects instead.'
+              : standaloneProjects.length === 0
+                // Step 2 of the brief: a required field with nothing to choose is a dead
+                // end, so the empty state names both ways out — create one right here, or
+                // take the work to the context that wants no project at all.
+                ? 'No projects yet — add one with “＋ New project…”, or switch to Life if this is one-off work.'
+                : 'Required. One-off work with no project belongs in Life.'
+        }
+      >
+        {!showNewProject ? (
+          <select
+            className="vb-dialog-control"
+            style={CONTROL_STYLE}
+            value={projectId === '' ? '' : String(projectId)}
+            onChange={e => {
+              if (e.target.value === NEW_PROJECT_SENTINEL) { setShowNewProject(true); return; }
+              setProjectId(e.target.value === '' ? '' : Number(e.target.value));
+            }}
+          >
+            {/* Disabled once a real project is picked, exactly as the Context select's
+                placeholder is and for the same reason: it is reachable as the *initial*
+                state, never as a way back out of a valid choice. Organization's
+                placeholder stays selectable because "No organization" is a legitimate
+                final answer there — "no project" is not one here. */}
+            <option value="" disabled={projectId !== ''}>Choose a project…</option>
+            {outOfScope && (
+              <option value={outOfScope.id} disabled>{outOfScope.name} (no longer a standalone project)</option>
+            )}
+            {standaloneProjects.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+            {/* Never disabled and never hidden: with no projects yet this is the only thing
+                in the list that can get the user out of a required field. */}
+            <option value={NEW_PROJECT_SENTINEL}>＋ New project…</option>
+          </select>
+        ) : (
+          <div>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <input
+                type="text"
+                className="vb-dialog-control"
+                style={CONTROL_STYLE}
+                value={newProjectName}
+                onChange={e => setNewProjectName(e.target.value)}
+                // Same reason the organization form below binds Enter: inside a form,
+                // Enter fires the submit button — "Create" — so finishing the project name
+                // the obvious way would otherwise submit the whole work item, and with no
+                // project set it would bounce straight off the guard in `handleSubmit`.
+                onKeyDown={e => {
+                  if (e.key !== 'Enter') return;
+                  e.preventDefault();
+                  if (!creatingProject && newProjectName.trim()) handleCreateProject();
+                }}
+                placeholder="Project name"
+                autoFocus
+              />
+              <button
+                type="button"
+                className="vb-dialog-control"
+                onClick={handleCreateProject}
+                disabled={creatingProject || !newProjectName.trim()}
+                style={{
+                  width: 'auto', padding: '8px 14px', background: '#256f92', color: '#fff',
+                  border: 'none', fontWeight: 700, cursor: 'pointer',
+                }}
+              >
+                {creatingProject ? 'Adding…' : 'Add'}
+              </button>
+              <button
+                type="button"
+                className="vb-dialog-control"
+                onClick={() => { setShowNewProject(false); setNewProjectName(''); setProjectError(null); }}
+                style={{
+                  width: 'auto', padding: '8px 14px', background: 'transparent', color: '#5c6b80',
+                  border: '1px solid rgba(200,210,230,0.6)', cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+            {projectError && (
+              <p style={{ margin: '6px 0 0', fontFamily: FONT, fontSize: '0.76rem', color: '#922e48' }}>
+                {projectError}
+              </p>
+            )}
+          </div>
+        )}
+      </Field>
+    );
+  }
+
   function renderContextFields(context: WorkContext): React.ReactNode {
     if (context === 'academic')     return renderAcademicFields();
     if (context === 'organization') return renderOrganizationFields();
+    if (context === 'project')      return renderProjectFields();
     return null;
   }
 
@@ -1138,8 +1271,13 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
       // The POST above sends only `{ name }`, so the server defaults it to a plain
       // `context: 'project'` project with no parent — this literal has to describe
       // whatever the server actually stored, not the shape a later task's inline-creation
-      // call here might send instead. Task 26/29 must update both together if they add a
-      // context/parent to this request.
+      // call here might send instead.
+      //
+      // Task 29 settled the open question this comment used to carry: the Projects branch
+      // is this function's one and only caller, and "creates with `context: 'project'` and
+      // no parent" is exactly what that branch wants, so neither the body nor this literal
+      // needed widening. Anything that ever does need a parent (an academic or organization
+      // project created inline) must send it AND mirror it here, in the same edit.
       const created: ProjectSummary = {
         id: data.project_id, name, color: null, status: 'active',
         context: 'project', user_subject_id: null, organization_id: null,
@@ -1220,6 +1358,19 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   const requiresCourse = context === 'academic'
     && (academicSource === 'graded' || academicSource === 'independent');
 
+  /** Projects work hangs off a project, always — spec §14, and the whole point of Task 29.
+   *  Unconditional on the context, unlike `requiresCourse`: this context has one shape, not
+   *  three, and both create and edit write the same owned row through the same POST/PATCH.
+   *
+   *  The Project select deliberately carries no native `required` attribute to go with this.
+   *  Title has both because native `required` is the universal convention for a text input;
+   *  the closest analogue to this field is Academic's equally-required Course select, which
+   *  is enforced by its JS guard alone — and two required selects in one dialog reporting
+   *  the same mistake two different ways (a browser bubble here, the form's own red message
+   *  there) is a worse trade than the redundancy is worth. The guard below is the whole
+   *  enforcement, which is also why it is stated as a guard and not as a disabled button. */
+  const requiresProject = context === 'project';
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     // Path 1's only exit. Pressing Enter in the Title field submits the form, so this guard
@@ -1255,6 +1406,14 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
         // Create mode deliberately starts with no context selected, so an unpicked context
         // has to fail here rather than POST `category: ''` to the server.
         setFormError('Please choose a context.');
+        return;
+      }
+      if (requiresProject && projectId === '') {
+        // The Projects branch offers no "No project" option, so this is only reachable by
+        // leaving the placeholder untouched — never by a deliberate choice. Placed before
+        // the academic guards purely to keep that block contiguous; the contexts are
+        // mutually exclusive, so no two of these guards can ever both be live.
+        setFormError('Please choose a project.');
         return;
       }
       if (context === 'academic' && academicSource === '') {
