@@ -66,8 +66,10 @@ const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
  *  titling face as it moves into the header, because it is now part of the title block. A second
  *  constant rather than an edit to `FONT` above: `FONT` is also on the toolbar row's search input
  *  (Inter, the UI face), which §14a explicitly keeps as one of the five axes separating the two
- *  "pick one of a few" rows — changing the shared constant would silently move that too. */
-const CONTEXT_FONT = "'DM Sans','Segoe UI',sans-serif";
+ *  "pick one of a few" rows — changing the shared constant would silently move that too. Named
+ *  to match `WorkboardStats.tsx`'s identical constant, since both now render inside the same
+ *  header block and share its face. */
+const HEADER_FONT = "'DM Sans','Segoe UI',sans-serif";
 
 /** Direction doc §11's outer-panel glass treatment, matched to `WorkboardWeekView.tsx`'s and
  *  `WorkboardRail.tsx`'s `GLASS` constant exactly (same values, duplicated rather than
@@ -200,7 +202,8 @@ export default function WorkboardShell(
       {/* Spec §1 / addendum §14: the header block is the title on the left and the context
           navigation on the upper right, on one row where width allows. The 22px that used to be
           the subtitle's own bottom margin lives on this row instead, so the context group's
-          `align-self: flex-end` lands on the subtitle's text baseline rather than 22px below it.
+          `align-self: flex-end` lands near the bottom of the title block's box — the subtitle's
+          line-box, not its exact text baseline — rather than 22px below it.
           `flex-wrap` here is only a graceful fallback for narrow viewports; addendum §21 assigns
           the real 768–1023px wrap and the <768px scroll-strip treatment to Task 40. */}
       <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: '22px' }}>
@@ -250,7 +253,7 @@ export default function WorkboardShell(
                   // §14b: DM Sans (the title block's face, now that this row is part of it) and an
                   // explicit `letter-spacing: 0`, so §1's 0.04em uppercase tracking can never be
                   // inherited onto these sentence-case labels. Weight stays 700 in both states.
-                  fontFamily: CONTEXT_FONT, letterSpacing: '0',
+                  fontFamily: HEADER_FONT, letterSpacing: '0',
                   fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer',
                   color: active ? '#2d3748' : '#5c6b80',
                 }}
