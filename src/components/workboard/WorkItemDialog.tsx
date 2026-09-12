@@ -1207,6 +1207,18 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
               {/* The per-context section — nothing until a context is picked. */}
               {context !== '' && renderContextFields(context)}
 
+              {/* POST /api/workboard/academic/create takes only { title, target_type,
+                  cat_id?, period_id?, deadline, priority } — Start date, Estimated hours
+                  and Note have no column on that path, so a user who fills them in for
+                  graded work would otherwise lose them with no signal at all. Due date and
+                  Priority are unaffected — both map onto fields the route does accept. */}
+              {isNewGradedPath && (
+                <p style={{ ...HINT_TEXT_STYLE, margin: '-4px 0 16px' }}>
+                  Study Pulse doesn't have a place for Start date, Estimated hours, or Note
+                  yet — only Due date and Priority are saved for graded work.
+                </p>
+              )}
+
               <div style={{ display: 'flex', gap: '12px' }}>
                 <div style={{ flex: 1 }}>
                   <Field label="Due date">
@@ -1215,7 +1227,10 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
                 </div>
                 <div style={{ flex: 1 }}>
                   <Field label="Start date" hint="Adds a bar on the Timeline view.">
-                    <input type="date" className="vb-dialog-control" style={CONTROL_STYLE} value={startDate} onChange={e => setStartDate(e.target.value)} />
+                    <input
+                      type="date" className="vb-dialog-control" style={CONTROL_STYLE}
+                      value={startDate} onChange={e => setStartDate(e.target.value)} disabled={isNewGradedPath}
+                    />
                   </Field>
                 </div>
               </div>
@@ -1232,7 +1247,8 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
                   <Field label="Estimated hours">
                     <input
                       type="number" min="0" step="0.25" className="vb-dialog-control" style={CONTROL_STYLE}
-                      value={estimatedHours} onChange={e => setEstimatedHours(e.target.value)} placeholder="e.g. 2"
+                      value={estimatedHours} onChange={e => setEstimatedHours(e.target.value)}
+                      placeholder="e.g. 2" disabled={isNewGradedPath}
                     />
                   </Field>
                 </div>
@@ -1253,6 +1269,7 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
                   value={note}
                   onChange={e => setNote(e.target.value)}
                   placeholder="Optional details…"
+                  disabled={isNewGradedPath}
                 />
               </Field>
             </>
