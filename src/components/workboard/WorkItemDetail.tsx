@@ -330,7 +330,13 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
     if (!focusables.length) return;
     const first = focusables[0];
     const last  = focusables[focusables.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
+    // `document.activeElement === root` alongside `=== first`: `refocusIfLost` (below) can
+    // land focus on the panel container itself, which carries `tabIndex={-1}` so it is
+    // deliberately excluded from `focusables` — but that also means it isn't `first`, so a
+    // Shift+Tab pressed from there would fall through to native browser handling instead of
+    // this wrap check, walking backward out of the drawer into whatever precedes it in the
+    // document (the panel's children come after it, so forward Tab is unaffected).
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === root)) {
       e.preventDefault();
       last.focus();
     } else if (!e.shiftKey && document.activeElement === last) {
@@ -836,14 +842,16 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
         </section>
 
         {/* A dead-end marker for the eye, not for a screen reader: the drawer ends here and the
-            rest of the item is edited elsewhere. Named specifically as Focus's row menu, not
-            generically as "the row's Edit action" — the Table view has no such action to offer
-            (it takes no `onEdit` prop at all, per `WorkTableView.tsx`'s own note), so a user who
-            opened this drawer from a Table row or a phone card would be pointed at something
-            they cannot reach without switching views. */}
+            rest of the item is edited elsewhere. Named specifically as the List view's row
+            menu — "List" is the tab's actual on-screen label (`WorkboardShell.tsx`'s view
+            selector), not the internal "Focus" name this codebase's own comments use for it —
+            not generically as "the row's Edit action", since the Table view has no such action
+            to offer (it takes no `onEdit` prop at all, per `WorkTableView.tsx`'s own note), so a
+            user who opened this drawer from a Table row or a phone card would otherwise be
+            pointed at something they cannot reach without switching views. */}
         <p style={{ ...NOTE_STYLE, display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem' }}>
           <Check size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.7 }} />
-          Title, deadline and the rest are edited from Focus’s row menu.
+          Title, deadline and the rest are edited from the List view’s row menu.
         </p>
       </div>
 
