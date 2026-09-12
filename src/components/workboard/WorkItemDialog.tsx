@@ -11,7 +11,10 @@ import type { WorkItem, WorkPriority, WorkStatus, WorkSource, ProjectSummary } f
 // Same rule, same reason: `organizations.ts` imports `@/lib/db` at module scope, so this
 // stays `import type` — erased at compile time, so no mysql2 reaches the client bundle.
 import type { OrganizationSummary } from '@/lib/workboard/organizations';
-import { WORK_CONTEXTS, CONTEXT_LABELS, type WorkContext } from '@/lib/workboard/workContexts';
+import {
+  WORK_CONTEXTS, CONTEXT_LABELS, LIFE_AREAS, LIFE_AREA_LABELS,
+  type WorkContext, type LifeArea,
+} from '@/lib/workboard/workContexts';
 
 const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
 const HEADER_FONT = "'DM Sans','Segoe UI',sans-serif";
@@ -344,6 +347,13 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   const [creatingProject, setCreatingProject] = useState(false);
   const [projectError, setProjectError]       = useState<string | null>(null);
 
+  // The life branch, in its entirety: one optional area. `LIFE_AREAS` is a static constant,
+  // not a database-backed list, so unlike Course / Organization / Project there is nothing
+  // to fetch, nothing to cache, and no loading or error state to hold — which is exactly
+  // spec §15's point that Life stays lightweight. Per-context like the rest, so it is reset
+  // in `handleContextChange`.
+  const [lifeArea, setLifeArea]               = useState<LifeArea | ''>(editingItem?.life_area ?? '');
+
   const [submitting, setSubmitting]           = useState(false);
   const [formError, setFormError]             = useState<string | null>(null);
 
@@ -543,10 +553,13 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
    * `projectId` in state and save a project reference onto a Life item — an invalid
    * combination the service layer would reject, or worse, silently persist.
    *
-   * TASKS 28 / 29 / 30: each of you introduces new per-context state (an organisation id,
-   * a life area, and so on). Add a reset for it HERE as you add it — every per-context
-   * field must appear in this list, or it leaks across a context switch. Task 26 added the
-   * five academic-branch values below; the project and subject ids predate it.
+   * All four branches now have their state listed below, and that completeness is the
+   * point: every per-context field must appear here, or it leaks across a context switch.
+   * Anything a future branch adds belongs in this list in the same edit that adds it —
+   * including a field with no child to invalidate, so that an audit of this function can
+   * see every context accounted for rather than having to prove an absence elsewhere.
+   * Task 26 added the five academic-branch values, 28 the organization ones and 30 the
+   * life area; the project and subject ids predate them all.
    */
   function handleContextChange(next: WorkContext | '') {
     setContext(next);
@@ -580,6 +593,12 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     setShowNewOrg(false);
     setNewOrgName('');
     setOrgError(null);
+    // The life branch. Nothing hangs off Area the way a project hangs off a course or an
+    // organization, so there is no child selection here to invalidate — this reset exists so
+    // that every per-context field is accounted for in one place, and so a `life_area` can
+    // never ride out of Life onto a row of another context (the submit body gates it on the
+    // context as well, the same belt-and-braces `organization_id` gets).
+    setLifeArea('');
     // A validation message raised by the outgoing context ("Please choose a course.") names
     // a field that no longer exists once the context changes — it goes with its fields.
     setFormError(null);
@@ -1244,10 +1263,42 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     );
   }
 
+  /**
+   * The Life branch. NO HOOKS, for exactly the reason the three branches above have none —
+   * see `renderContextFields`'s note directly below.
+   *
+   * The whole branch is one optional select, and that is the design rather than an
+   * unfinished start: spec §15 keeps Life deliberately lightweight, so there is no project
+   * field here (the one context that offers none), no course, no organization, and no
+   * inline creation of anything. `LIFE_AREAS` is a static constant, so unlike every other
+   * branch this one reads no fetched list and needs no loading, error or retry state.
+   *
+   * Area is optional and its placeholder stays selectable — "No area" is a legitimate final
+   * answer (the Table renders an em dash for it), so this follows the Organization select's
+   * always-reselectable placeholder rather than the Projects branch's, which is disabled
+   * once set because "no project" is not an answer that branch accepts.
+   */
+  function renderLifeFields(): React.ReactNode {
+    return (
+      <Field label="Area" hint="Optional. Groups personal work so it can be filtered and read at a glance.">
+        <select
+          className="vb-dialog-control"
+          style={CONTROL_STYLE}
+          value={lifeArea}
+          onChange={e => setLifeArea(e.target.value as LifeArea | '')}
+        >
+          <option value="">No area</option>
+          {LIFE_AREAS.map(a => <option key={a} value={a}>{LIFE_AREA_LABELS[a]}</option>)}
+        </select>
+      </Field>
+    );
+  }
+
   function renderContextFields(context: WorkContext): React.ReactNode {
     if (context === 'academic')     return renderAcademicFields();
     if (context === 'organization') return renderOrganizationFields();
     if (context === 'project')      return renderProjectFields();
+    if (context === 'life')         return renderLifeFields();
     return null;
   }
 
@@ -1556,6 +1607,13 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
           // out of the body even if that seam ever misses one. Sent on PATCH too, so
           // clearing the picker clears the column rather than leaving the old value.
           organization_id:  context === 'organization' && organizationId !== '' ? organizationId : null,
+          // The third gated-on-context field, for the third time the same reason: a
+          // `life_area` on an Academic or Projects row is exactly the cross-context leak
+          // `handleContextChange` exists to prevent, and this keeps it out of the body even
+          // if that seam ever misses one. Sent on PATCH too — both routes read the key's
+          // *presence*, so a null here clears the column rather than leaving the old area
+          // behind on an item that has just been moved out of Life or had its area cleared.
+          life_area:        context === 'life' && lifeArea !== '' ? lifeArea : null,
           priority,
           work_status:      workStatus,
           due_at:           dueAt || null,
