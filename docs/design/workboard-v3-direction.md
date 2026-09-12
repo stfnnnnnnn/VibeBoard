@@ -54,19 +54,19 @@ Five items, in shipped order: **My Work · Academic · Projects · Organization 
 
 ## §15. Table density
 
-The Table is the module's densest surface (spec §27: tighter than Rituals or Finance). **Every value in this section is shipped** — `src/components/workboard/views/WorkTableView.tsx` and the four cell components under `src/components/workboard/table/`. This section is a record, not a redesign; a later task changing any of it is changing shipped pixels.
+The Table is the module's densest surface (spec §27: tighter than Rituals or Finance). **Nearly every value in this section is shipped** — `src/components/workboard/views/WorkTableView.tsx` and the four cell components under `src/components/workboard/table/`. This section is a record, not a redesign, with one exception noted where it occurs (§15d); a later task changing anything else in it is changing shipped pixels.
 
 ### 15a. Row and cell
 
 | Property | Value | Source |
 |---|---|---|
 | Cell padding, text columns | `7px 12px` | `WorkTableView.tsx:941` |
-| Cell padding, the four interactive columns | `2px 12px` | `StatusCell.tsx:157`, `PriorityCell.tsx:168`, `DeadlineCell.tsx:37`, `LinksCell.tsx:30` |
+| Cell padding, the four interactive column *components* (five columns: Status, Priority, Deadline, Time, Links) | `2px 12px` | `StatusCell.tsx:157`, `PriorityCell.tsx:168`, `DeadlineCell.tsx:37`, `LinksCell.tsx:30` |
 | Cell type | Inter `0.8rem`, weight 500, `#5c6b80` | `WorkTableView.tsx:950–952` |
 | Status / Priority cell weight | 600 (overrides the above) | `WorkTableView.tsx:986, 994` |
 | Vertical alignment | `middle` | `WorkTableView.tsx:948` |
 | Wrapping | `nowrap` on every cell except Work, which is `normal` | `WorkTableView.tsx:949, 963` |
-| Work-cell title | Inter `0.88rem`, weight 600, `max-width: 340px`, single-line ellipsis | `WorkItemRow.tsx:241`, `WorkTableView.tsx:973` |
+| Work-cell title | Inter `0.88rem`, weight 600, `max-width: 340px`, single-line ellipsis | `WorkItemRow.tsx:242`, `WorkTableView.tsx:973` |
 | Priority edge | `3px solid` §4's edge colour, as the **first cell's left border** | `WorkTableView.tsx:946` |
 | Divider | `border-bottom: 1px solid rgba(200,210,230,0.35)`, suppressed on the last row | `WorkTableView.tsx:95, 931, 942` |
 | **Zebra striping** | **None.** | — |
@@ -89,7 +89,7 @@ The reason the interactive columns override their vertical padding to `2px` is t
 
 ### 15c. Inline control sizing
 
-One rule governs every control that sits in a cell *(shipped across all four cells)*:
+One rule governs every control that sits in a cell *(shipped across all four cells)*, with one named exception:
 
 - `box-sizing: border-box`, `min-height: 26px`, `border-radius: 8px`, `background: rgba(255,255,255,0.6)`, `border: 1px solid rgba(200,210,230,0.6)`, Inter `0.76rem`, weight 600, `line-height: 1.2`.
 - Horizontal padding varies with the control's own affordance: `2px 4px 2px 7px` for a native `<select>` (the shorter right pad leaves room for the UA disclosure arrow) *(`StatusCell.tsx:175`, `PriorityCell.tsx:186`)*; `2px 8px` for a button trigger *(`DeadlineCell.tsx:681`, `LinksCell.tsx:141`)*.
@@ -97,6 +97,7 @@ One rule governs every control that sits in a cell *(shipped across all four cel
 - The `26px` control clears WCAG 2.2 AA's 24px Target Size floor on its own, so shrinking the cell padding costs nothing in reachability.
 - Hover: `border-color: rgba(140,160,190,0.75)`. Focus: §9's ring, `2px solid #2a7fa8`, `outline-offset: 2px`, applied through `:focus-visible` only.
 - In-flight: `opacity: 0.65` with the control disabled, never a colour swap — the UA's own disabled rendering greys text below §8's contrast floor, and this is a transient state, not a permanently unavailable control *(`StatusCell.tsx:179–182`)*.
+- **The named exception:** the Priority select's `high` value overrides both the shared background and weight — `rgba(224,96,124,0.15)`, weight 700 *(`PriorityCell.tsx:192–194`)*. This is deliberate, not a drift from the rule above: it is §18's chip-scale red fill, applied to the one control that carries a priority value, and §18 records why that scale is permitted. A future edit to §15c's shared control style should not "fix" this override into matching every other cell.
 
 **Every one of these rules must live in the component that renders the control, not in `WorkTableView`.** styled-jsx hashes its scope per component, so a `.vb-status-select` rule written in the view compiles cleanly and matches nothing. This trap has been hit repeatedly in this module and is recorded here so §15 cannot be implemented into it again.
 
@@ -117,7 +118,7 @@ One rule governs every control that sits in a cell *(shipped across all four cel
 
 Two supporting rules are part of the same decision. `position: sticky` is on the `<th>` because sticky on a table *section* is unreliable across browsers while sticky on the cells is not. The background is `rgba(255,255,255,0.95)` rather than a glass fill because the header has to be opaque enough to hide the rows travelling under it, and the `0.05` of transparency that remains is all the glass system gets here.
 
-**`scroll-padding-top: 36px` on `.vb-table-scroll`** *(new)*. Tabbing between inline controls scrolls the container to bring the next control into view, and the sticky header will sit on top of it — WCAG 2.2 AA *Focus Not Obscured (Minimum)* forbids persistent UI fully covering the focused control. The header's own height is `2 + 27 + 2 = 31px`, and §9's focus ring extends `4px` beyond a control's box (`2px` outline at `2px` offset), so `35px` is the floor; `36px` takes it to the 4px rhythm. This is the one gap §15 adds to shipped code rather than records.
+**`scroll-padding-top: 36px` on `.vb-table-scroll`** *(new)*. Tabbing between inline controls scrolls the container to bring the next control into view, and the sticky header will sit on top of it — WCAG 2.2 AA *Focus Not Obscured (Minimum)* forbids persistent UI fully covering the focused control. The header's own height is `2 + 27 + 2 = 31px`, and §9's focus ring extends `4px` beyond a control's box (`2px` outline at `2px` offset), so `35px` is the floor. `36px` is used instead of the bare floor because it is `3 × 12` — a value on §3's own `12px` spacing rhythm, the same one §15e cites for the phone card's left padding — rather than an arbitrary number one pixel above the minimum. This is the one gap §15 adds to shipped code rather than records.
 
 ### 15e. Below `768px` the table is not a table
 
@@ -144,36 +145,40 @@ The breakpoints are read from JavaScript (`matchMedia` at `768` and `1024`) and 
 
 The raw/darkened split is §8's and is not negotiable: the raw hue is for non-text decoration only (3:1 non-text threshold), the darkened value is the only approved text colour (4.5:1). §20 recomputes the darkened four for the one new context this section creates.
 
-### 16b. The three permitted forms
+### 16b. The permitted forms
 
-A context hue may appear in exactly three shapes, and nothing else:
+A context hue may appear in three general-purpose shapes, plus two shapes scoped to Timeline lanes and nowhere else. Nothing outside this list is permitted:
 
 1. **The category chip** — §2a, unchanged. Full pill, `border-radius: 999px`, `padding: 3px 10px`, tinted background at 16% alpha, darkened text, `0.68rem`/700/uppercase *(shipped)*.
 2. **The dot** — a `6px` circle, `border-radius: 50%`, raw hue, no border. Identical in size and shape to §2b's project/course dot, deliberately: a user who has learned "small round swatch = which thing this belongs to" reads both without relearning.
-3. **The compact label** *(new)* — the dot followed by the context name at the chip's type (`0.68rem`, weight 700, uppercase) in the **darkened** text colour, `gap: 5px`, **no background fill, no padding, no border**. This is the chip with its pill removed: same family, a third of the visual weight. Use it where a full chip would be too heavy for its surroundings but a bare dot would be ambiguous — the Filters popover's context rows (Task 38) and Timeline's lane labels under My Work (Task 39).
+3. **The compact label** *(new)* — the dot followed by the context name at the chip's type (`0.68rem`, weight 700, uppercase) in the **darkened** text colour, `gap: 5px`, **no background fill, no padding, no border**. This is the chip with its pill removed: same family, a third of the visual weight. Use it where a full chip would be too heavy for its surroundings but a bare dot would be ambiguous — the Filters popover's context rows (Task 38) only.
+4. **The lane tint** *(shipped, Timeline under My Work only)* — `background: <hue>08` on the whole lane, not a dot or a label. See §16c; this is the one case in the module where a context hue *is* a row background, and it is the single named exception to the "never a row background" rule below.
+5. **The lane-stack edge** *(new, Timeline under a single context only, Task 39)* — a `2px` left edge on the lane stack's container, replacing form 4 the moment every lane in the stack shares one context. See §16c for why.
+
+**Timeline's lane *label text* is not a context-hue application at all.** It is §1's shipped micro-label — `#8a94a6`, no dot, no context colour — under both forms 4 and 5. The hue lives in the lane's background or the container's edge; the label stays neutral in either state. An earlier draft of this section assigned the lane label to form 3 (the compact label); that was wrong and is corrected here.
 
 ### 16c. Where each form goes, and where the hue is forbidden
 
 | Surface | Treatment |
 |---|---|
-| Focus row, Board card | §2a chip, unchanged *(shipped)* |
+| Focus row, Board card | Form 1, unchanged *(shipped)* |
 | Table "Context" cell | **Plain `#5c6b80` text, no dot** *(shipped: `tableColumns.ts:78` + `WorkTableView.tsx:950–952`)*. v3 does not change it — §15's row is `31px` tall and a dot buys nothing a legible label does not already say. |
-| Timeline lanes, My Work | `background: <hue>08` per lane, `min-height: 44px`, `border-bottom: 1px solid rgba(200,210,230,0.25)` *(shipped: `WorkTimelineView.tsx:221–223`)*; lane label per §1's micro-label *(`WorkTimelineView.tsx:226–231`)* |
-| Timeline lanes, a single context (Task 39) | **Lanes drop the per-lane tint entirely; the context hue moves to a `2px` left edge on the lane stack's container** *(new)* |
-| Filters popover context rows (Task 38) | Compact label (16b form 3) |
+| Timeline lanes, My Work | Form 4: `background: <hue>08` per lane, `min-height: 44px`, `border-bottom: 1px solid rgba(200,210,230,0.25)` *(shipped: `WorkTimelineView.tsx:221–223`)*; lane label per §1's micro-label, neutral *(`WorkTimelineView.tsx:226–231`)* |
+| Timeline lanes, a single context (Task 39) | Form 5: **lanes drop the per-lane tint entirely; the context hue moves to the `2px` edge**, lane label stays the same neutral micro-label *(new)* |
+| Filters popover context rows (Task 38) | Form 3, the compact label |
 | Detail drawer hierarchy line | Plain `#5c6b80` *(shipped: `WorkItemDetail.tsx:517`)*; unchanged |
 
 **The Timeline ruling deserves its reasoning stated.** Task 39 makes lanes context-aware — courses under Academic, projects under Projects. Inside a single context every lane belongs to that same context, so a per-lane tint would paint every lane the identical colour and distinguish nothing. A colour that is constant across all lanes is not information about lanes; it is information about the container. So it moves to the container, as one `2px` edge, and the lanes go untinted. Under My Work the lanes *are* the four contexts, the tint does distinguish them, and §5c's shipped treatment is correct and unchanged.
 
 **Forbidden, without exception:**
 
-- **Never a row or card background.** No tint, no fill, no wash, at any alpha above §5c's `08` lane tint — which is the single permitted exception and is scoped to Timeline lanes under My Work. §3's flattened-row rule is not suspended for colour.
-- **Never the §4 priority edge.** That `3px` slot is owned by priority and means high/normal/low. There is no second left edge on a row or a card.
+- **Never a row or card background outside form 4.** No tint, no fill, no wash, at any alpha, on any surface other than a Timeline lane under My Work. §3's flattened-row rule is not suspended for colour.
+- **Never the §4 priority edge.** That `3px` slot is owned by priority and means high/normal/low. Form 5's `2px` lane-stack edge is a different slot on a different surface (Timeline's own container, which has no priority edge to conflict with) — it does not create a second priority-edge-shaped thing on a row or a card.
 - **Never as a raw hue behind or as text** (§8).
 - **Never the context navigation indicator** (§14b).
 - **Never a due-state, priority, or status signal, and never adjacent enough to be mistaken for one.** The semantic set — `#e0607c`/`#922e48` for overdue and high, `#8a5010` for completed-late and blocked, `#5c6b80` for everything ordinary — always wins. Where a context accent and a semantic colour would occupy the same element, the semantic colour renders and the accent is dropped, not blended, not moved to a border. A context is a fact about where work lives; a due state is a fact about whether it needs attention now, and only the second one is ever urgent.
 
-Note the genuine overlap this creates: `#8a5010` is simultaneously Organization's darkened text colour and the module's completed-late/blocked amber. That collision is pre-existing and shipped, and it is tolerable because the two never render on the same element — Organization's value appears on a chip or compact label, the semantic value on a meta string or a badge. No new use of `#8a5010` may put them on the same line without the badge's own pill ground to separate them.
+Note the genuine overlap this creates: `#8a5010` is simultaneously Organization's darkened text colour and the module's completed-late/blocked amber. Two things are true here, not one. **At the element level** the collision is tolerable — Organization's value appears on a chip or compact label, the semantic value on a meta string or a badge, and no single element ever needs to be read as both. **At the card level it is closer than that framing suggests**: an Organization item that is also Blocked, viewed under My Work, shows two amber pills on one Board card — the category chip (`rgba(240,163,92,0.16)` ground) and the Blocked badge (the identical ground, §17b) — 6–8px apart, one meaning "where this lives" and the other "why it's stuck". They are not the adjacent-enough-to-confuse case the "never" rule above forbids, because that rule is about a context hue colliding with a *due-state* signal, and Blocked is a stage, not a due state — but a user glancing at the card sees one colour doing two jobs on the same object. No fix is prescribed here; it is recorded so Task 40's `impeccable` pass evaluates it as a real case rather than discovering it fresh.
 
 ---
 
@@ -241,7 +246,7 @@ Title typography: DM Sans `1.05rem`/800/`#2d3748`, `line-height: 1.3`, `overflow
 
 §6 made the Overdue stat card the one deliberately expressive element in v2: five co-occurring changes at `count > 0`, identical to its three siblings at zero. Spec §22 keeps the intent and objects to the volume — a single overdue item should not dominate the header.
 
-**The diagnosis is surface area, not colour.** Of §6's five changes, four are local marks — a `3px` stripe, a `14px` icon, and two coloured strings. The fifth is a tinted fill across the whole card: roughly 130×90px of pink sitting among three white-glass cards. That one property is doing all the dominating. Removing it removes the shouting and leaves four co-occurring signals, which is more than enough to satisfy `color-not-only`.
+**The diagnosis is surface area, not colour.** The table below has seven properties; two of them — the background and the border — are the tinted fill across the whole card: at the four-column grid's own gap and padding (`WorkboardStats.tsx:201, 238`), that card is roughly 280–315px wide by ~90px tall depending on viewport, sitting among three white-glass cards. Those two properties are doing all the dominating. Removing them removes the shouting and leaves five co-occurring signals — the edge, the icon, and three coloured strings (label, numeral, subtitle) — which is more than enough to satisfy `color-not-only`.
 
 **Overdue, `count > 0` — the v3 treatment.** Two properties revert to neutral; three are unchanged from §6:
 
@@ -303,7 +308,14 @@ All four improve when the tint is removed, which is the expected direction: a hu
 
 §14's context row introduces no new pairing: `#5c6b80` on glass is §8's 4.48:1 (passing) and `#2d3748` is far above. The typeface change to DM Sans does not affect contrast.
 
-§18 introduces no new pairing at all — every colour it keeps was verified in §8 (`#922e48` at 5.52:1, `#a0405a` on its own pill ground at 4.43:1 and used only for the card's supplementary line), and the two properties it changes revert to values already in use on the three neutral cards.
+**§18 does introduce a new pairing, and it had to be recomputed for the same reason §16's did.** §8 verified `#922e48`/`#a0405a` against the card's *own tinted* ground (`rgba(224,96,124,0.14)` composited over glass); stripping that tint per §18 moves both onto the same bare-glass ground as everything else in this section:
+
+| Pair | On the tinted card (§8) | On bare glass (§20) | AA (4.5:1) |
+|---|---|---|---|
+| `#922e48` (label, numeral) | 5.52:1 | **6.41:1** | Pass |
+| `#a0405a` (subtitle) | 4.43:1 — marginal, close to the floor | **5.14:1** | Pass, clears the margin |
+
+Both improve for the same reason §16's four pairs did: the pink tint was fractionally darker than bare glass, so removing it lightens the ground under an already-dark text colour. `#a0405a` is the more consequential of the two — it leaves the narrow band §8 originally flagged it in.
 
 §15's table: the column-header `#5c6b80` and the cell `#5c6b80` are §8's passing secondary colour; the sorted column and hover darken to `#2d3748`. The sticky header's `rgba(255,255,255,0.95)` ground is lighter than bare glass, so every text ratio on it is at or above the figures above.
 
@@ -322,6 +334,8 @@ All four improve when the tint is removed, which is the expected direction: a hu
 
 **Never a cramped five-item context row.** Below `1024px` the row either wraps to full width or scrolls; it does not shrink its padding below `10px 12px`, drop labels for icons, or collapse into a `<select>` — the five context names are the user's primary orientation ("where am I working?") and abbreviating them costs more than a second row of height. This differs from the view selector, which *does* go icon-only below `1024px` (§10), because four view icons are conventional and self-describing while "Organization" has no icon a user would guess.
 
+**This is a deliberate narrowing of a choice the spec leaves open.** Spec §29 offers "horizontally scrolling *or a selector*" for mobile navigation without preferring one; this addendum picks scrolling and rules the `<select>` collapse out entirely, for the reason stated above. Noted explicitly, the way §14b flags its own deviation from shipped code, so a Task 40 implementer who reads the spec directly does not wonder whether the dropdown option was overlooked.
+
 **Column dropping is by declared priority, never by position.** `TableColumn.priority` is `'essential' | 'high' | 'low'` *(shipped: `tableColumns.ts:16–22`)*: `Work`, `Status` and `Deadline` are `essential` and survive every width; the context's own identity column (`Course`, `Organization`, `Project`, `Area`, `Context`) plus `Priority` are `high`; `Time`, `Links`, `Estimate` and the secondary project column are `low` and go first. The column arrays are `readonly` and shared by reference across contexts — `WORK` is literally the same object in four of them — so responsive dropping must filter into a new array and never write `col.priority` or sort in place, which would corrupt every other context for the rest of the session.
 
 **The specificity discipline is not optional here.** Any property a media query has to override must not also be set inline. That is the rule §15e's JavaScript breakpoints exist to sidestep in the Table, and it is the bug that shipped Board's mobile snap-scroll silently dead in v2.
@@ -332,10 +346,10 @@ All four improve when the tint is removed, which is the expected direction: a hu
 
 If you read nothing else in this addendum:
 
-- The context row and the view selector differ on **five** axes at once (§14a) — shape, active signal, resting boundary, typeface, position. The context row keeps §13's underline pattern; only its typeface changes, to DM Sans, and its `aria-label` becomes "Filter by context".
+- The context row and the view selector differ on **five** axes at once (§14a) — shape, active signal, resting boundary, typeface, position. The context row keeps §13's underline pattern; its typeface changes to DM Sans, its `aria-label` becomes "Filter by context", and it stays shrink-to-fit and right-aligned — **never `width: 100%`** (§14b).
 - The context indicator is **never** the context's own hue (§14b), and §16 is the reason that ruling got stronger, not weaker.
 - The Table row is **31px**, governed by the Work cell, and every inline control cell drops its vertical padding to `2px` to stay under it (§15b). **No zebra** (§15a). The sticky header's rule is an **inset box-shadow, not a border**, because a collapsed border does not travel with a sticky cell (§15d).
-- Context accents reuse §2a's four existing hues — no new colour system — as dots, thin edges, and compact labels only. **Never a row background, never the §4 priority edge, never over a semantic colour** (§16c).
+- Context accents reuse §2a's four existing hues — no new colour system — as the chip, the dot, or the compact label (§16b), plus two Timeline-only exceptions (a lane background under My Work, a lane-stack edge under a single context). **Never a row background outside that one Timeline exception, never the §4 priority edge, never over a semantic colour** (§16c).
 - Completed-late is `#8a5010` amber, not red, because the work is finished (§17a). Blocked is the amber badge and renders under My Work only (§17b). The detail drawer is solid `#fbfbfd` and can **never** be glass, because `backdrop-filter` would trap the `position: fixed` popover it hosts (§17d).
 - Restrained Overdue = §6 **minus two properties**: the tinted background and the red border revert to neutral; the edge, icon, and three text colours stay (§18). The general rule: red fills at chip scale, red edges and text at card scale.
 - A Board column has **one** header in §1's section-header style and **no subheader** — §5a's reading, ratified by shipped code (§19).
