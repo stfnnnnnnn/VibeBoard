@@ -328,7 +328,7 @@ export default function WorkboardShell(
               textDecoration: 'none', whiteSpace: 'nowrap',
             }}
           >
-            Week calendar ↗
+            Week calendar <span aria-hidden>↗</span>
           </Link>
 
           <button
