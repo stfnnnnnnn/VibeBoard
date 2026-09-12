@@ -313,25 +313,34 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   // Cached per course id. That cache is also the loop guard: this effect writes
   // `linkableItems`, which it depends on, and the `linkableItems[subjectId]` check makes the
   // resulting re-run a no-op. Re-picking a course it has already loaded costs nothing.
-  useEffect(() => {
-    if (context !== 'academic' || academicSource !== 'link' || subjectId === '') return;
-    if (linkableItems[subjectId]) return;
-    const courseId = subjectId;
-    let cancelled = false;
+  // Pulled out of the effect so a failed load can be retried directly: re-selecting the
+  // course that just failed fires no `change` event (it is already the selected value), so
+  // the effect below — keyed on `subjectId` — would otherwise never run again for it. The
+  // effect and the "Try again" button both call this; only the effect's invocation can be
+  // cancelled by an unmount or a course switch, since only it can be interrupted that way.
+  function loadLinkableItems(courseId: number, cancelledRef?: { current: boolean }) {
     setLinkableLoading(courseId);
     setLinkableError(null);
     fetch('/api/workboard/work')
       .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((data: { items?: WorkItem[] }) => {
-        if (cancelled) return;
+        if (cancelledRef?.current) return;
         const rows: LinkableItem[] = (data.items ?? [])
           .filter(i => i.context === 'academic' && i.user_subject_id === courseId)
           .map(i => ({ key: `${i.source}:${i.id}`, source: i.source, id: i.id, title: i.title, due_at: i.due_at }));
         setLinkableItems(prev => ({ ...prev, [courseId]: rows }));
       })
-      .catch(() => { if (!cancelled) setLinkableError('Could not load this course’s items.'); })
-      .finally(() => { if (!cancelled) setLinkableLoading(null); });
-    return () => { cancelled = true; };
+      .catch(() => { if (!cancelledRef?.current) setLinkableError('Could not load this course’s items.'); })
+      .finally(() => { if (!cancelledRef?.current) setLinkableLoading(null); });
+  }
+
+  useEffect(() => {
+    if (context !== 'academic' || academicSource !== 'link' || subjectId === '') return;
+    if (linkableItems[subjectId]) return;
+    const cancelledRef = { current: false };
+    loadLinkableItems(subjectId, cancelledRef);
+    return () => { cancelledRef.current = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [context, academicSource, subjectId, linkableItems]);
 
   useEffect(() => {
@@ -536,15 +545,20 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
                       className="vb-dialog-control"
                       style={CONTROL_STYLE}
                       value={linkedItemKey}
-                      disabled={loadingRows || (courseRows?.length ?? 0) === 0}
+                      disabled={loadingRows || linkableError !== null || (courseRows?.length ?? 0) === 0}
                       onChange={e => setLinkedItemKey(e.target.value)}
                     >
                       <option value="">
                         {loadingRows
                           ? 'Loading…'
-                          : (courseRows?.length ?? 0) === 0
-                            ? 'Nothing on your board for this course yet'
-                            : 'Choose an item…'}
+                          // A failed load leaves `courseRows` undefined too, which must not
+                          // read as "this course truly has nothing" — that is a real, false
+                          // answer to the one question this picker exists to answer honestly.
+                          : linkableError !== null
+                            ? 'Could not load'
+                            : (courseRows?.length ?? 0) === 0
+                              ? 'Nothing on your board for this course yet'
+                              : 'Choose an item…'}
                       </option>
                       {(courseRows ?? []).map(r => (
                         <option key={r.key} value={r.key}>
@@ -556,7 +570,20 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
                   </Field>
 
                   {linkableError && (
-                    <p style={{ ...HINT_TEXT_STYLE, color: '#922e48', fontWeight: 600 }}>{linkableError}</p>
+                    <p style={{ ...HINT_TEXT_STYLE, margin: '-10px 0 16px', color: '#922e48', fontWeight: 600 }}>
+                      {linkableError}{' '}
+                      <button
+                        type="button"
+                        className="vb-dialog-link"
+                        onClick={() => loadLinkableItems(chosenCourseId)}
+                        style={{
+                          background: 'none', border: 'none', padding: 0, font: 'inherit',
+                          color: 'inherit', textDecoration: 'underline', cursor: 'pointer',
+                        }}
+                      >
+                        Try again
+                      </button>
+                    </p>
                   )}
 
                   {pickedItem && (
@@ -592,31 +619,49 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
               </div>
             )}
 
-            {path === 'independent' && (
-              <Field
-                label="Academic project"
-                hint={
-                  chosenCourseId === null
-                    ? 'Optional. Choose a course first — projects are listed per course.'
-                    : academicProjects.length === 0
-                      ? 'Optional. This course has no projects yet.'
-                      : 'Optional. Only this course’s projects are listed.'
-                }
-              >
-                <select
-                  className="vb-dialog-control"
-                  style={CONTROL_STYLE}
-                  value={projectId === '' ? '' : String(projectId)}
-                  disabled={chosenCourseId === null || academicProjects.length === 0}
-                  onChange={e => setProjectId(e.target.value === '' ? '' : Number(e.target.value))}
+            {path === 'independent' && (() => {
+              // An item being edited can carry a `project_id` the current filter would
+              // never have offered — a project from a different course, or created before
+              // this filter existed. A `<select value>` that matches no `<option>` falls
+              // back to displaying the *first* one ("No project"), which would misreport a
+              // real, still-submitted value as cleared and — worse — leave it uneditable
+              // once `academicProjects` is empty and the control disables. Surfacing it as
+              // its own disabled option keeps what is about to be saved visible, and "No
+              // project" stays one real click away to actually clear it.
+              const outOfScope = projectId !== '' && !academicProjects.some(p => p.id === projectId)
+                ? projects.find(p => p.id === projectId)
+                : undefined;
+              return (
+                <Field
+                  label="Academic project"
+                  hint={
+                    outOfScope
+                      ? 'This project isn’t part of the chosen course. Pick “No project” to clear it.'
+                      : chosenCourseId === null
+                        ? 'Optional. Choose a course first — projects are listed per course.'
+                        : academicProjects.length === 0
+                          ? 'Optional. This course has no projects yet.'
+                          : 'Optional. Only this course’s projects are listed.'
+                  }
                 >
-                  <option value="">No project</option>
-                  {academicProjects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </Field>
-            )}
+                  <select
+                    className="vb-dialog-control"
+                    style={CONTROL_STYLE}
+                    value={projectId === '' ? '' : String(projectId)}
+                    disabled={chosenCourseId === null || (academicProjects.length === 0 && !outOfScope)}
+                    onChange={e => setProjectId(e.target.value === '' ? '' : Number(e.target.value))}
+                  >
+                    <option value="">No project</option>
+                    {outOfScope && (
+                      <option value={outOfScope.id} disabled>{outOfScope.name} (not in this course)</option>
+                    )}
+                    {academicProjects.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </Field>
+              );
+            })()}
           </>
         )}
       </>
@@ -863,7 +908,11 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
                   value={title}
                   onChange={e => setTitle(e.target.value)}
                   placeholder="What needs doing?"
-                  required
+                  // Not required on path 1: nothing here is submitted (the item already
+                  // exists), so native constraint validation would block the "Done" button
+                  // on an empty Title the form never reads — the one path that needs no
+                  // title would be the one path whose primary button silently refuses to fire.
+                  required={!isLinkExistingPath}
                 />
               </Field>
 
