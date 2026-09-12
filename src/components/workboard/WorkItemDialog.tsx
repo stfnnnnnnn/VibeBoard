@@ -271,6 +271,11 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   // until one is picked, so the modal opens short and grows (progressive disclosure). An
   // item being edited always has a context already, so edit mode pre-fills from it.
   const [context, setContext]                 = useState<WorkContext | ''>(editingItem?.category ?? '');
+  // Kept current by the effect below so an in-flight async callback — `handleCreateProject`
+  // is the one case in this file that outlives a possible context switch — can ask "is the
+  // user still where I started?" after an `await`. `context` itself can't answer that: it is
+  // a value this closure captured at the moment it was created, not a live read.
+  const contextRef = useRef(context);
   const [projectId, setProjectId]             = useState<number | ''>(editingItem?.project_id ?? '');
   const [subjectId, setSubjectId]             = useState<number | ''>(editingItem?.user_subject_id ?? '');
   const [priority, setPriority]               = useState<WorkPriority>(editingItem?.priority ?? 'normal');
@@ -350,6 +355,8 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   // that the academic branch below is the one and only reader, it is gated on
   // `context === 'academic'`. An academic-*sourced* item never needs the list at all (its
   // course is fixed by its Study Pulse row), hence the `isAcademicEdit` bail as well.
+  useEffect(() => { contextRef.current = context; }, [context]);
+
   //
   // Fires on the transition into the academic context — the moment Context is set to
   // Academic (create mode), or on mount for an owned academic item being edited — and at
@@ -1282,10 +1289,21 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
         id: data.project_id, name, color: null, status: 'active',
         context: 'project', user_subject_id: null, organization_id: null,
       };
+      // The project now genuinely exists, so the shell always learns about it — but the
+      // three lines below are only meaningful for *this* branch's own selection, and the
+      // user may have switched Context away from Projects while the POST was in flight
+      // (the Task 29 review found this: nothing previously stopped a stale `projectId`
+      // from landing on whatever context the user had moved on to, since `project_id` is
+      // the one submit-body field not gated on context — unlike `user_subject_id` and
+      // `organization_id`, which are). `context` itself can't answer "did it change since
+      // this function started" — it's the value this closure captured at call time — so
+      // this reads the ref the effect above keeps live instead.
       onProjectCreated(created);
-      setProjectId(created.id);
-      setShowNewProject(false);
-      setNewProjectName('');
+      if (contextRef.current === 'project') {
+        setProjectId(created.id);
+        setShowNewProject(false);
+        setNewProjectName('');
+      }
     } finally {
       setCreatingProject(false);
     }
@@ -1408,11 +1426,16 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
         setFormError('Please choose a context.');
         return;
       }
-      if (requiresProject && projectId === '') {
-        // The Projects branch offers no "No project" option, so this is only reachable by
-        // leaving the placeholder untouched — never by a deliberate choice. Placed before
-        // the academic guards purely to keep that block contiguous; the contexts are
-        // mutually exclusive, so no two of these guards can ever both be live.
+      if (requiresProject && !projects.some(p => p.id === projectId && p.context === 'project')) {
+        // Not just `projectId === ''`: an edit-mode item can hold the id of a project that
+        // was standalone when it was linked and has since been re-parented onto a course or
+        // organization (`renderProjectFields`'s `outOfScope` disables it in the select for
+        // exactly this reason). `projectId === ''` alone would miss that case and let Save
+        // silently re-write a link the hint right above the select says to change. This is
+        // only reachable by leaving the placeholder untouched or by that stale-link case —
+        // never by a deliberate, still-valid choice. Placed before the academic guards
+        // purely to keep that block contiguous; the contexts are mutually exclusive, so no
+        // two of these guards can ever both be live.
         setFormError('Please choose a project.');
         return;
       }
