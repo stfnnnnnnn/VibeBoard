@@ -62,6 +62,13 @@ const CATEGORY_TABS: { key: CategoryFilter; label: string }[] = [
 
 const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
 
+/** Direction-addendum §14b: the context row — and *only* the context row — flips to the app's
+ *  titling face as it moves into the header, because it is now part of the title block. A second
+ *  constant rather than an edit to `FONT` above: `FONT` is also on the toolbar row's search input
+ *  (Inter, the UI face), which §14a explicitly keeps as one of the five axes separating the two
+ *  "pick one of a few" rows — changing the shared constant would silently move that too. */
+const CONTEXT_FONT = "'DM Sans','Segoe UI',sans-serif";
+
 /** Direction doc §11's outer-panel glass treatment, matched to `WorkboardWeekView.tsx`'s and
  *  `WorkboardRail.tsx`'s `GLASS` constant exactly (same values, duplicated rather than
  *  imported — each of the three files stays independent of the others so none of them risks
@@ -190,58 +197,81 @@ export default function WorkboardShell(
         <ArrowLeft size={15} /> Dashboard
       </Link>
 
-      <h1 className="gradient-text" style={{ fontSize: '2.2rem', fontWeight: 700, margin: '0 0 4px' }}>Workboard</h1>
-      <p style={{ margin: '0 0 22px', color: '#5c6b80', fontSize: '0.95rem' }}>All your work, in one place.</p>
+      {/* Spec §1 / addendum §14: the header block is the title on the left and the context
+          navigation on the upper right, on one row where width allows. The 22px that used to be
+          the subtitle's own bottom margin lives on this row instead, so the context group's
+          `align-self: flex-end` lands on the subtitle's text baseline rather than 22px below it.
+          `flex-wrap` here is only a graceful fallback for narrow viewports; addendum §21 assigns
+          the real 768–1023px wrap and the <768px scroll-strip treatment to Task 40. */}
+      <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: '22px' }}>
+        <div>
+          <h1 className="gradient-text" style={{ fontSize: '2.2rem', fontWeight: 700, margin: '0 0 4px' }}>Workboard</h1>
+          <p style={{ margin: 0, color: '#5c6b80', fontSize: '0.95rem' }}>All your work, in one place.</p>
+        </div>
+
+        {/* Context navigation (direction doc §13, addendum §14) — underline-indicator pattern,
+            deliberately not the view switcher's pill-fill, so the two "pick one of a few"
+            controls read as different jobs (filter vs. view) at a glance. §14a makes that
+            distinction carry on five axes at once now that the rows sit far apart: shape,
+            active signal, resting boundary, typeface (DM Sans here, Inter there) and position.
+
+            Deliberately `role="radiogroup"`/`role="radio"`, not the tabs pattern: this row picks
+            a *filter* applied to whichever view is showing, it doesn't switch to a distinct
+            content panel the way the view switcher below does. The WAI-ARIA tabs pattern assumes
+            each tab owns an associated (and otherwise hidden) tabpanel; there is no second panel
+            here for "Academic" to own — the same List/Board/Timeline/Calendar panel just renders
+            a narrower slice of `work.items`. A single-select group of otherwise-plain buttons is
+            exactly what `radiogroup`/`radio` describes, and `aria-checked` says "selected", which
+            is what `aria-pressed` here was always straining to mean.
+
+            `align-self: flex-end` is §14b's exact instruction for keeping the group shrink-to-fit
+            and bottom-aligned against the title: a `width: 100%` group under a right-aligned row
+            would read as a page divider rather than as this control's own baseline. For the same
+            reason the row no longer carries a bottom margin of its own — inside a flex row, a
+            bottom margin under `align-self: flex-end` would lift the underline off the baseline
+            it is supposed to share with the title block. */}
+        <div role="radiogroup" aria-label="Filter by context" style={{ alignSelf: 'flex-end', display: 'flex', gap: '4px', borderBottom: '1px solid rgba(200,210,230,0.35)', flexWrap: 'wrap' }}>
+          {CATEGORY_TABS.map(({ key, label }, idx) => {
+            const active = category === key;
+            return (
+              <button
+                key={key}
+                ref={el => { categoryTabRefs.current[idx] = el; }}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                tabIndex={active ? 0 : -1}
+                onClick={() => setCategory(key)}
+                onKeyDown={e => handleRovingKeyDown(e, idx, CATEGORY_TABS.length, categoryTabRefs, next => setCategory(CATEGORY_TABS[next].key))}
+                className="vb-category-tab"
+                style={{
+                  position: 'relative', display: 'inline-flex', alignItems: 'center',
+                  minHeight: '40px', padding: '10px 16px', background: 'transparent', border: 'none',
+                  // §14b: DM Sans (the title block's face, now that this row is part of it) and an
+                  // explicit `letter-spacing: 0`, so §1's 0.04em uppercase tracking can never be
+                  // inherited onto these sentence-case labels. Weight stays 700 in both states.
+                  fontFamily: CONTEXT_FONT, letterSpacing: '0',
+                  fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer',
+                  color: active ? '#2d3748' : '#5c6b80',
+                }}
+              >
+                {label}
+                <span
+                  aria-hidden
+                  style={{
+                    position: 'absolute', left: 0, right: 0, bottom: '-1px', height: '2px',
+                    background: !active ? 'transparent' : key === 'all'
+                      ? 'linear-gradient(to right, #f2a7c0, #74bcd9)'
+                      : '#74bcd9',
+                  }}
+                />
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       <WorkboardStats stats={work.stats} oldestOverdueDue={oldestOverdueDue} />
-
-      {/* Category tabs (direction doc §13) — underline-indicator pattern, deliberately not
-          the view switcher's pill-fill, so the two "pick one of a few" controls read as
-          different jobs (filter vs. view) at a glance.
-
-          Deliberately `role="radiogroup"`/`role="radio"`, not the tabs pattern: this row picks
-          a *filter* applied to whichever view is showing, it doesn't switch to a distinct
-          content panel the way the view switcher below does. The WAI-ARIA tabs pattern assumes
-          each tab owns an associated (and otherwise hidden) tabpanel; there is no second panel
-          here for "Academic" to own — the same List/Board/Timeline/Calendar panel just renders
-          a narrower slice of `work.items`. A single-select group of otherwise-plain buttons is
-          exactly what `radiogroup`/`radio` describes, and `aria-checked` says "selected", which
-          is what `aria-pressed` here was always straining to mean. */}
-      <div role="radiogroup" aria-label="Filter by category" style={{ display: 'flex', gap: '4px', borderBottom: '1px solid rgba(200,210,230,0.35)', marginBottom: '18px', flexWrap: 'wrap' }}>
-        {CATEGORY_TABS.map(({ key, label }, idx) => {
-          const active = category === key;
-          return (
-            <button
-              key={key}
-              ref={el => { categoryTabRefs.current[idx] = el; }}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              tabIndex={active ? 0 : -1}
-              onClick={() => setCategory(key)}
-              onKeyDown={e => handleRovingKeyDown(e, idx, CATEGORY_TABS.length, categoryTabRefs, next => setCategory(CATEGORY_TABS[next].key))}
-              className="vb-category-tab"
-              style={{
-                position: 'relative', display: 'inline-flex', alignItems: 'center',
-                minHeight: '40px', padding: '10px 16px', background: 'transparent', border: 'none',
-                fontFamily: FONT, fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer',
-                color: active ? '#2d3748' : '#5c6b80',
-              }}
-            >
-              {label}
-              <span
-                aria-hidden
-                style={{
-                  position: 'absolute', left: 0, right: 0, bottom: '-1px', height: '2px',
-                  background: !active ? 'transparent' : key === 'all'
-                    ? 'linear-gradient(to right, #f2a7c0, #74bcd9)'
-                    : '#74bcd9',
-                }}
-              />
-            </button>
-          );
-        })}
-      </div>
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '18px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
         {/* True tabs pattern: each button selects one of four mutually-exclusive, entirely
