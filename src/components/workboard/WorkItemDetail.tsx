@@ -331,11 +331,14 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
     const first = focusables[0];
     const last  = focusables[focusables.length - 1];
     // `document.activeElement === root` alongside `=== first`: `refocusIfLost` (below) can
-    // land focus on the panel container itself, which carries `tabIndex={-1}` so it is
-    // deliberately excluded from `focusables` — but that also means it isn't `first`, so a
-    // Shift+Tab pressed from there would fall through to native browser handling instead of
-    // this wrap check, walking backward out of the drawer into whatever precedes it in the
-    // document (the panel's children come after it, so forward Tab is unaffected).
+    // land focus on the panel container itself — `querySelectorAll` above only matches
+    // root's *descendants*, so root can never be in `focusables` and is therefore never
+    // `first`, regardless of its `tabIndex={-1}` (that attribute only keeps it out of the
+    // natural tab order; it plays no part in the exclusion here). Without this second
+    // disjunct, a Shift+Tab pressed while focus sits on root would fall through to native
+    // browser handling instead of this wrap check, walking backward out of the drawer into
+    // whatever precedes it in the document (the panel's children come after it, so forward
+    // Tab is unaffected).
     if (e.shiftKey && (document.activeElement === first || document.activeElement === root)) {
       e.preventDefault();
       last.focus();
