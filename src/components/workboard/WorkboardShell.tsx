@@ -2,8 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, List, Table2, Columns3, GanttChart, CalendarDays, Search } from 'lucide-react';
-import WorkboardWeekView from './WorkboardWeekView';
+import { ArrowLeft, List, Table2, Columns3, GanttChart, Search } from 'lucide-react';
 import WorkListView from './views/WorkListView';
 import WorkBoardView from './views/WorkBoardView';
 import WorkTableView from './views/WorkTableView';
@@ -29,17 +28,21 @@ export interface WorkPayload {
   workload:      WorkloadDay[];
 }
 
-export type ViewKey = 'list' | 'table' | 'board' | 'timeline' | 'calendar';
+/** Spec §5/§6's view set: Focus | Table | Board | Timeline. Calendar is deliberately absent —
+ *  it lives at its own `/workboard/calendar` route now, reached from the toolbar's secondary
+ *  "Week calendar ↗" link rather than from this selector. The `list` key is kept as-is while
+ *  its label reads "Focus": §4 renames the view in the UI only, and a key rename would cascade
+ *  through state, tab `id`s and `WorkListView` for no user-visible gain. */
+export type ViewKey = 'list' | 'table' | 'board' | 'timeline';
 
 const VIEWS: { key: ViewKey; label: string; Icon: typeof List }[] = [
-  { key: 'list',     label: 'List',     Icon: List },
-  // Spec §7-§9's central new feature, placed directly after Focus/List because it is the other
+  { key: 'list',     label: 'Focus',    Icon: List },
+  // Spec §7-§9's central new feature, placed directly after Focus because it is the other
   // "work through everything" surface — the spec's own Views section lists it in exactly this
-  // position. Calendar keeps its slot until the task that removes it from the selector.
+  // position.
   { key: 'table',    label: 'Table',    Icon: Table2 },
   { key: 'board',    label: 'Board',    Icon: Columns3 },
   { key: 'timeline', label: 'Timeline', Icon: GanttChart },
-  { key: 'calendar', label: 'Calendar', Icon: CalendarDays },
 ];
 
 type CategoryFilter = WorkCategory | 'all';
@@ -141,7 +144,7 @@ export default function WorkboardShell(
    *  across the whole module (ids repeat between the four Study Pulse tables, so neither half is
    *  a key on its own). Falls back to the snapshot when the lookup misses, which is what keeps
    *  an item filtered out from under the drawer — a search typed behind it, or a completed item
-   *  leaving List's groups — from blanking the panel the user is still reading. */
+   *  leaving Focus's groups — from blanking the panel the user is still reading. */
   const detailLive = detailItem === null
     ? null
     : work.items.find(i => i.source === detailItem.source && i.id === detailItem.id) ?? detailItem;
@@ -222,7 +225,7 @@ export default function WorkboardShell(
             a *filter* applied to whichever view is showing, it doesn't switch to a distinct
             content panel the way the view switcher below does. The WAI-ARIA tabs pattern assumes
             each tab owns an associated (and otherwise hidden) tabpanel; there is no second panel
-            here for "Academic" to own — the same List/Board/Timeline/Calendar panel just renders
+            here for "Academic" to own — the same Focus/Table/Board/Timeline panel just renders
             a narrower slice of `work.items`. A single-select group of otherwise-plain buttons is
             exactly what `radiogroup`/`radio` describes, and `aria-checked` says "selected", which
             is what `aria-pressed` here was always straining to mean.
@@ -278,7 +281,7 @@ export default function WorkboardShell(
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '18px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
         {/* True tabs pattern: each button selects one of four mutually-exclusive, entirely
-            different content panels (List/Board/Timeline/Calendar all render into the single
+            different content panels (Focus/Table/Board/Timeline all render into the single
             `role="tabpanel"` below), which is exactly the case the WAI-ARIA tabs pattern is
             for — unlike the category filter above. `aria-label` on every button is what keeps
             the accessible name intact once the label text is visually hidden below 1024px
@@ -360,11 +363,13 @@ export default function WorkboardShell(
         </div>
       </div>
 
-      {/* Direction doc §10/§12: the rail sits beside List/Calendar (fixed 240px column) at
-          >=1024px, collapses entirely on Board/Timeline so kanban columns and the date axis
-          get the full canvas, and — new in this task — moves below the main content (instead
-          of beside it) from 1023px down on List/Calendar, where it stays visible rather than
-          collapsing. Both `flex-direction` and `align-items` are kept out of the inline style
+      {/* Direction doc §10/§12: the rail sits beside Focus (fixed 240px column) at >=1024px,
+          collapses entirely on Table/Board/Timeline so the grid, the kanban columns and the
+          date axis get the full canvas, and moves below the main content (instead of beside
+          it) from 1023px down on Focus, where it stays visible rather than collapsing. Focus
+          is now the only view that gets the rail at all: Calendar, the other view that used to
+          carry it, has moved to its own `/workboard/calendar` route.
+          Both `flex-direction` and `align-items` are kept out of the inline style
           below and set only in the stylesheet (same specificity reasoning as elsewhere in this
           task): `align-items: flex-start` cross-aligns the two side-by-side columns to their
           own content height at >=1024px, but that same value would shrink-wrap both children
@@ -374,67 +379,65 @@ export default function WorkboardShell(
           override for the stacked case. */}
       <div className="vb-content-row" style={{ display: 'flex', gap: '18px' }}>
         {/* The view switcher's single shared tabpanel — `id`/`aria-labelledby` track whichever
-            tab is currently selected. Direction doc §11: List/Board/Timeline share one GLASS
-            outer panel (the shell's own view-content container — none of the three views
-            apply it themselves, so it's applied once, here, rather than three times); Calendar
-            keeps its own existing look (multiple internal glass cells, no single outer panel)
-            and is deliberately excluded from this wrapper, per §11's "not being touched". */}
+            tab is currently selected. Direction doc §11: all four views (Focus/Table/Board/
+            Timeline) share one GLASS outer panel — the shell's own view-content container, which
+            none of the views applies itself, so it is applied once, here, rather than four times.
+            Now that Calendar has moved to its own `/workboard/calendar` route, every view this
+            shell can show wants the wrapper, so it is rendered unconditionally with no
+            exclusion left to branch on. */}
         <div id="vb-view-panel" role="tabpanel" aria-labelledby={`vb-view-tab-${view}`} tabIndex={0} style={{ flex: '1 1 auto', minWidth: 0 }}>
-          {view === 'calendar' && <WorkboardWeekView initialWeek={initialWeek} />}
-          {view !== 'calendar' && (
-            <div style={{ ...GLASS, padding: '20px', boxSizing: 'border-box' }}>
-              {view === 'list' && (
-                <WorkListView
-                  items={visibleItems}
-                  todayStr={work.generated_at}
-                  isFiltered={isFiltered}
-                  onChanged={refreshWork}
-                  onEdit={openEditDialog}
-                  onOpenDetail={openDetail}
-                  onNewItem={openCreateDialog}
-                />
-              )}
-              {view === 'table' && (
-                <WorkTableView
-                  items={visibleItems}
-                  context={category}
-                  todayStr={work.generated_at}
-                  isFiltered={isFiltered}
-                  isSearching={isSearching}
-                  onChanged={refreshWork}
-                  onNewItem={openCreateDialog}
-                  onOpenDetail={openDetail}
-                />
-              )}
-              {view === 'board' && (
-                <WorkBoardView
-                  items={visibleItems}
-                  // The SAME value `visibleItems` is filtered by, deliberately: the Board judges
-                  // a drop's stage legality against the board's context rather than each item's
-                  // own, which is only sound while the two agree. Task 16 shipped this prop
-                  // optional (defaulting to 'all'), so its absence would not have failed the
-                  // build — the Board would just have kept My Work's three columns under every
-                  // tab, invisibly, until someone opened Projects looking for Backlog.
-                  context={category}
-                  todayStr={work.generated_at}
-                  isFiltered={isFiltered}
-                  onChanged={refreshWork}
-                  onNewItem={openCreateDialog}
-                />
-              )}
-              {view === 'timeline' && (
-                <WorkTimelineView
-                  items={visibleItems}
-                  weekStart={work.week_start}
-                  today={work.generated_at}
-                  isFiltered={isFiltered}
-                />
-              )}
-            </div>
-          )}
+          <div style={{ ...GLASS, padding: '20px', boxSizing: 'border-box' }}>
+            {view === 'list' && (
+              <WorkListView
+                items={visibleItems}
+                todayStr={work.generated_at}
+                isFiltered={isFiltered}
+                onChanged={refreshWork}
+                onEdit={openEditDialog}
+                onOpenDetail={openDetail}
+                onNewItem={openCreateDialog}
+              />
+            )}
+            {view === 'table' && (
+              <WorkTableView
+                items={visibleItems}
+                context={category}
+                todayStr={work.generated_at}
+                isFiltered={isFiltered}
+                isSearching={isSearching}
+                onChanged={refreshWork}
+                onNewItem={openCreateDialog}
+                onOpenDetail={openDetail}
+              />
+            )}
+            {view === 'board' && (
+              <WorkBoardView
+                items={visibleItems}
+                // The SAME value `visibleItems` is filtered by, deliberately: the Board judges
+                // a drop's stage legality against the board's context rather than each item's
+                // own, which is only sound while the two agree. Task 16 shipped this prop
+                // optional (defaulting to 'all'), so its absence would not have failed the
+                // build — the Board would just have kept My Work's three columns under every
+                // tab, invisibly, until someone opened Projects looking for Backlog.
+                context={category}
+                todayStr={work.generated_at}
+                isFiltered={isFiltered}
+                onChanged={refreshWork}
+                onNewItem={openCreateDialog}
+              />
+            )}
+            {view === 'timeline' && (
+              <WorkTimelineView
+                items={visibleItems}
+                weekStart={work.week_start}
+                today={work.generated_at}
+                isFiltered={isFiltered}
+              />
+            )}
+          </div>
         </div>
 
-        {(view === 'list' || view === 'calendar') && (
+        {view === 'list' && (
           // Whole-board data (`work.workload` / `work.items`), never `visibleItems` — the
           // rail describes the whole board, same rule the stat cards follow, so its numbers
           // never move as the user types in search or switches category tabs.
@@ -500,7 +503,7 @@ export default function WorkboardShell(
         }
         /* Direction doc §10: the view switcher goes icon-only below 1024px — the label text
            is hidden visually but each button's aria-label (set above) keeps its accessible
-           name, so screen-reader users still get "List"/"Board"/etc. rather than nothing. */
+           name, so screen-reader users still get "Focus"/"Board"/etc. rather than nothing. */
         .vb-view-switch-btn {
           padding: 8px 14px;
         }
