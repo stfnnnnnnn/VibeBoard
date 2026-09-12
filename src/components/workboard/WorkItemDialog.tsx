@@ -1280,7 +1280,7 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
    */
   function renderLifeFields(): React.ReactNode {
     return (
-      <Field label="Area" hint="Optional. Groups personal work so it can be filtered and read at a glance.">
+      <Field label="Area" hint="Optional. Groups personal work so it reads at a glance in the Table.">
         <select
           className="vb-dialog-control"
           style={CONTROL_STYLE}
