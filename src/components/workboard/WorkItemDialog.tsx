@@ -1020,6 +1020,14 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
           return;
         }
         if (grading.mode === 'custom') {
+          if (grading.periods.length === 0) {
+            // Distinct from the message below: naming "grading period and category" when
+            // neither can be chosen — the select is disabled precisely because there is
+            // nothing in it — points at an action the user has no way to perform. The
+            // period select's own hint already explains where to fix it.
+            setFormError('This course’s grading preset has no periods set up yet.');
+            return;
+          }
           if (gradingPeriodId === '' || gradingCatId === '') {
             setFormError('Choose a grading period and category.');
             return;
@@ -1214,7 +1222,7 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
                   Priority are unaffected — both map onto fields the route does accept. */}
               {isNewGradedPath && (
                 <p style={{ ...HINT_TEXT_STYLE, margin: '-4px 0 16px' }}>
-                  Study Pulse doesn't have a place for Start date, Estimated hours, or Note
+                  Study Pulse doesn’t have a place for Start date, Estimated hours, or Note
                   yet — only Due date and Priority are saved for graded work.
                 </p>
               )}
