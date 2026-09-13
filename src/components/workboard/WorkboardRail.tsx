@@ -167,7 +167,7 @@ function UpcomingDeadlines({ items, todayStr }: { items: WorkItem[]; todayStr: s
 
 /**
  * Direction doc §12: the right rail — two independently-scrolling glass panels (workload
- * chart, upcoming deadlines), shown beside List/Calendar and collapsed on Board/Timeline
+ * chart, upcoming deadlines), shown beside Focus and collapsed on Table/Board/Timeline
  * (WorkboardShell.tsx decides *when* to render this; this component only renders its own
  * two panels). Always reads whole-board `work.workload`/`work.items` — never the shell's
  * filtered `visibleItems` — so the rail's numbers don't move as the user searches or

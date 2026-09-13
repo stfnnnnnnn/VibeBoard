@@ -144,7 +144,7 @@ export default function WorkTimelineView({ items, weekStart, today, isFiltered }
           Nothing scheduled yet
         </h2>
         <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: '#5c6b80', margin: 0 }}>
-          Timeline needs a due date or start date to plot something — add one from the List view.
+          Timeline needs a due date or start date to plot something — add one from the Focus view.
         </p>
       </div>
     );

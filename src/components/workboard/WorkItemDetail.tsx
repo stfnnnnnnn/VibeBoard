@@ -845,16 +845,17 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
         </section>
 
         {/* A dead-end marker for the eye, not for a screen reader: the drawer ends here and the
-            rest of the item is edited elsewhere. Named specifically as the List view's row
-            menu — "List" is the tab's actual on-screen label (`WorkboardShell.tsx`'s view
-            selector), not the internal "Focus" name this codebase's own comments use for it —
+            rest of the item is edited elsewhere. Named specifically as the Focus view's row
+            menu — "Focus" is the tab's actual on-screen label (`WorkboardShell.tsx`'s view
+            selector), even though the internal view key stays the literal "list" (Task 35
+            deliberately left the key alone to avoid a rename cascade) —
             not generically as "the row's Edit action", since the Table view has no such action
             to offer (it takes no `onEdit` prop at all, per `WorkTableView.tsx`'s own note), so a
             user who opened this drawer from a Table row or a phone card would otherwise be
             pointed at something they cannot reach without switching views. */}
         <p style={{ ...NOTE_STYLE, display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem' }}>
           <Check size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.7 }} />
-          Title, deadline and the rest are edited from the List view’s row menu.
+          Title, deadline and the rest are edited from the Focus view’s row menu.
         </p>
       </div>
 
