@@ -503,6 +503,11 @@ export default function WorkboardShell(
                 weekStart={work.week_start}
                 today={work.generated_at}
                 isFiltered={isFiltered}
+                // The same value `visibleItems` is filtered by, same as Table's and Board's
+                // `context` props just above — required (not optional) on `WorkTimelineView`,
+                // so omitting this would fail `tsc` rather than silently keeping My Work's four
+                // fixed lanes under every tab (Task 16's Board-context history, repeated here).
+                context={category}
               />
             )}
           </div>

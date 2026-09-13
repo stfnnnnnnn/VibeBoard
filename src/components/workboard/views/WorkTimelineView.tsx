@@ -7,6 +7,10 @@ import { CalendarRange, SearchX } from 'lucide-react';
 // same hazard — it has broken `/workboard` twice already).
 import type { WorkItem } from '@/lib/workboard/workItems';
 import { WORK_CATEGORIES, type WorkCategory } from '@/lib/workboard/workCategories';
+// The canonical module (not the deprecated `workCategories` shim above, kept only for the
+// existing My-Work lane logic this task does not touch). Pool-free by construction — safe as
+// a runtime import for `LIFE_AREA_LABELS` — see `workContexts.ts`.
+import { LIFE_AREA_LABELS, type WorkContext } from '@/lib/workboard/workContexts';
 import { addDays, dueDateOf } from '@/lib/workboard/dates';
 
 const FONT    = "'Inter','DM Sans','Segoe UI',sans-serif";
@@ -44,6 +48,11 @@ const CATEGORY_HUE: Record<WorkCategory, string> = {
   life:         '#f2a7c0',
 };
 
+/** `'all'` is the shell's My Work tab — every context at once. Mirrors `WorkBoardView`'s
+ *  `BoardContext` and `WorkTableView`'s `TableContext`, and takes the same value from the
+ *  same shell state. */
+export type TimelineContext = WorkContext | 'all';
+
 /** Number of whole days between `week_start` and `date` (both "YYYY-MM-DD"). Negative when
  *  `date` precedes `week_start`. Computed in UTC, matching `dates.ts`'s convention, so this
  *  never depends on the server process's local timezone. */
@@ -65,6 +74,34 @@ function darken(hex: string, amount: number): string {
 
 function itemKey(item: Pick<WorkItem, 'source' | 'id'>): string {
   return `${item.source}-${item.id}`;
+}
+
+/**
+ * `context !== 'all'` lane grouping (§16b/§16c, Task 39): which group `item` belongs to under
+ * a single active context, or `null` when it has no group value for that context (destined for
+ * the trailing "Unassigned" lane rather than being dropped). Grouped by the id field, never the
+ * label, so two same-named things (e.g. two courses that happen to share a code) are never
+ * accidentally merged into one lane.
+ */
+function groupOf(item: WorkItem, context: WorkContext): { id: number | string; label: string } | null {
+  switch (context) {
+    case 'academic':
+      return item.user_subject_id === null
+        ? null
+        : { id: item.user_subject_id, label: item.course_code ?? '' };
+    case 'project':
+      return item.project_id === null
+        ? null
+        : { id: item.project_id, label: item.project_name ?? '' };
+    case 'organization':
+      return item.organization_id === null
+        ? null
+        : { id: item.organization_id, label: item.organization_name ?? '' };
+    case 'life':
+      return item.life_area === null
+        ? null
+        : { id: item.life_area, label: LIFE_AREA_LABELS[item.life_area] };
+  }
 }
 
 type PlottedBar    = { kind: 'bar';    item: WorkItem; left: number; width: number };
@@ -102,6 +139,56 @@ function plot(item: WorkItem, weekStart: string): Plotted | null {
   return { kind: 'marker', item, left: dueIdx * DAY_WIDTH };
 }
 
+/**
+ * One rendered row. `hue` carries the per-lane tint (form 4, My Work only) — `null` means
+ * "paint no background at all" (form 5, a single context), never a fallback color, per §16c:
+ * lanes drop the tint entirely rather than trading it for a neutral one.
+ */
+type Lane = { key: string; label: string; hue: string | null; plotted: Plotted[] };
+
+/**
+ * `context !== 'all'` lane grouping (§16b/§16c, Task 39): one lane per distinct real group
+ * (grouped and keyed by id, never by label, so two same-named groups are never merged),
+ * labelled with that group's display label and sorted alphabetically by it — the only
+ * deterministic ordering signal available for courses/projects/organizations/areas, absent a
+ * stored display order — plus one trailing "Unassigned" lane, appended only when at least one
+ * item actually has no group under this context (never rendered empty). Every lane's `plotted`
+ * list runs through the exact same `plot()` used for My Work's lanes.
+ */
+function buildContextLanes(items: WorkItem[], context: WorkContext, weekStart: string): Lane[] {
+  const groups = new Map<number | string, { label: string; items: WorkItem[] }>();
+  const unassigned: WorkItem[] = [];
+
+  for (const item of items) {
+    const group = groupOf(item, context);
+    if (group === null) {
+      unassigned.push(item);
+      continue;
+    }
+    const bucket = groups.get(group.id);
+    if (bucket) {
+      bucket.items.push(item);
+    } else {
+      groups.set(group.id, { label: group.label, items: [item] });
+    }
+  }
+
+  const toLane = (key: string, label: string, laneItems: WorkItem[]): Lane => ({
+    key, label, hue: null, // form 5: no per-lane tint — the hue moves to the lane-stack edge
+    plotted: laneItems.map(item => plot(item, weekStart)).filter((p): p is Plotted => p !== null),
+  });
+
+  const lanes = Array.from(groups.entries())
+    .map(([id, { label, items: laneItems }]) => toLane(String(id), label, laneItems))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  if (unassigned.length > 0) {
+    lanes.push(toLane('unassigned', 'Unassigned', unassigned));
+  }
+
+  return lanes;
+}
+
 export interface WorkTimelineViewProps {
   /** Already filtered by category and search — see `WorkboardShell`'s `visibleItems`. */
   items:     WorkItem[];
@@ -113,9 +200,16 @@ export interface WorkTimelineViewProps {
    *  same distinction `WorkListView`/`WorkBoardView` make, so a filtered-to-nothing timeline
    *  reads as "no matches" rather than wrongly telling the user their dated items lack dates. */
   isFiltered?: boolean;
+  /** The same value `visibleItems` is filtered by — `'all'` under My Work, one context under a
+   *  tab. Deliberately REQUIRED, not optional: `WorkBoardView`'s equivalent prop shipped
+   *  optional in Task 16, and its own history is on record for the consequence — an optional
+   *  prop let the shell's call site forget to pass it, and `tsc` had nothing to catch that, so
+   *  the Board silently kept showing My Work's shape under every tab until manual testing caught
+   *  it. Required here means the same mistake fails the build instead of shipping quietly. */
+  context: TimelineContext;
 }
 
-export default function WorkTimelineView({ items, weekStart, today, isFiltered }: WorkTimelineViewProps) {
+export default function WorkTimelineView({ items, weekStart, today, isFiltered, context }: WorkTimelineViewProps) {
   // Direction doc §5d: the *legitimately*-empty condition is "no item has a start_date or
   // due_at" — checked against the raw field presence, not against whether anything actually
   // plots in this particular four-week window (a fully-dated backlog with nothing due in the
@@ -154,13 +248,23 @@ export default function WorkTimelineView({ items, weekStart, today, isFiltered }
   const todayIdx = dayIndex(weekStart, today);
   const totalWidth = WINDOW_DAYS * DAY_WIDTH;
 
-  const lanes = WORK_CATEGORIES.map(category => ({
-    category,
-    plotted: items
-      .filter(item => item.category === category)
-      .map(item => plot(item, weekStart))
-      .filter((p): p is Plotted => p !== null),
-  }));
+  // §16b/§16c (Task 39): My Work keeps the four fixed context lanes, form 4 (per-lane tint,
+  // untouched below); a single context regroups by that context's own id field instead, form 5
+  // (no per-lane tint — see `buildContextLanes` and the lane-stack edge on the wrapper below).
+  const lanes: Lane[] = context === 'all'
+    ? WORK_CATEGORIES.map(category => ({
+        category,
+        plotted: items
+          .filter(item => item.category === category)
+          .map(item => plot(item, weekStart))
+          .filter((p): p is Plotted => p !== null),
+      })).map(({ category, plotted }) => ({
+        key:   category,
+        label: CATEGORY_LABEL[category],
+        hue:   CATEGORY_HUE[category],
+        plotted,
+      }))
+    : buildContextLanes(items, context, weekStart);
 
   return (
     <div className="vb-timeline" style={{ overflowX: 'auto', paddingBottom: '4px' }}>
@@ -212,14 +316,17 @@ export default function WorkTimelineView({ items, weekStart, today, isFiltered }
           </div>
         )}
 
-        {/* Lanes — one per category, fixed order. */}
-        <div>
-          {lanes.map(({ category, plotted }) => (
+        {/* Lanes. Under My Work: one per fixed context, each carrying its own tint (form 4).
+            Under a single context: one per group of that context (course/project/organization/
+            area) plus a trailing Unassigned lane when needed, none tinted — instead the one
+            active context's hue moves to this wrapper's own left edge (form 5, §16b/§16c). */}
+        <div style={context === 'all' ? undefined : { borderLeft: `2px solid ${CATEGORY_HUE[context]}` }}>
+          {lanes.map(({ key, label, hue, plotted }) => (
             <div
-              key={category}
+              key={key}
               style={{
                 position: 'relative', minHeight: '44px',
-                background: `${CATEGORY_HUE[category]}08`,
+                background: hue !== null ? `${hue}08` : undefined,
                 borderBottom: '1px solid rgba(200,210,230,0.25)',
               }}
             >
@@ -228,7 +335,7 @@ export default function WorkTimelineView({ items, weekStart, today, isFiltered }
                 fontFamily: DM_FONT, fontSize: '0.68rem', fontWeight: 800, color: '#8a94a6',
                 textTransform: 'uppercase', letterSpacing: '0.04em', pointerEvents: 'none',
               }}>
-                {CATEGORY_LABEL[category]}
+                {label}
               </span>
 
               {plotted.map(p => {
