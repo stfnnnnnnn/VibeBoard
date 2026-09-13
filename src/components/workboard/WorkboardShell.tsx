@@ -644,6 +644,12 @@ export default function WorkboardShell(
           .vb-context-nav {
             flex-wrap: nowrap;
             overflow-x: auto;
+            /* A specified overflow-y: visible computes to auto the moment overflow-x is auto
+               (CSS Overflow 3), so this row becomes a scroll container on both axes and clips
+               to its own padding box — including the active indicator's deliberate 1px
+               bottom overhang (it sits at bottom: -1px to straddle the group's border). The
+               1px bottom padding buys that pixel of box back without shifting the tabs. */
+            padding-bottom: 1px;
             scroll-snap-type: x proximity;
             -webkit-overflow-scrolling: touch;
           }

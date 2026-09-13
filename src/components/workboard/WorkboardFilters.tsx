@@ -213,7 +213,16 @@ const MARGIN = 8;
 const PHONE_MAX_WIDTH = 767;
 
 function useIsPhone(): boolean {
-  const [isPhone, setIsPhone] = useState(false);
+  // Lazy-seeded from the real viewport at construction time, unlike `WorkTableView`'s
+  // `useWidthTier` (desktop-seeded, corrected only after mount) — that file's seeding exists
+  // because it renders on the server, where `window` doesn't exist, and a mismatched first
+  // client paint would fight React's hydration. This panel never server-renders (it mounts
+  // only when a click opens it), so there is no SSR value to agree with and no reason to accept
+  // a guaranteed-wrong first guess: seeding eagerly removes a real flash of the desktop-anchored
+  // card before the phone sheet swaps in, which a passive effect's one-frame lag cannot avoid.
+  const [isPhone, setIsPhone] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(`(max-width: ${PHONE_MAX_WIDTH}px)`).matches,
+  );
   useEffect(() => {
     const phone = window.matchMedia(`(max-width: ${PHONE_MAX_WIDTH}px)`);
     const update = () => setIsPhone(phone.matches);

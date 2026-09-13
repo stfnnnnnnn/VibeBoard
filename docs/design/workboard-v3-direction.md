@@ -212,21 +212,25 @@ Shape-identical to §4's High pill, colour-different — the two sit on the same
 
 ### 17c. The three Table empty states
 
-The Table is the one view with three, because `isFiltered` alone cannot separate "this context has no work yet" — where offering the create button is right — from "the search matched nothing here" — where it is not. Resolved in this order *(shipped: `WorkTableView.tsx:589–651`)*:
+The Table is the one view with three, because `isFiltered` alone cannot separate "this context has no work yet" — where offering the create button is right — from "a search or filter matched nothing here" — where it is not. Resolved in this order *(shipped: `WorkTableView.tsx:589–651`)*:
 
 | # | Condition | Icon | Heading | Body | Action |
 |---|---|---|---|---|---|
 | 1 | Nothing at all (`!isFiltered`) | `CheckCircle2`, **56px**, `#74bcd9` | Nothing on your plate | Add your first work item to get started. | **New Work Item** (`.vb-btn-pink`) |
-| 2 | A search is running | `SearchX`, **48px**, `#9aa4b5` | No matching work items | Try a different category or search term. | none |
+| 2 | A search or a popover filter is narrowing | `SearchX`, **48px**, `#9aa4b5` | No matching work items | Try a different category, search term, or filter. | none |
 | 3 | Only the context tab is narrowing | `Table2`, **48px**, `#9aa4b5` | Nothing in *{Context}* yet | Work items you add under this context will appear here as rows. | **New Work Item** (`.vb-btn-pink`) |
 
 Shared anatomy *(shipped)*: `text-align: center`, `padding: 60px 20px`, icon `margin-bottom: 14px`, heading DM Sans `1.05rem`/700/`#2d3748` with `margin: 0 0 6px`, body Inter `0.85rem`/500/`#5c6b80`, button `width: auto; padding: 10px 22px`. The body's bottom margin is `18px` when a button follows and `0` when none does.
 
+**Task 40 widened state 2's condition** *(new)*: the Filters popover (Task 38) can narrow `visibleItems` to nothing with the search box empty and a specific context tab active — the exact shape state 3 was written to claim as "genuinely empty". `isSearching`'s computed value now covers both cases (`query.trim() !== '' || countActiveFilters(filters) > 0`), which is what state 2's condition actually reads; the row above states its real meaning rather than the narrower one that used to be true.
+
+**A known, accepted residual of that widening, not fully closed**: a *genuinely* empty context (zero items in it at all) combined with an active filter now also resolves to state 2, without the create button — even though creating an item is, in that specific case, still the correct fix state 3 would have offered. Closing this fully needs a third signal (an unfiltered per-context item count) that no current prop carries; the trade taken instead was to stop asserting something false ("Nothing in {Context} yet" over a context that actually has work, just filtered out) in favour of something merely less helpful while still true. Recorded here rather than left implicit, per this document's own citation discipline.
+
 Three rules the table encodes and a fourth surface must not break:
 
-- **The action button appears if and only if the fix is available from this view.** States 1 and 3 are fixed by creating an item, which this view can trigger. State 2 is fixed by changing a search box that lives in the shell, so it gets no button. This is §7's rule, applied.
+- **The action button appears if and only if the fix is available from this view.** States 1 and 3 are fixed by creating an item, which this view can trigger. State 2 is fixed by changing a search box or a popover filter, both of which live outside this empty state's own reach, so it gets no button. This is §7's rule, applied.
 - **Icon size tracks first-run-ness.** State 1 is the only genuine first-run state and gets `56px` in the accent blue; states 2 and 3 are routine and get `48px` in muted grey.
-- **Copy is shared with the other views, not written fresh.** State 1 and state 2 reproduce `WorkListView`'s and `WorkBoardView`'s strings verbatim — compare `WorkBoardView.tsx:399–405`, which is state 2 word for word. Only state 3 is new to the Table, because only the Table has a context-scoped empty case. A view that words the same condition differently teaches the user that the two views disagree.
+- **Copy is shared with the other views, not written fresh.** State 1 and state 2 reproduce `WorkListView`'s and `WorkBoardView`'s strings verbatim — compare `WorkBoardView.tsx:399–405`, which is state 2 word for word (kept in sync across all four views, Timeline included, when Task 40 widened the string). Only state 3 is new to the Table, because only the Table has a context-scoped empty case. A view that words the same condition differently teaches the user that the two views disagree.
 - **Body text is `#5c6b80`, never a lighter shade.** §8's narrow exception for `#8a94a6`/`#9aa4b5` covers decorative filler inside an obviously-empty container — Board's dashed column placeholder (§5b) qualifies; a centred sentence that is the only content on the screen does not. The icons may use `#9aa4b5`, being non-text decoration.
 
 ### 17d. Detail drawer panel

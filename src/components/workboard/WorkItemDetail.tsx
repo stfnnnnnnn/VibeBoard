@@ -915,6 +915,15 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
             border-left: none;
             border-top: 1px solid rgba(200,210,230,0.6);
           }
+          /* The shared focus-visible rule above forces border-radius: inherit, which resolves
+             to the backdrop's 0 (border-radius isn't naturally inherited, so that rule only ever
+             worked because the panel itself had no radius to lose). Re-asserted here at the same
+             .vb-detail-panel:focus-visible specificity so this later rule wins on source order:
+             without it, the sheet's rounded top corners square off for as long as the panel holds
+             focus (reachable via the delete-then-refocus-the-panel path). */
+          .vb-detail-panel:focus-visible {
+            border-radius: 18px 18px 0 0;
+          }
         }
       `}</style>
     </div>
