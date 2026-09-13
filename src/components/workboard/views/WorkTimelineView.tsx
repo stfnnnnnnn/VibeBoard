@@ -348,7 +348,7 @@ export default function WorkTimelineView({ items, weekStart, today, isFiltered, 
           <div
             aria-hidden
             style={{
-              position: 'absolute', top: `${HEADER_HEIGHT}px`, bottom: 0,
+              position: 'absolute', top: `${HEADER_HEIGHT}px`, bottom: 0, zIndex: 4,
               left: 0, width: '2px', background: CATEGORY_HUE[context], pointerEvents: 'none',
             }}
           />
