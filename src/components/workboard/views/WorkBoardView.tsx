@@ -401,7 +401,7 @@ export default function WorkBoardView({ items, context = 'all', todayStr, isFilt
           No matching work items
         </h2>
         <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: '#5c6b80', margin: 0 }}>
-          Try a different category or search term.
+          Try a different category, search term, or filter.
         </p>
       </div>
     );

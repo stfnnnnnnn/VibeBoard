@@ -495,9 +495,13 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
         tabIndex={-1}
         onKeyDown={handleKeyDown}
         className="vb-detail-panel"
+        // `width`, `height` and `border-left` are declared in the styled-jsx block below rather
+        // than here, because addendum §21's phone breakpoint overrides exactly those three and an
+        // inline declaration wins over a class selector in every media state. Everything else the
+        // panel needs is width-invariant and stays inline.
         style={{
-          width: 'min(420px, 100%)', height: '100%', overflowY: 'auto', boxSizing: 'border-box',
-          background: '#fbfbfd', borderLeft: '1px solid rgba(200,210,230,0.6)',
+          overflowY: 'auto', boxSizing: 'border-box',
+          background: '#fbfbfd',
           boxShadow: '-20px 0 60px rgba(31,38,68,0.28)', padding: '22px',
           display: 'flex', flexDirection: 'column', gap: '18px', fontFamily: FONT,
         }}
@@ -888,6 +892,29 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
         .vb-detail-link:hover {
           background: rgba(116,188,217,0.14);
           text-decoration: underline;
+        }
+        /* Addendum §21. Desktop and tablet are identical and unchanged: a full-height panel
+           anchored to the right edge at min(420px, 100%). */
+        .vb-detail-panel {
+          width: min(420px, 100%);
+          height: 100%;
+          border-left: 1px solid rgba(200,210,230,0.6);
+        }
+        /* Below 768px the side panel becomes a bottom sheet. align-self: flex-end is what docks
+           it to the bottom of the (full-height, align-items: stretch) backdrop instead of
+           stretching to fill it; it is settable from here precisely because it was never set
+           inline on the panel. The divider swaps edges with the geometry — the left edge is now
+           flush with the viewport and needs no rule, while the top edge is newly exposed against
+           the backdrop and takes one. */
+        @media (max-width: 767px) {
+          .vb-detail-panel {
+            width: 100%;
+            height: min(88vh, 100%);
+            align-self: flex-end;
+            border-radius: 18px 18px 0 0;
+            border-left: none;
+            border-top: 1px solid rgba(200,210,230,0.6);
+          }
         }
       `}</style>
     </div>

@@ -184,6 +184,57 @@ const PANEL_WIDTH = 292;
 const GAP = 6;
 const MARGIN = 8;
 
+/* ─── Phone breakpoint ─────────────────────────────────────────────────────────────────────
+ * Addendum §21 gives this popover two treatments, not three: anchored at `≥1024px`, "unchanged"
+ * at `768–1023px`, and a bottom sheet below `768px`. One boundary, so one boolean.
+ *
+ * **This has to be decided in JavaScript, unlike the context row and the detail drawer**, which
+ * §21 places at the same breakpoint and which this task moves into `@media` rules. Those two are
+ * laid out by normal flow, so a class rule can restyle them. This panel's position is pixel math:
+ * a layout effect measures the panel and the trigger and writes `left`/`top` as inline values. No
+ * media query can turn "anchored 6px under a button at x=871" into "pinned to the viewport
+ * bottom", because there is no CSS property holding the anchoring — the anchoring *is* the
+ * computed number. So the branch is on the render, and the measurement is skipped outright when
+ * there is nothing to anchor to.
+ *
+ * The query is `(max-width: 767px)` rather than the negation of a `(min-width: 768px)` query so
+ * that it is the exact complement of the `@media (max-width: 767px)` rules this task adds to
+ * `WorkboardShell` and `WorkItemDetail`: at a fractional viewport width between the two values
+ * (a zoomed desktop browser can produce one), negating a min-width query would put this panel in
+ * its phone form while the context row beside it was still in its tablet form.
+ *
+ * Shape otherwise copied from `WorkTableView`'s `useWidthTier`: state seeded with the desktop
+ * value so the server render and the first client paint agree — the effect only ever corrects it
+ * after mount — `update()` called once immediately, and the listener removed on unmount. Copied
+ * rather than imported for this module's usual reason (see `CONTEXT_ACCENT` above): a small
+ * private helper is duplicated into each file that needs it instead of creating an import edge
+ * between sibling view components. `useWidthTier` is not exported in any case.
+ */
+const PHONE_MAX_WIDTH = 767;
+
+function useIsPhone(): boolean {
+  const [isPhone, setIsPhone] = useState(false);
+  useEffect(() => {
+    const phone = window.matchMedia(`(max-width: ${PHONE_MAX_WIDTH}px)`);
+    const update = () => setIsPhone(phone.matches);
+    update();
+    phone.addEventListener('change', update);
+    return () => phone.removeEventListener('change', update);
+  }, []);
+  return isPhone;
+}
+
+/** Everything the panel looks like at *every* width, factored out so the two position shapes
+ *  below differ only by the properties that actually differ. `position: fixed` is in here rather
+ *  than in either branch because both shapes are fixed — one to a measured point, one to the
+ *  viewport's bottom edge. */
+const PANEL_SURFACE: React.CSSProperties = {
+  position: 'fixed', zIndex: 40, boxSizing: 'border-box',
+  background: '#fff', boxShadow: '0 8px 24px rgba(31,38,68,0.18)', padding: '12px',
+  display: 'flex', flexDirection: 'column', gap: '12px',
+  textAlign: 'left', fontFamily: FONT,
+};
+
 /* ─── The project listbox ──────────────────────────────────────────────────────────────── */
 
 /** One rendered section of the project list. Under a single context there is exactly one section
@@ -334,6 +385,13 @@ interface PanelProps {
  * because this trigger sits at the right end of the toolbar where a left-aligned 292px panel
  * would immediately hit the clamp and detach from its own trigger. The clamp is still applied
  * afterwards, so a narrow viewport behaves exactly as it does for the deadline popover.
+ *
+ * All of the above describes the panel at `≥768px`. Below that, addendum §21 makes it a bottom
+ * sheet: the anchoring is skipped rather than clamped, and the panel takes the detail drawer's
+ * phone metrics. See `useIsPhone` for why that branch is in JavaScript while the drawer's and the
+ * context row's are `@media` rules, and `panelStyle` for the two shapes. Open/close mechanics —
+ * Escape, outside click, scroll and resize dismissal, focus in and focus back — are untouched by
+ * the branch and identical in both.
  */
 function FiltersPanel({ filters, onChange, context, projects, anchor, onClose }: PanelProps) {
   const ids       = useId();
@@ -348,9 +406,16 @@ function FiltersPanel({ filters, onChange, context, projects, anchor, onClose }:
   const firstRef  = useRef<HTMLSelectElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
+  const isPhone = useIsPhone();
+
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
   useLayoutEffect(() => {
+    // Phone renders a bottom sheet, whose position is four fixed edge values and no arithmetic.
+    // Returning before the measurement is what keeps `pos` out of that branch entirely: the phone
+    // style below reads none of it, and this effect writes none of it. Neither half can end up
+    // half-applied, which is the failure mode a shared `pos` between the two shapes would invite.
+    if (isPhone) return;
     const el = panelRef.current;
     if (!el) return;
     const { width, height } = el.getBoundingClientRect();
@@ -365,7 +430,7 @@ function FiltersPanel({ filters, onChange, context, projects, anchor, onClose }:
       top = above >= MARGIN ? above : Math.max(MARGIN, window.innerHeight - MARGIN - height);
     }
     setPos({ left, top });
-  }, [anchor]);
+  }, [anchor, isPhone]);
 
   // Opening moves focus into the panel; the trigger's own Escape/Done handling moves it back.
   // `opacity: 0` rather than `visibility: hidden` for the pre-measurement frame precisely so
@@ -452,6 +517,59 @@ function FiltersPanel({ filters, onChange, context, projects, anchor, onClose }:
   // across group boundaries, and "All projects" already occupies 0.
   let flat = 0;
 
+  /**
+   * Addendum §21's two shapes for this surface, and the `isPhone` ternary is the only thing that
+   * chooses between them — there is no width at which a property from one leaks into the other.
+   *
+   * **Non-phone** is byte-for-byte what shipped: the measured `left`/`top` with the pre-measured
+   * fallback, the `opacity`/`pointerEvents` guard that hides the panel for the one frame before
+   * the layout effect runs, and the 292px rounded card.
+   *
+   * **Phone** is the drawer's bottom sheet, sharing its phone metrics (`width: 100%`,
+   * `height: min(88vh, 100%)`, `border-radius: 18px 18px 0 0`). Three decisions inside that are
+   * this control's rather than §21's, since §21 says only "sharing the drawer's phone metrics":
+   *
+   * 1. **Border on the top edge only.** Bottom-anchored and full-width leaves three of the four
+   *    edges flush with the viewport, where a border draws a line against nothing; the top edge
+   *    is the one newly exposed against the page behind it and is the one that needs the rule.
+   *    Exactly the swap the drawer makes (`border-left: none` + `border-top`), applied to this
+   *    sheet's own geometry.
+   * 2. **No `opacity`/`pointerEvents` guard.** That guard exists to hide the panel until `pos` is
+   *    measured, and this branch has no measurement to wait for — carrying it over would read
+   *    `pos`, which stays `null` here forever, and leave the sheet permanently invisible and
+   *    click-through. This is the specific way the two branches could have been wired into each
+   *    other, and it is why the effect's early return and this omission are a pair.
+   * 3. **`overflow-y: auto`.** The panel is content-height everywhere else, but this branch gives
+   *    it a fixed `88vh`; on a short viewport the footer buttons would otherwise fall outside a
+   *    box with no way to scroll to them. The drawer carries the same property for the same
+   *    reason. The panel is inside `containerRef`, so the trigger's capture-phase scroll-dismiss
+   *    already ignores scrolls that originate in here, exactly as it does for the project listbox.
+   *
+   * Everything else — ground, shadow, padding, gap, type — is `PANEL_SURFACE`, unchanged. This is
+   * a repositioning, not a restyle: the shadow stays the downward `0 8px 24px` it has always been
+   * rather than being flipped upward for the sheet, because the new top border is what separates
+   * the sheet from the page and §21 asks for no shadow change.
+   */
+  const panelStyle: React.CSSProperties = isPhone
+    ? {
+        ...PANEL_SURFACE,
+        left: 0, right: 0, bottom: 0,
+        width: '100%', height: 'min(88vh, 100%)', overflowY: 'auto',
+        borderRadius: '18px 18px 0 0',
+        borderTop: '1px solid rgba(200,210,230,0.6)',
+      }
+    : {
+        ...PANEL_SURFACE,
+        left: pos?.left ?? Math.max(MARGIN, anchor.right - PANEL_WIDTH),
+        top:  pos?.top  ?? anchor.bottom + GAP,
+        // Hidden until measured, but still focusable — see the focus effect above.
+        opacity: pos === null ? 0 : 1,
+        pointerEvents: pos === null ? 'none' : 'auto',
+        width: `${PANEL_WIDTH}px`,
+        borderRadius: '12px',
+        border: '1px solid rgba(200,210,230,0.6)',
+      };
+
   return (
     <div
       ref={panelRef}
@@ -464,19 +582,7 @@ function FiltersPanel({ filters, onChange, context, projects, anchor, onClose }:
         // also acts on the key.
         if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); }
       }}
-      style={{
-        position: 'fixed',
-        left: pos?.left ?? Math.max(MARGIN, anchor.right - PANEL_WIDTH),
-        top:  pos?.top  ?? anchor.bottom + GAP,
-        // Hidden until measured, but still focusable — see the focus effect above.
-        opacity: pos === null ? 0 : 1,
-        pointerEvents: pos === null ? 'none' : 'auto',
-        zIndex: 40, width: `${PANEL_WIDTH}px`, boxSizing: 'border-box',
-        background: '#fff', borderRadius: '12px', border: '1px solid rgba(200,210,230,0.6)',
-        boxShadow: '0 8px 24px rgba(31,38,68,0.18)', padding: '12px',
-        display: 'flex', flexDirection: 'column', gap: '12px',
-        textAlign: 'left', fontFamily: FONT,
-      }}
+      style={panelStyle}
     >
       {/* Status — the context's own stage vocabulary, or My Work's normalised three. */}
       <div>

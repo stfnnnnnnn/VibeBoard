@@ -230,13 +230,27 @@ export default function WorkboardShell(
    *  field-by-field comparison against `EMPTY_FILTERS`, so the two places that ask "is anything
    *  filtered?" — this and the trigger's badge — can never disagree. */
   const isFiltered = category !== 'all' || query.trim() !== '' || countActiveFilters(filters) > 0;
-  /** The narrower half of `isFiltered`, and deliberately *not* widened alongside it: it exists
-   *  only to separate the Table's search-specific empty state from its context-specific one, and
-   *  a popover filter is neither. The Table has three empty states rather than two, and
-   *  `isFiltered` alone cannot separate "this context has no work yet" (where offering the
-   *  create button is right) from "the search matched nothing in this context" (where it is
-   *  not), because it is true for every non-My-Work tab regardless of the search box. */
-  const isSearching = query.trim() !== '';
+  /** The narrower half of `isFiltered`: **everything narrowing the view except the context tab
+   *  itself** — today the search box or the Filters popover. The Table has three empty states
+   *  rather than two, and `isFiltered` alone cannot separate "this context has no work yet"
+   *  (where offering the create button is right) from "what you asked for matched nothing in this
+   *  context" (where it is not), because it is true for every non-My-Work tab regardless of what
+   *  else is set.
+   *
+   *  **Widened by Task 40 to include the popover**, which Task 38 left out. The name says "search"
+   *  but the question it has always answered is "is some narrowing *other than the tab* running,
+   *  so that the honest empty state is 'no matches' rather than 'nothing here yet'?" — and a
+   *  popover filter that excludes every row in a context answers yes exactly as a search term
+   *  does. Left un-widened, an Academic tab plus a priority filter matching nothing rendered
+   *  "Nothing in Academic yet" over a context that is not empty, under a New Work Item button
+   *  that would not have fixed what the user was looking at (direction doc §5e grants an action
+   *  button only where the fix is available from that view).
+   *
+   *  Deliberately *not* merged into `isFiltered`: the two are different questions. `isFiltered`
+   *  asks "is anything narrowing at all" (tab included) and gates the empty-state wording in
+   *  every view; this asks "is anything *but the tab* narrowing" and exists for the Table's third
+   *  state alone. */
+  const isSearching = query.trim() !== '' || countActiveFilters(filters) > 0;
 
   /** The Overdue card's subtitle wants "oldest from <date>" (direction doc §6's example).
    *  Derived from the whole-board `work.items` (never `visibleItems`) so it never moves as
@@ -263,8 +277,9 @@ export default function WorkboardShell(
           the subtitle's own bottom margin lives on this row instead, so the context group's
           `align-self: flex-end` lands near the bottom of the title block's box — the subtitle's
           line-box, not its exact text baseline — rather than 22px below it.
-          `flex-wrap` here is only a graceful fallback for narrow viewports; addendum §21 assigns
-          the real 768–1023px wrap and the <768px scroll-strip treatment to Task 40. */}
+          `flex-wrap` on this outer row is what lets the context group drop to its own line once
+          it takes `width: 100%` below 1024px; that rule, and the <768px scroll strip, are in the
+          styled-jsx block at the bottom of this file (addendum §21). */}
       <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: '22px' }}>
         <div>
           <h1 className="gradient-text" style={{ fontSize: '2.2rem', fontWeight: 700, margin: '0 0 4px' }}>Workboard</h1>
@@ -291,8 +306,11 @@ export default function WorkboardShell(
             would read as a page divider rather than as this control's own baseline. For the same
             reason the row no longer carries a bottom margin of its own — inside a flex row, a
             bottom margin under `align-self: flex-end` would lift the underline off the baseline
-            it is supposed to share with the title block. */}
-        <div role="radiogroup" aria-label="Filter by context" style={{ alignSelf: 'flex-end', display: 'flex', gap: '4px', borderBottom: '1px solid rgba(200,210,230,0.35)', flexWrap: 'wrap' }}>
+            it is supposed to share with the title block. That `align-self`, the group's
+            `flex-wrap` and each tab's `padding` are declared in the styled-jsx block below rather
+            than inline, because §21's breakpoints override exactly those three (and only those
+            three) properties. */}
+        <div role="radiogroup" aria-label="Filter by context" className="vb-context-nav" style={{ display: 'flex', gap: '4px', borderBottom: '1px solid rgba(200,210,230,0.35)' }}>
           {CATEGORY_TABS.map(({ key, label }, idx) => {
             const active = category === key;
             return (
@@ -308,7 +326,7 @@ export default function WorkboardShell(
                 className="vb-category-tab"
                 style={{
                   position: 'relative', display: 'inline-flex', alignItems: 'center',
-                  minHeight: '40px', padding: '10px 16px', background: 'transparent', border: 'none',
+                  minHeight: '40px', background: 'transparent', border: 'none',
                   // §14b: DM Sans (the title block's face, now that this row is part of it) and an
                   // explicit `letter-spacing: 0`, so §1's 0.04em uppercase tracking can never be
                   // inherited onto these sentence-case labels. Weight stays 700 in both states.
@@ -589,6 +607,49 @@ export default function WorkboardShell(
           }
           .vb-view-switch-btn {
             padding: 8px 12px;
+          }
+        }
+        /* Addendum §21's context-navigation row. Every property below is in the stylesheet
+           rather than inline for one reason: a media query has to override it, and an inline
+           declaration beats a class selector in every media state. align-self, flex-wrap
+           and the tab padding therefore live here as base rules (identical to the values
+           they had inline) so the two breakpoints beneath them can actually take effect —
+           the discipline §21 spells out, and the bug that shipped Board's mobile snap-scroll
+           dead in v2. Properties that never change across widths stay inline, untouched. */
+        .vb-context-nav {
+          align-self: flex-end;
+          flex-wrap: wrap;
+        }
+        .vb-category-tab {
+          padding: 10px 16px;
+        }
+        /* 768–1023px: the row leaves the title's baseline and takes the full width on its own
+           line, at §21's 10px 12px floor. It never shrinks below that, never drops labels for
+           icons, and never collapses to a select element — unlike the view switcher above,
+           whose four icons are conventional where "Organization" has no guessable glyph (§21). */
+        @media (max-width: 1023px) {
+          .vb-context-nav {
+            align-self: stretch;
+            width: 100%;
+          }
+          .vb-category-tab {
+            padding: 10px 12px;
+          }
+        }
+        /* Below 768px: a horizontally scrolling snap strip. flex-shrink: 0 on the items is
+           load-bearing, not decorative — inside a nowrap overflow-x row a flex item will
+           still shrink to fit the viewport, squeezing the labels instead of producing the
+           scrollable strip this breakpoint exists to create. */
+        @media (max-width: 767px) {
+          .vb-context-nav {
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            scroll-snap-type: x proximity;
+            -webkit-overflow-scrolling: touch;
+          }
+          .vb-category-tab {
+            scroll-snap-align: start;
+            flex-shrink: 0;
           }
         }
       `}</style>

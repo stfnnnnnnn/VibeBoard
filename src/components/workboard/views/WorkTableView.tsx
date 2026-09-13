@@ -486,15 +486,18 @@ export interface WorkTableViewProps {
   context:     TableContext;
   /** "YYYY-MM-DD" — `work.generated_at`, so every row agrees with Focus on what "today" is. */
   todayStr:    string;
-  /** True when the shell's context tab *or* its search box is currently narrowing `items` —
-   *  the same signal `WorkListView`/`WorkBoardView` take, kept so the three views' prop shapes
-   *  stay recognisably the same. */
+  /** True when **anything** is currently narrowing `items` — the shell's context tab, its search
+   *  box, or the Filters popover (Task 38 added the last). The same signal
+   *  `WorkListView`/`WorkBoardView` take, kept so the three views' prop shapes stay recognisably
+   *  the same. */
   isFiltered?: boolean;
-  /** True when the search box specifically is narrowing `items`. This view needs the narrower
-   *  signal because it has three empty states, not two: `isFiltered` alone cannot tell "this
-   *  context has no work yet" (offer the create button) apart from "your search matched nothing
-   *  inside this context" (offering a create button there would be wrong advice), since
-   *  `isFiltered` is true for *any* non-My-Work tab. */
+  /** True when something **other than the context tab** is narrowing `items`: the search box or
+   *  the Filters popover. This view needs the narrower signal because it has three empty states,
+   *  not two: `isFiltered` alone cannot tell "this context has no work yet" (offer the create
+   *  button) apart from "what you asked for matched nothing inside this context" (offering a
+   *  create button there would be wrong advice), since `isFiltered` is true for *any* non-My-Work
+   *  tab. The name predates the popover; `WorkboardShell` is where the value is computed and says
+   *  why the popover now counts. */
   isSearching?: boolean;
   /** Re-pulls the whole work payload after an inline mutation, so the stats, the workload
    *  chart and every other view reconcile with what the Status cell just wrote. Tasks 21–24
@@ -587,13 +590,21 @@ export default function WorkTableView({
   };
 
   // Three distinct empty states, resolved in this order:
-  //   1. nothing is narrowing the view at all      -> the board itself is empty
-  //   2. a search is running                       -> nothing matched it
-  //   3. only the context tab is narrowing         -> that context has no work yet
-  // The `context === 'all'` disjunct in test 2 is unreachable at runtime (if `isFiltered` is
-  // true and `isSearching` is false, the tab must be a real context) but it is what narrows
-  // `context` from `TableContext` to `WorkContext` for case 3's `CONTEXT_LABELS` lookup, so the
-  // label cannot be indexed with `'all'`.
+  //   1. nothing is narrowing the view at all              -> the board itself is empty
+  //   2. a search or a popover filter is running           -> nothing matched it
+  //   3. only the context tab is narrowing                 -> that context has no work yet
+  //
+  // `isSearching` is the shell's "something other than the tab is narrowing" signal — the search
+  // box or the Filters popover (Task 40 widened it to the latter; before that, a popover filter
+  // emptying a real context fell through to case 3 and claimed the context itself was empty).
+  //
+  // The `context === 'all'` disjunct in test 2 stays unreachable at runtime, and now for a
+  // structural reason rather than a coincidental one: under My Work the category disjunct of
+  // `isFiltered` is false by definition, so the only ways `isFiltered` can be true there are the
+  // search box and the popover — both of which now set `isSearching`, which the same test already
+  // caught. So `context === 'all'` can never be the disjunct that decides this branch. It is kept
+  // because it is still load-bearing for types: it is what narrows `context` from `TableContext`
+  // to `WorkContext` so case 3's `CONTEXT_LABELS[context]` cannot be indexed with `'all'`.
   if (items.length === 0) {
     if (!isFiltered) {
       // Nothing at all. `WorkListView`'s copy, unchanged — this is the board-level statement
@@ -615,7 +626,12 @@ export default function WorkTableView({
     }
 
     if (isSearching || context === 'all') {
-      // Wording taken verbatim from `WorkListView`/`WorkBoardView`'s filtered empty state.
+      // Heading taken verbatim from `WorkListView`/`WorkBoardView`'s filtered empty state. The
+      // sentence beneath it names one more lever than theirs does: now that a popover filter can
+      // be the thing that emptied this view, advice that lists only the category and the search
+      // box would point the user at two controls neither of which is the one holding the rows
+      // back. Those two views' copy is unchanged here and carries the same omission — a separate
+      // one-line consistency fix, noted in this task's report rather than made from the Table.
       return (
         <div style={{ textAlign: 'center', padding: '60px 20px' }}>
           <SearchX size={48} color="#9aa4b5" style={{ marginBottom: '14px' }} />
@@ -623,7 +639,7 @@ export default function WorkTableView({
             No matching work items
           </h2>
           <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: '#5c6b80', margin: 0 }}>
-            Try a different category or search term.
+            Try a different category, search term, or filter.
           </p>
         </div>
       );
@@ -835,7 +851,13 @@ export default function WorkTableView({
       role="region"
       aria-label="Work items table"
       tabIndex={0}
-      style={{ maxHeight: '68vh', overflow: 'auto', borderRadius: '12px' }}
+      // `scroll-padding-top` per addendum §15d: tabbing between inline controls scrolls this
+      // container to bring the next one into view, and the sticky header would then sit on top of
+      // it — WCAG 2.2 AA *Focus Not Obscured (Minimum)* forbids persistent UI fully covering the
+      // focused control. The header is `2 + 27 + 2 = 31px` and §9's ring extends 4px past a
+      // control's box (2px outline at 2px offset), so 35px is the floor; 36px is used because it
+      // is 3 × 12, on this module's own spacing rhythm, rather than the bare floor plus one.
+      style={{ maxHeight: '68vh', overflow: 'auto', borderRadius: '12px', scrollPaddingTop: '36px' }}
     >
       <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: FONT }}>
         <caption
