@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, List, Table2, Columns3, GanttChart, Search } from 'lucide-react';
 import WorkListView from './views/WorkListView';
@@ -11,6 +11,12 @@ import WorkboardStats from './WorkboardStats';
 import WorkboardRail from './WorkboardRail';
 import WorkItemDialog, { type DialogTarget } from './WorkItemDialog';
 import WorkItemDetail from './WorkItemDetail';
+// Spec §23's Filters popover. `matchesFilters` is the pure predicate this shell composes into
+// `visibleItems` below — the popover owns the panel's UI, this file owns where the result is
+// applied, so all four views keep filtering through exactly one memo.
+import WorkboardFilters, {
+  EMPTY_FILTERS, countActiveFilters, matchesFilters, type FilterState,
+} from './WorkboardFilters';
 import type { WorkboardWeek } from '@/lib/workboard/aggregate';
 import type { WorkItem, ProjectSummary } from '@/lib/workboard/workItems';
 // `WORK_CATEGORIES`/`WorkCategory` come from `workCategories.ts`, not `workItems.ts` — the
@@ -116,6 +122,9 @@ export default function WorkboardShell(
   const [work, setWork] = useState<WorkPayload>(initialWork);
   const [category, setCategory] = useState<CategoryFilter>('all');
   const [query, setQuery] = useState('');
+  /** The Filters popover's state, owned here rather than inside the popover so `visibleItems`
+   *  can read it — the popover is the editor, this is the value every view filters by. */
+  const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
   const [dialogTarget, setDialogTarget] = useState<DialogTarget | null>(null);
   /** The item whose detail drawer is open, or null. Same shape and same lifetime as
    *  `dialogTarget` above — the drawer is the dialog's sibling, not a second kind of state. */
@@ -161,6 +170,31 @@ export default function WorkboardShell(
     }));
   };
 
+  /** Two of the five filters are only meaningful inside the context that was active when they
+   *  were chosen, so switching contexts clears exactly those two:
+   *
+   *  - `status` because its vocabulary *is* the context's. "Ready to Submit" is Academic's stage
+   *    and exists in no other context's list, so carrying it into Projects would leave a filter
+   *    that hides every item while naming a state that tab cannot show. My Work's normalised
+   *    three have the same problem in reverse.
+   *  - `projectId` because a project belongs to one context, so the chosen project is not in the
+   *    next tab's list — and an out-of-list selection is a filter the popover can no longer
+   *    display or unset.
+   *
+   *  Priority, the deadline range and overdue-only are context-independent facts about an item
+   *  and deliberately survive the switch: a user narrowing to overdue high-priority work across
+   *  contexts should not have to re-apply it on every tab.
+   *
+   *  The updater returns `current` unchanged when both fields are already empty, so the effect's
+   *  mount run (and every switch made with no filters set) bails out of re-rendering entirely. */
+  useEffect(() => {
+    setFilters(current =>
+      current.status === '' && current.projectId === ''
+        ? current
+        : { ...current, status: '', projectId: '' },
+    );
+  }, [category]);
+
   // Stats and the workload chart deliberately read `work.stats` / `work.workload` directly
   // (whole-board numbers, computed server-side) rather than being recomputed from
   // `visibleItems` here — the direction doc and Task 12's brief both require the four stat
@@ -169,14 +203,26 @@ export default function WorkboardShell(
     const q = query.trim().toLowerCase();
     return work.items.filter(item => {
       if (category !== 'all' && item.category !== category) return false;
+      // Spec §23 step 2: the popover's filters compose into *this* memo rather than into each
+      // view, so Focus, Table, Board and Timeline all narrow identically. `matchesFilters` is
+      // pure and returns true for `EMPTY_FILTERS` on every item, so a user who never opens the
+      // popover sees exactly the pre-Task-38 behaviour.
+      if (!matchesFilters(item, filters, category, work.generated_at)) return false;
       if (!q) return true;
       return item.title.toLowerCase().includes(q)
           || (item.chip_label ?? '').toLowerCase().includes(q);
     });
-  }, [work.items, category, query]);
+  }, [work.items, work.generated_at, category, query, filters]);
 
-  const isFiltered = category !== 'all' || query.trim() !== '';
-  /** The narrower half of `isFiltered`. The Table has three empty states rather than two, and
+  /** Widened by Task 38 to include the popover: `isFiltered` drives every view's empty-state
+   *  wording, and a board emptied by a priority filter must say "nothing matches your filter",
+   *  not "nothing on your plate" with a create button. `countActiveFilters` rather than a
+   *  field-by-field comparison against `EMPTY_FILTERS`, so the two places that ask "is anything
+   *  filtered?" — this and the trigger's badge — can never disagree. */
+  const isFiltered = category !== 'all' || query.trim() !== '' || countActiveFilters(filters) > 0;
+  /** The narrower half of `isFiltered`, and deliberately *not* widened alongside it: it exists
+   *  only to separate the Table's search-specific empty state from its context-specific one, and
+   *  a popover filter is neither. The Table has three empty states rather than two, and
    *  `isFiltered` alone cannot separate "this context has no work yet" (where offering the
    *  create button is right) from "the search matched nothing in this context" (where it is
    *  not), because it is true for every non-My-Work tab regardless of the search box. */
@@ -360,6 +406,21 @@ export default function WorkboardShell(
               }}
             />
           </div>
+
+          {/* Spec §23: a compact Filter control *beside* Search, never a permanently-expanded
+              form. Placed immediately after the search box because the two do the same job —
+              narrowing what the view below shows — and reading "Search … Filters" left to right
+              keeps the pair together at the toolbar's trailing edge, where the panel can anchor
+              to the trigger's right edge without crossing the New Work Item button.
+              `context={category}` is the same value `visibleItems` filters by, deliberately: the
+              popover's status vocabulary and its project grouping both have to describe the slice
+              the user is actually looking at. */}
+          <WorkboardFilters
+            filters={filters}
+            onChange={setFilters}
+            context={category}
+            projects={work.projects}
+          />
         </div>
       </div>
 
