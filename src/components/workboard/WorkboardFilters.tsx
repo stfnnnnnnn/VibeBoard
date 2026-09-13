@@ -232,6 +232,85 @@ function ContextCompactLabel({ context }: { context: WorkContext }) {
   );
 }
 
+interface ProjectOptionRowProps {
+  label:       string;
+  selected:    boolean;
+  /** Roving tabindex: 0 for the selected row, -1 for every other. */
+  tabIndex:    number;
+  /** The panel keeps one flat ref array for its arrow keys; this hands the element back to it. */
+  registerRef: (el: HTMLButtonElement | null) => void;
+  onSelect:    () => void;
+  onKeyDown:   (e: React.KeyboardEvent) => void;
+}
+
+/**
+ * One row of the project listbox — **a real component, not a helper function returning JSX**, and
+ * that distinction is the whole reason it exists.
+ *
+ * styled-jsx's SWC transform scopes the JSX that appears lexically inside the *same function* as
+ * the `<style jsx>` tag. When these buttons were built by an `optionRow(...)` arrow function
+ * declared beside the panel's `return`, they sat in a different function scope, so the compiler
+ * emitted `className: "vb-filters-option"` with no `jsx-<hash>` alongside it while every sibling
+ * control got one — and the panel's `.vb-filters-option:hover` / `:focus-visible` rules compiled
+ * to `.vb-filters-option.jsx-<hash>{…}`, a selector that could never match. The rows silently lost
+ * this module's `2px #2a7fa8` focus ring and their hover affordance.
+ *
+ * This is the same trap `WorkItemDetail.tsx`'s `WorkTitleButton` was extracted to escape, fixed
+ * the same way: the button now lives in a component that owns its own `<style jsx>` block, so the
+ * rules and the elements they target share one scope hash. Verified in the compiled SWC output,
+ * not assumed — see this task's report.
+ */
+function ProjectOptionRow({
+  label, selected, tabIndex, registerRef, onSelect, onKeyDown,
+}: ProjectOptionRowProps) {
+  return (
+    <>
+      <button
+        ref={registerRef}
+        type="button"
+        role="option"
+        aria-selected={selected}
+        tabIndex={tabIndex}
+        className="vb-filters-option"
+        onClick={onSelect}
+        onKeyDown={onKeyDown}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '6px', width: '100%',
+          boxSizing: 'border-box', minHeight: '28px', padding: '4px 8px',
+          borderRadius: '8px', border: 'none', textAlign: 'left',
+          background: selected ? 'rgba(37,111,146,0.12)' : 'transparent',
+          fontFamily: FONT, fontSize: '0.8rem',
+          fontWeight: selected ? 700 : 500,
+          color: selected ? '#1f5c7a' : '#2d3748',
+          cursor: 'pointer',
+        }}
+      >
+        <span style={{ flex: '0 0 13px', display: 'inline-flex', alignItems: 'center' }}>
+          {selected ? <Check size={13} aria-hidden /> : null}
+        </span>
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {label}
+        </span>
+      </button>
+
+      {/* Moved here from the panel's own block, which is the point of this component. Every row
+          renders the same declaration; styled-jsx keys its registry by the style's hash, so the
+          rule is injected once however many rows are on screen. */}
+      <style jsx>{`
+        /* §9's ring, on the darker blue — :focus-visible so a mouse click does not leave a ring
+           nobody asked for, while keyboard arrival through the listbox always does. */
+        .vb-filters-option:focus-visible {
+          outline: 2px solid #2a7fa8;
+          outline-offset: 2px;
+        }
+        .vb-filters-option:hover {
+          background: rgba(37,111,146,0.08);
+        }
+      `}</style>
+    </>
+  );
+}
+
 /* ─── The popover panel ────────────────────────────────────────────────────────────────── */
 
 interface AnchorRect { left: number; right: number; top: number; bottom: number }
@@ -326,6 +405,14 @@ function FiltersPanel({ filters, onChange, context, projects, anchor, onClose }:
 
   const selectedIndex = Math.max(0, optionValues.indexOf(filters.projectId));
 
+  /** Whether there is a single *real* project to choose in the current scope — the question the
+   *  section's empty state actually asks. Keyed on `groups` rather than on the raw `projects`
+   *  prop: under a specific context tab whose own list is empty (the live state today on three of
+   *  the four tabs), the prop is non-empty while this scope has nothing in it, and the check
+   *  would render a bordered, padded scroll box holding nothing but the ever-present "All
+   *  projects" row — which reads as stuck rather than as "there is nothing here". */
+  const hasProjects = groups.some(g => g.projects.length > 0);
+
   /** WAI-ARIA's listbox keyboard contract, with selection following focus — the same shape (and
    *  the same wrap-around Home/End behaviour) as the shell's own `handleRovingKeyDown`, which its
    *  context radiogroup and view tablist both use. Duplicated rather than exported from the shell
@@ -345,41 +432,21 @@ function FiltersPanel({ filters, onChange, context, projects, anchor, onClose }:
 
   const activeCount = countActiveFilters(filters);
 
-  /** Renders one option row. `flatIndex` is its position in `optionValues`, which is what the
-   *  roving tabindex and the arrow keys both index by. */
-  const optionRow = (value: number | '', label: string, flatIndex: number) => {
-    const selected = filters.projectId === value;
-    return (
-      <button
-        key={value === '' ? 'all' : value}
-        ref={el => { optionRefs.current[flatIndex] = el; }}
-        type="button"
-        role="option"
-        aria-selected={selected}
-        tabIndex={flatIndex === selectedIndex ? 0 : -1}
-        className="vb-filters-option"
-        onClick={() => set('projectId', value)}
-        onKeyDown={e => handleOptionKeyDown(e, flatIndex)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: '6px', width: '100%',
-          boxSizing: 'border-box', minHeight: '28px', padding: '4px 8px',
-          borderRadius: '8px', border: 'none', textAlign: 'left',
-          background: selected ? 'rgba(37,111,146,0.12)' : 'transparent',
-          fontFamily: FONT, fontSize: '0.8rem',
-          fontWeight: selected ? 700 : 500,
-          color: selected ? '#1f5c7a' : '#2d3748',
-          cursor: 'pointer',
-        }}
-      >
-        <span style={{ flex: '0 0 13px', display: 'inline-flex', alignItems: 'center' }}>
-          {selected ? <Check size={13} aria-hidden /> : null}
-        </span>
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {label}
-        </span>
-      </button>
-    );
-  };
+  /** Builds one option row. `flatIndex` is its position in `optionValues`, which is what the
+   *  roving tabindex and the arrow keys both index by. The row itself is a real component
+   *  (`ProjectOptionRow`) rather than JSX returned from here — see that component's comment; JSX
+   *  built inside this function would not be scoped by any `<style jsx>` block in this file. */
+  const optionRow = (value: number | '', label: string, flatIndex: number) => (
+    <ProjectOptionRow
+      key={value === '' ? 'all' : value}
+      label={label}
+      selected={filters.projectId === value}
+      tabIndex={flatIndex === selectedIndex ? 0 : -1}
+      registerRef={el => { optionRefs.current[flatIndex] = el; }}
+      onSelect={() => set('projectId', value)}
+      onKeyDown={e => handleOptionKeyDown(e, flatIndex)}
+    />
+  );
 
   // A running counter rather than an index computed per group: the flat index has to advance
   // across group boundaries, and "All projects" already occupies 0.
@@ -446,9 +513,14 @@ function FiltersPanel({ filters, onChange, context, projects, anchor, onClose }:
           label on these context rows, and a native `<optgroup>` cannot render a coloured dot. */}
       <div>
         <span id={projectLabelId} style={SECTION_LABEL}>Project</span>
-        {projects.length === 0 ? (
+        {!hasProjects ? (
+          // Naming the scope, because under a context tab "No projects yet" would contradict the
+          // project list the user can see on another tab. Hiding the listbox entirely also removes
+          // the lone "All projects" row, which is the correct loss: with nothing to narrow to,
+          // `projectId` is already '' (the shell clears it on every context change) and "Clear
+          // filters" remains the escape hatch for any state that outlives a payload refresh.
           <p style={{ margin: 0, fontSize: '0.76rem', fontWeight: 600, color: '#8a94a6' }}>
-            No projects yet.
+            {context === 'all' ? 'No projects yet.' : 'No projects in this context yet.'}
           </p>
         ) : (
           <div
@@ -572,8 +644,11 @@ function FiltersPanel({ filters, onChange, context, projects, anchor, onClose }:
           component gets its own styled-jsx scope hash, so the same rule written in the parent
           would compile cleanly and match nothing. The trap several tasks in this plan have hit. */}
       <style jsx>{`
+        /* The .vb-filters-option rules are deliberately NOT here: those buttons are rendered by
+           ProjectOptionRow, a different component with a different styled-jsx scope hash, so a
+           rule written here would compile to a selector matching none of them. They live in that
+           component instead. */
         .vb-filters-control:focus-visible,
-        .vb-filters-option:focus-visible,
         .vb-filters-btn:focus-visible,
         .vb-filters-listbox:focus-visible {
           outline: 2px solid #2a7fa8;
@@ -581,9 +656,6 @@ function FiltersPanel({ filters, onChange, context, projects, anchor, onClose }:
         }
         .vb-filters-control:hover:not(:disabled) {
           border-color: rgba(140,160,190,0.75);
-        }
-        .vb-filters-option:hover {
-          background: rgba(37,111,146,0.08);
         }
         .vb-filters-btn:hover:not(:disabled) {
           filter: brightness(0.97);

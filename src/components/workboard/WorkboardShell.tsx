@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, List, Table2, Columns3, GanttChart, Search } from 'lucide-react';
 import WorkListView from './views/WorkListView';
@@ -170,8 +170,9 @@ export default function WorkboardShell(
     }));
   };
 
-  /** Two of the five filters are only meaningful inside the context that was active when they
-   *  were chosen, so switching contexts clears exactly those two:
+  /** The only way the context tab should ever change. Two of the five filters are only meaningful
+   *  inside the context that was active when they were chosen, so switching contexts clears
+   *  exactly those two:
    *
    *  - `status` because its vocabulary *is* the context's. "Ready to Submit" is Academic's stage
    *    and exists in no other context's list, so carrying it into Projects would leave a filter
@@ -185,15 +186,24 @@ export default function WorkboardShell(
    *  and deliberately survive the switch: a user narrowing to overdue high-priority work across
    *  contexts should not have to re-apply it on every tab.
    *
-   *  The updater returns `current` unchanged when both fields are already empty, so the effect's
-   *  mount run (and every switch made with no filters set) bails out of re-rendering entirely. */
-  useEffect(() => {
+   *  **Both writes happen in the same event handler, deliberately, rather than in an effect that
+   *  reacts to `category` afterwards.** React batches the two `setState` calls into one render, so
+   *  the user sees exactly one frame: new context, filters already reset. Reacting after the fact
+   *  would paint an intermediate frame at the new context with the *old* status filter still
+   *  applied — and since a stage like `ready_to_submit` exists in no other context's vocabulary,
+   *  `visibleItems` would momentarily go empty and the view would flash its "nothing matches"
+   *  empty state before snapping back.
+   *
+   *  The updater returns `current` unchanged when both fields are already empty, so a switch made
+   *  with no filters set costs nothing. */
+  const selectCategory = (next: CategoryFilter) => {
+    setCategory(next);
     setFilters(current =>
       current.status === '' && current.projectId === ''
         ? current
         : { ...current, status: '', projectId: '' },
     );
-  }, [category]);
+  };
 
   // Stats and the workload chart deliberately read `work.stats` / `work.workload` directly
   // (whole-board numbers, computed server-side) rather than being recomputed from
@@ -293,8 +303,8 @@ export default function WorkboardShell(
                 role="radio"
                 aria-checked={active}
                 tabIndex={active ? 0 : -1}
-                onClick={() => setCategory(key)}
-                onKeyDown={e => handleRovingKeyDown(e, idx, CATEGORY_TABS.length, categoryTabRefs, next => setCategory(CATEGORY_TABS[next].key))}
+                onClick={() => selectCategory(key)}
+                onKeyDown={e => handleRovingKeyDown(e, idx, CATEGORY_TABS.length, categoryTabRefs, next => selectCategory(CATEGORY_TABS[next].key))}
                 className="vb-category-tab"
                 style={{
                   position: 'relative', display: 'inline-flex', alignItems: 'center',
