@@ -61,8 +61,11 @@ const NEUTRAL_CARD: React.CSSProperties = {
  * their own. The tinted ground is still correct at chip scale and below.
  *
  * So the surface is deliberately NEUTRAL_CARD's, inherited rather than restated so the two
- * cannot drift apart. `position` is the only real difference: the alert state is the only one
- * that renders the absolutely-positioned edge stripe, which needs a positioned ancestor.
+ * cannot drift apart. `position: 'relative'` is the only real difference, kept as an explicit
+ * anchor for the absolutely-positioned edge stripe below — NEUTRAL_CARD's own `backdropFilter`
+ * already forms a containing block for it incidentally, but that's a side effect of a visual
+ * property, not a guarantee; stating `position` here means the anchor survives even if
+ * `backdropFilter` is ever dropped (a perf pass, an `@supports not (backdrop-filter)` fallback).
  */
 const ALERT_CARD: React.CSSProperties = {
   ...NEUTRAL_CARD,

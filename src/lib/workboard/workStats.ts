@@ -33,7 +33,7 @@ export function groupByTimeframe(items: WorkItem[], todayStr: string): Timeframe
 
 export interface WorkStats {
   active_count:              number;
-  /** Not-done items whose normalised status is specifically `in_progress` — a strict subset of
+  /** Not-done items whose normalised status is specifically `in_progress` — a subset of
    *  `active_count` (which is todo + in_progress). Backs the Active card's v3 sub-line,
    *  "N currently in progress" (spec §22). */
   in_progress_count:         number;

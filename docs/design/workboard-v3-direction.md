@@ -264,7 +264,7 @@ Title typography: DM Sans `1.05rem`/800/`#2d3748`, `line-height: 1.3`, `overflow
 
 **Overdue, `count === 0`:** unchanged from §6 — identical to its three siblings in every respect, subtitle "All caught up". The sameness at zero is still what makes the non-zero state register as a change.
 
-**The edge stays `3px #e0607c` and is not thickened to compensate.** §6 chose that width and colour specifically to match §4's priority-edge vocabulary, "so a viewer who has already learned that pink-red edge means high/urgent reads the same color here without re-learning it." A `4px` edge would buy back a little of the lost weight at the cost of introducing a second edge width into a system that has exactly one. The four remaining signals are sufficient without it.
+**The edge stays `3px #e0607c` and is not thickened to compensate.** §6 chose that width and colour specifically to match §4's priority-edge vocabulary, "so a viewer who has already learned that pink-red edge means high/urgent reads the same color here without re-learning it." A `4px` edge would buy back a little of the lost weight at the cost of introducing a second edge width into a system that has exactly one. The five remaining signals are sufficient without it.
 
 **The rule this generalises to, so the question does not have to be re-answered per surface** *(new)*:
 
