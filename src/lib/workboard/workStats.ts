@@ -33,6 +33,10 @@ export function groupByTimeframe(items: WorkItem[], todayStr: string): Timeframe
 
 export interface WorkStats {
   active_count:              number;
+  /** Not-done items whose normalised status is specifically `in_progress` — a strict subset of
+   *  `active_count` (which is todo + in_progress). Backs the Active card's v3 sub-line,
+   *  "N currently in progress" (spec §22). */
+  in_progress_count:         number;
   /** Net change over the trailing 7 days: created minus completed. This is what the schema
    *  can honestly answer — a true "active count as of last week" isn't reconstructable
    *  without history we don't keep, so it is not claimed. */
@@ -49,7 +53,7 @@ export function computeStats(items: WorkItem[], todayStr: string, weekStart: str
   const weekEnd     = addDays(weekStart, 6);
   const weekAgo     = addDays(todayStr, -7);
 
-  let active = 0, dueSoon = 0, overdue = 0;
+  let active = 0, inProgress = 0, dueSoon = 0, overdue = 0;
   let hours = 0, counted = 0, missing = 0;
   let completed7d = 0;
 
@@ -59,6 +63,7 @@ export function computeStats(items: WorkItem[], todayStr: string, weekStart: str
 
     if (!done) {
       active++;
+      if (item.work_status === 'in_progress') inProgress++;
       if (due !== null) {
         if (due < todayStr) overdue++;
         else if (due <= soonHorizon) dueSoon++;
@@ -74,10 +79,14 @@ export function computeStats(items: WorkItem[], todayStr: string, weekStart: str
 
   // `WorkItem` deliberately carries no `created_at` field, so creations cannot be counted from
   // this data alone. Only completions are countable, making the delta always ≤ 0.
-  // The UI will render this as "N completed in the last 7 days" using completed7d's contribution.
+  // No longer surfaced on the Active card: spec §22 replaced that sub-line with
+  // `in_progress_count`, which describes the number above it. The value is still computed and
+  // exported — it is an honest independent figure, not dead by intent — but nothing reads it
+  // today, so a future task may retire it.
 
   return {
     active_count:              active,
+    in_progress_count:         inProgress,
     active_net_change_7d:      -completed7d,
     due_soon_count:            dueSoon,
     overdue_count:             overdue,

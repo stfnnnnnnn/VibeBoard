@@ -54,12 +54,18 @@ const NEUTRAL_CARD: React.CSSProperties = {
   boxSizing: 'border-box',
 };
 
-/** §6's Overdue-alert treatment: five co-occurring, non-animated changes (background,
- *  border, numeral color, icon, edge) rather than a color swap alone. */
+/**
+ * §18's restrained Overdue treatment. §6 tinted the whole card's background and border; §18
+ * reverts both to neutral — at card scale a filled red ground dominates the header, and the
+ * five remaining co-occurring signals (edge, icon, label, numeral, subtitle) are enough on
+ * their own. The tinted ground is still correct at chip scale and below.
+ *
+ * So the surface is deliberately NEUTRAL_CARD's, inherited rather than restated so the two
+ * cannot drift apart. `position` is the only real difference: the alert state is the only one
+ * that renders the absolutely-positioned edge stripe, which needs a positioned ancestor.
+ */
 const ALERT_CARD: React.CSSProperties = {
   ...NEUTRAL_CARD,
-  background: 'rgba(224,96,124,0.14)',
-  border: '1px solid rgba(224,96,124,0.35)',
   position: 'relative',
 };
 
@@ -179,12 +185,11 @@ export interface WorkboardStatsProps {
 
 export default function WorkboardStats({ stats, oldestOverdueDue }: WorkboardStatsProps) {
   const {
-    active_count, active_net_change_7d, due_soon_count, overdue_count,
+    active_count, in_progress_count, due_soon_count, overdue_count,
     estimated_hours_this_week, estimated_items_counted, estimated_items_missing,
   } = stats;
 
   const overdueAlert = overdue_count > 0;
-  const completed7d = Math.max(0, -active_net_change_7d);
 
   const estimatedItemsTotal = estimated_items_counted + estimated_items_missing;
   const estimateSubtitle = estimatedItemsTotal === 0
@@ -202,7 +207,10 @@ export default function WorkboardStats({ stats, oldestOverdueDue }: WorkboardSta
       <Card>
         <Label>Active</Label>
         <Numeral>{active_count}</Numeral>
-        <Subtitle>{completed7d} completed in the last 7 days</Subtitle>
+        {/* §22: the sub-line describes the number above it — a subset of Active — rather than
+            stacking an unrelated completion count beside it. No plural form to switch on:
+            "currently in progress" reads the same for 1 as for N. */}
+        <Subtitle>{in_progress_count} currently in progress</Subtitle>
       </Card>
 
       <Card>
