@@ -147,6 +147,24 @@ function plot(item: WorkItem, weekStart: string): Plotted | null {
 type Lane = { key: string; label: string; hue: string | null; plotted: Plotted[] };
 
 /**
+ * Alphabetical by label, EXCEPT a lane whose label is the empty-string fallback (`groupOf`'s
+ * `?? ''`, taken when a group's id is present but its display-label field is somehow blank —
+ * unreachable today since `course_code`/`project_name`/`organization_name` are all NOT NULL
+ * with FK constraints, but defensive against a future schema loosening that) sorts LAST among
+ * the real groups instead of first. Plain `localeCompare` would put `''` ahead of every real
+ * label, opening the list with a blank-looking lane — the same mistake `WorkTableView.tsx`'s
+ * `compareText`/`textOf` already guards against for an absent text column, applied here to the
+ * same kind of "nothing to show" value.
+ */
+function compareLaneLabel(a: Lane, b: Lane): number {
+  if (a.label === '' || b.label === '') {
+    if (a.label === b.label) return 0;
+    return a.label === '' ? 1 : -1;
+  }
+  return a.label.localeCompare(b.label);
+}
+
+/**
  * `context !== 'all'` lane grouping (§16b/§16c, Task 39): one lane per distinct real group
  * (grouped and keyed by id, never by label, so two same-named groups are never merged),
  * labelled with that group's display label and sorted alphabetically by it — the only
@@ -180,7 +198,7 @@ function buildContextLanes(items: WorkItem[], context: WorkContext, weekStart: s
 
   const lanes = Array.from(groups.entries())
     .map(([id, { label, items: laneItems }]) => toLane(String(id), label, laneItems))
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .sort(compareLaneLabel);
 
   if (unassigned.length > 0) {
     lanes.push(toLane('unassigned', 'Unassigned', unassigned));
@@ -316,11 +334,31 @@ export default function WorkTimelineView({ items, weekStart, today, isFiltered, 
           </div>
         )}
 
+        {/* The lane-stack edge (form 5, §16b/§16c): the active context's hue as a 2px line,
+            painted as its own absolutely-positioned overlay — the exact pattern the today-marker
+            above already uses — rather than a `border-left` on the lane-stack wrapper below.
+            A real border sits inside the wrapper's own box and would push every bar/marker's
+            `left: dayIndex * DAY_WIDTH` (computed relative to this same wrapper) 2px right of
+            its true day column, while the header row and the today-marker — siblings outside
+            the wrapper — would stay put: a 2px misalignment between the axis and every bar,
+            live only in this mode. An overlay paints without touching layout, so the wrapper
+            stays exactly as unstyled here as it is for My Work, and every bar/marker/today-line
+            keeps the same origin in both modes. */}
+        {context !== 'all' && (
+          <div
+            aria-hidden
+            style={{
+              position: 'absolute', top: `${HEADER_HEIGHT}px`, bottom: 0,
+              left: 0, width: '2px', background: CATEGORY_HUE[context], pointerEvents: 'none',
+            }}
+          />
+        )}
+
         {/* Lanes. Under My Work: one per fixed context, each carrying its own tint (form 4).
             Under a single context: one per group of that context (course/project/organization/
-            area) plus a trailing Unassigned lane when needed, none tinted — instead the one
-            active context's hue moves to this wrapper's own left edge (form 5, §16b/§16c). */}
-        <div style={context === 'all' ? undefined : { borderLeft: `2px solid ${CATEGORY_HUE[context]}` }}>
+            area) plus a trailing Unassigned lane when needed, none tinted — the active
+            context's hue is painted separately, above, as the lane-stack edge overlay. */}
+        <div>
           {lanes.map(({ key, label, hue, plotted }) => (
             <div
               key={key}
