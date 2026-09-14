@@ -20,6 +20,17 @@ export class AcademicItemNotFoundError extends Error {
   constructor() { super('That item was not found'); this.name = 'AcademicItemNotFoundError'; }
 }
 
+/** Thrown when a patch would write `activities`/`quizzes`/`exams`' own status, deadline, or
+ *  urgency column on a row that is already graded (`score`/`items`/`grade` all non-null) —
+ *  see `patchAcademicItem`'s guard for why ANY such write is unsafe on a graded row, not only
+ *  a status change. */
+export class AcademicItemGradedError extends Error {
+  constructor() {
+    super('This item has been graded in Study Pulse — its status, deadline, and priority can only be changed there.');
+    this.name = 'AcademicItemGradedError';
+  }
+}
+
 export interface AcademicPatch {
   work_status?:      WorkStatus;
   work_stage?:       WorkStage;
@@ -48,14 +59,19 @@ export async function patchAcademicItem(
   // Ownership: never trust the id in the URL — walk the entry back to this user's subjects.
   // The inner JOIN through `user_subjects` is the 404 gate and stays exactly as it was; the
   // LEFT JOIN to the overlay is additive and cannot admit a row the gate would reject.
-  // Two current values ride along with the ownership check:
+  // Values riding along with the ownership check:
   //   - `current_status`, so a patch that merely re-sends the dialog's seeded `work_status`
   //     (unchanged) doesn't re-stamp `accomplished_at` — see Finding 1 of the whole-branch
   //     review;
   //   - `current_stage`, so the same re-send can't flatten a finer stored stage — see
-  //     Fix 1 of the Task 10 review.
+  //     Fix 1 of the Task 10 review;
+  //   - `score`/`items`/`grade`, to detect a graded row before the guard below — see the
+  //     whole-branch review's Finding C-1. Selected unconditionally (not just for
+  //     `hasGradedTrigger` tables) so this one query stays a single shape for all four
+  //     sources; `grade_entries` rows simply never trip the guard that reads them.
   const [owns] = await pool.execute<RowDataPacket[]>(
-    `SELECT t.\`${spec.pk}\` AS id, t.status AS current_status, m.work_stage AS current_stage
+    `SELECT t.\`${spec.pk}\` AS id, t.status AS current_status, m.work_stage AS current_stage,
+            t.score AS current_score, t.items AS current_items, t.grade AS current_grade
        FROM \`${spec.table}\` t
        JOIN user_subjects us ON us.user_subject_id = t.user_subject_id
        LEFT JOIN workboard_entry_meta m
@@ -66,6 +82,8 @@ export async function patchAcademicItem(
   if (!owns.length) throw new AcademicItemNotFoundError();
   const currentStatus = owns[0].current_status as string;
   const currentStage  = owns[0].current_stage as string | null;
+  const isGraded =
+    owns[0].current_score !== null && owns[0].current_items !== null && owns[0].current_grade !== null;
 
   // A stage implies its status; a bare status (v2 callers) implies the matching stage —
   // 'todo', 'in_progress' and 'done' are all legal academic stage names, so the cast is
@@ -94,6 +112,21 @@ export async function patchAcademicItem(
       usableStoredStage === null ||
       normaliseStage(usableStoredStage) !== status
     );
+
+  // Whole-branch review Finding C-1: `activities`/`quizzes`/`exams` each carry a
+  // `BEFORE UPDATE` trigger that forces `status = 'Done'` the instant `score`/`items`/`grade`
+  // are all non-null — on ANY update to the row, not only one that touches `status`. A patch
+  // that only changes the deadline or the priority still fires it, silently marking a
+  // `Pending` graded row `Done` with no `accomplished_at` ever written, which drops it out of
+  // `getWorkItems`'s academic predicate. So this must gate the entry table UPDATE as a whole,
+  // not only the status branch below — `touchesEntryTable` is true whenever ANY of the three
+  // entry-table-affecting fields would produce a `SET` clause. Overlay-only fields
+  // (`deadline_time`/`estimated_hours`/`start_date`/`work_stage`) never reach this table at
+  // all (they write `workboard_entry_meta` instead) and are correctly unaffected by this guard.
+  const touchesEntryTable = statusChanging || patch.due_at !== undefined || patch.priority !== undefined;
+  if (spec.hasGradedTrigger && isGraded && touchesEntryTable) {
+    throw new AcademicItemGradedError();
+  }
 
   const conn = await pool.getConnection();
   try {

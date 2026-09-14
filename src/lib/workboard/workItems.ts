@@ -156,16 +156,24 @@ interface AcademicTableSpec {
   pk:       string;
   nameCol:  string;
   metaCol:  'activity_id' | 'quiz_id' | 'exam_id' | 'grade_entry_id';
+  /** `activities`/`quizzes`/`exams` each carry a `BEFORE UPDATE` trigger that forces
+   *  `status = 'Done'` the moment `score`/`items`/`grade` are all non-null, regardless of what
+   *  the UPDATE's own SET clause asked for — confirmed live via `information_schema.TRIGGERS`.
+   *  `grade_entries` has the identical `score`/`items`/`grade`/`status`/`accomplished_at`
+   *  columns but NO such trigger (same query, zero rows) — editing a graded `grade_entries` row
+   *  is genuinely safe. `patchAcademicItem` gates its graded-row guard on this flag so it
+   *  protects exactly the three tables that need it and never blocks the one that doesn't. */
+  hasGradedTrigger: boolean;
 }
 
 /** The four Study Pulse entry tables, their primary keys, their title columns, and the
  *  overlay column that points back at them. Every academic query in Workboard v2 walks
  *  this list rather than hardcoding table names at call sites. */
 export const ACADEMIC_TABLES: AcademicTableSpec[] = [
-  { source: 'activities',    table: 'activities',    pk: 'activity_id', nameCol: 'activity_name', metaCol: 'activity_id' },
-  { source: 'quizzes',       table: 'quizzes',       pk: 'quiz_id',     nameCol: 'quiz_name',     metaCol: 'quiz_id' },
-  { source: 'exams',         table: 'exams',         pk: 'exam_id',     nameCol: 'exam_name',     metaCol: 'exam_id' },
-  { source: 'grade_entries', table: 'grade_entries', pk: 'entry_id',    nameCol: 'name',          metaCol: 'grade_entry_id' },
+  { source: 'activities',    table: 'activities',    pk: 'activity_id', nameCol: 'activity_name', metaCol: 'activity_id',     hasGradedTrigger: true },
+  { source: 'quizzes',       table: 'quizzes',       pk: 'quiz_id',     nameCol: 'quiz_name',     metaCol: 'quiz_id',        hasGradedTrigger: true },
+  { source: 'exams',         table: 'exams',         pk: 'exam_id',     nameCol: 'exam_name',     metaCol: 'exam_id',        hasGradedTrigger: true },
+  { source: 'grade_entries', table: 'grade_entries', pk: 'entry_id',    nameCol: 'name',          metaCol: 'grade_entry_id', hasGradedTrigger: false },
 ];
 
 export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {

@@ -49,11 +49,32 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
 export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  const userId = parseInt(session.user.id);
   const { id } = await props.params;
+  const orgId = parseInt(id);
+
+  // `fk_project_org` is ON DELETE CASCADE, so an unguarded delete here silently destroys every
+  // project scoped to this organization, and each of THOSE projects' own work items then has
+  // `project_id` set to NULL by a second cascade (`workboard_work_items_ibfk_2`) — quietly
+  // reproducing the exact "Context = Projects with no project" shape Task 29 made unproducible
+  // through the dialog, for an arbitrary number of rows, with no explanation to the user whose
+  // item just lost its project. Refuse rather than let the FK graph do this implicitly; the user
+  // can reassign or delete the dependent projects first, the same way the dialog already forces
+  // them to pick a project rather than leaving one behind.
+  const [dependents] = await pool.execute<RowDataPacket[]>(
+    'SELECT COUNT(*) AS n FROM workboard_projects WHERE organization_id = ? AND user_id = ?',
+    [orgId, userId],
+  );
+  if ((dependents[0].n as number) > 0) {
+    return Response.json(
+      { error: 'This organization still has projects. Reassign or delete them first.' },
+      { status: 409 },
+    );
+  }
 
   const [res] = await pool.execute<ResultSetHeader>(
     'DELETE FROM workboard_organizations WHERE id = ? AND user_id = ?',
-    [parseInt(id), parseInt(session.user.id)],
+    [orgId, userId],
   );
   if (res.affectedRows === 0) return Response.json({ error: 'Not found' }, { status: 404 });
   return Response.json({ status: 'success' });

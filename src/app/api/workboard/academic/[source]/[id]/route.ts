@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import { ensureWorkboardV2Schema, ensureWorkboardV3Schema } from '@/lib/migrate';
 import { ACADEMIC_SOURCES, type AcademicSource } from '@/lib/workboard/workItems';
-import { patchAcademicItem, AcademicItemNotFoundError, type AcademicPatch } from '@/lib/workboard/academicWrites';
+import { patchAcademicItem, AcademicItemNotFoundError, AcademicItemGradedError, type AcademicPatch } from '@/lib/workboard/academicWrites';
 import { isStageLegal } from '@/lib/workboard/workContexts';
 import { TIME_PATTERN } from '@/lib/workboard/dates';
 
@@ -66,6 +66,9 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ source:
   } catch (err) {
     if (err instanceof AcademicItemNotFoundError) {
       return Response.json({ error: err.message }, { status: 404 });
+    }
+    if (err instanceof AcademicItemGradedError) {
+      return Response.json({ error: err.message }, { status: 409 });
     }
     throw err;
   }
