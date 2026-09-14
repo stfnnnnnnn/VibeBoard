@@ -346,6 +346,16 @@ Both improve for the same reason §16's four pairs did: the pink tint was fracti
 
 ---
 
+## §22. Page `<h1>` — a ratified drift from v2 §1
+
+Task 40's quality-gate audit found the shipped page title (`WorkboardShell.tsx`, `src/app/workboard/calendar/page.tsx`) is a fixed `2.2rem`/weight **700**, not v2 §1's specified `clamp(1.9rem, 4vw, 2.6rem)`/weight **800**. Neither v2 nor v3 ever recorded this deviation, and it predates this addendum entirely — it is not a decision either direction document made deliberately, just one that was never reconciled with the written spec.
+
+**Ratified here rather than changed in code.** The shipped value has been live, unremarked-on, and unreviewed-against-the-spec through all 40 tasks of this plan with no prior complaint; reverting it now would be an unreviewed visual change with no driving requirement, at the exact point this plan is closing. §11's "match `WorkboardWeekView`'s heading exactly" clause is also now moot on its own terms — that file no longer renders an `<h1>` at all, having moved to its own `/workboard/calendar` route in Task 36 — and the two page shells that remain (`WorkboardShell.tsx`, the calendar route) already match each other exactly, which is the consistency that actually matters today.
+
+**The value itself:** `2.2rem`, weight 700, unchanged from what has shipped since early in this plan. A future task that wants the responsive `clamp()` back, or wants to reconcile the weight against §1's 800-weight section headers, should treat this as a fresh design decision rather than a bug fix — the current value is not broken, only undocumented until now.
+
+---
+
 ## Summary for implementers
 
 If you read nothing else in this addendum:

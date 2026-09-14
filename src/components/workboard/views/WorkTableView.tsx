@@ -626,12 +626,10 @@ export default function WorkTableView({
     }
 
     if (isSearching || context === 'all') {
-      // Heading taken verbatim from `WorkListView`/`WorkBoardView`'s filtered empty state. The
-      // sentence beneath it names one more lever than theirs does: now that a popover filter can
-      // be the thing that emptied this view, advice that lists only the category and the search
-      // box would point the user at two controls neither of which is the one holding the rows
-      // back. Those two views' copy is unchanged here and carries the same omission — a separate
-      // one-line consistency fix, noted in this task's report rather than made from the Table.
+      // Heading and body copy shared verbatim with `WorkListView`, `WorkBoardView`, and
+      // `WorkTimelineView`'s identical filtered-empty state — all four were synced in the same
+      // Task 40 commit that widened this condition to also cover an active popover filter, per
+      // v3 §17c's rule that this exact string must never diverge between views.
       return (
         <div style={{ textAlign: 'center', padding: '60px 20px' }}>
           <SearchX size={48} color="#9aa4b5" style={{ marginBottom: '14px' }} />
