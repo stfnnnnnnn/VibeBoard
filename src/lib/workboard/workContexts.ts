@@ -115,3 +115,49 @@ export function validateProjectParent(
   }
   return null;
 }
+
+/**
+ * Whole-branch review Finding I-2, gap 1: a work item's context implies which parent field
+ * is required, and this has only ever been enforced client-side (`WorkItemDialog.tsx`) —
+ * "the server is the weak half of this seam", flagged at Tasks 26/28/29 and never closed.
+ * Deliberately narrow: this closes only the one unambiguous requirement those tasks already
+ * established (academic needs a course), not the broader "which fields are legal for which
+ * context" question (e.g. whether life should forbid a project) — that is less settled
+ * (Task 28's own ruling: an organization item's own organization can legitimately be absent)
+ * and risks rejecting a real save if guessed at rather than derived from shipped behavior.
+ */
+export function validateWorkItemCategoryParent(
+  category: string,
+  userSubjectId: number | null | undefined,
+): string | null {
+  if (category === 'academic' && !userSubjectId) {
+    return 'An academic work item requires a course';
+  }
+  return null;
+}
+
+/**
+ * Whole-branch review Finding I-2, gap 2: a work item's own `organization_id`/
+ * `user_subject_id` and its linked project's own must agree when the item independently
+ * sets one — the review's concrete example is `organization_id = 5` beside a `project_id`
+ * whose own `organization_id` is `7`. The legitimate client flow (`WorkItemDialog.tsx`'s
+ * Academic/Organization project pickers, Tasks 26/28) only ever offers a project already
+ * scoped to the chosen course/organization, so a real save never disagrees; this exists for
+ * a caller that bypasses the dialog. Skipped entirely when the item doesn't independently
+ * set the field being cross-checked — this is not a requirement that the item redundantly
+ * restate the project's own parent, only that it not contradict it.
+ */
+export function validateWorkItemProjectConsistency(
+  itemUserSubjectId:     number | null | undefined,
+  itemOrganizationId:    number | null | undefined,
+  projectUserSubjectId:  number | null,
+  projectOrganizationId: number | null,
+): string | null {
+  if (itemUserSubjectId != null && itemUserSubjectId !== projectUserSubjectId) {
+    return "This item's course does not match its project's course";
+  }
+  if (itemOrganizationId != null && itemOrganizationId !== projectOrganizationId) {
+    return "This item's organization does not match its project's organization";
+  }
+  return null;
+}

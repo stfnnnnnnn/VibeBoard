@@ -6,7 +6,11 @@ import { ensureWorkboardV3Schema } from '@/lib/migrate';
 import { WORK_CATEGORIES } from '@/lib/workboard/workItems';
 import { manilaNowDatetime, normaliseDeadlineTime, TIME_PATTERN } from '@/lib/workboard/dates';
 import { checkReferences } from '@/lib/workboard/ownership';
-import { LIFE_AREAS, isStageLegal, normaliseStage, type WorkContext } from '@/lib/workboard/workContexts';
+import {
+  LIFE_AREAS, isStageLegal, normaliseStage,
+  validateWorkItemCategoryParent, validateWorkItemProjectConsistency,
+  type WorkContext,
+} from '@/lib/workboard/workContexts';
 
 // `work_status`, `work_stage`, `deadline_time` and `life_area` are deliberately absent:
 // each is written by a dedicated block below, so no column can ever collect two `= ?`
@@ -27,7 +31,8 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
 
   const [owns] = await pool.execute<RowDataPacket[]>(
     `SELECT id, work_status AS current_status, work_stage AS current_stage,
-            category AS current_category
+            category AS current_category, project_id AS current_project_id,
+            user_subject_id AS current_user_subject_id, organization_id AS current_organization_id
        FROM workboard_work_items WHERE id = ? AND user_id = ?`, [itemId, userId],
   );
   if (!owns.length) return Response.json({ error: 'Not found' }, { status: 404 });
@@ -80,6 +85,34 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     organizationId: 'organization_id' in body ? body.organization_id : undefined,
   });
   if (refError) return Response.json({ error: refError }, { status: 400 });
+
+  // Whole-branch review Finding I-2: `checkReferences` above only confirms each id belongs
+  // to this user independently — it never checks the ids are mutually consistent. Validated
+  // against the MERGED state (this field's incoming value if the body sent one, else the
+  // row's current value), exactly `projects/[id]/route.ts`'s already-reviewed pattern — a
+  // PATCH that only changes an unrelated field must not be rejected over a field it never
+  // touched, and a PATCH that changes `category` without also supplying the now-required
+  // parent field must correctly be caught.
+  const mergedProjectId      = 'project_id' in body ? body.project_id : owns[0].current_project_id;
+  const mergedUserSubjectId  = 'user_subject_id' in body ? body.user_subject_id : owns[0].current_user_subject_id;
+  const mergedOrganizationId = 'organization_id' in body ? body.organization_id : owns[0].current_organization_id;
+
+  const categoryParentError = validateWorkItemCategoryParent(nextContext, mergedUserSubjectId);
+  if (categoryParentError) return Response.json({ error: categoryParentError }, { status: 400 });
+
+  if (mergedProjectId != null) {
+    const [projectRows] = await pool.execute<RowDataPacket[]>(
+      'SELECT user_subject_id, organization_id FROM workboard_projects WHERE id = ? AND user_id = ?',
+      [mergedProjectId, userId],
+    );
+    if (projectRows.length) {
+      const consistencyError = validateWorkItemProjectConsistency(
+        mergedUserSubjectId, mergedOrganizationId,
+        projectRows[0].user_subject_id, projectRows[0].organization_id,
+      );
+      if (consistencyError) return Response.json({ error: consistencyError }, { status: 400 });
+    }
+  }
 
   const sets: string[] = [];
   const values: (string | number | null)[] = [];

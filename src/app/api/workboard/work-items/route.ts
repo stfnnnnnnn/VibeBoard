@@ -1,12 +1,16 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import pool from '@/lib/db';
-import type { ResultSetHeader } from 'mysql2';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { ensureWorkboardV2Schema, ensureWorkboardV3Schema } from '@/lib/migrate';
 import { WORK_CATEGORIES } from '@/lib/workboard/workItems';
 import { manilaNowDatetime, normaliseDeadlineTime, TIME_PATTERN } from '@/lib/workboard/dates';
 import { checkReferences } from '@/lib/workboard/ownership';
-import { LIFE_AREAS, isStageLegal, normaliseStage, type WorkContext } from '@/lib/workboard/workContexts';
+import {
+  LIFE_AREAS, isStageLegal, normaliseStage,
+  validateWorkItemCategoryParent, validateWorkItemProjectConsistency,
+  type WorkContext,
+} from '@/lib/workboard/workContexts';
 
 const PRIORITIES = ['high', 'normal', 'low'];
 const STATUSES   = ['todo', 'in_progress', 'done'];
@@ -61,6 +65,29 @@ export async function POST(req: NextRequest) {
     projectId: project_id, userSubjectId: user_subject_id, organizationId: organization_id,
   });
   if (refError) return Response.json({ error: refError }, { status: 400 });
+
+  // Whole-branch review Finding I-2: `checkReferences` above only confirms each id belongs
+  // to this user independently — it never checks the ids are mutually consistent. Gap 1: an
+  // academic item with no course, previously enforced only by the dialog.
+  const categoryParentError = validateWorkItemCategoryParent(category, user_subject_id);
+  if (categoryParentError) return Response.json({ error: categoryParentError }, { status: 400 });
+
+  // Gap 2: a project's own organization/course must agree with what the item independently
+  // claims, when the item sets one — e.g. organization_id=5 beside a project scoped to
+  // organization 7. Only queried when project_id is actually present; skipped otherwise.
+  if (project_id != null) {
+    const [projectRows] = await pool.execute<RowDataPacket[]>(
+      'SELECT user_subject_id, organization_id FROM workboard_projects WHERE id = ? AND user_id = ?',
+      [project_id, userId],
+    );
+    if (projectRows.length) {
+      const consistencyError = validateWorkItemProjectConsistency(
+        user_subject_id, organization_id,
+        projectRows[0].user_subject_id, projectRows[0].organization_id,
+      );
+      if (consistencyError) return Response.json({ error: consistencyError }, { status: 400 });
+    }
+  }
 
   const [res] = await pool.execute<ResultSetHeader>(
     `INSERT INTO workboard_work_items
