@@ -171,6 +171,11 @@ export default function LinksCell({ item, style, onChanged }: LinksCellProps) {
             triggerRef={triggerRef}
             onClose={() => setOpen(false)}
             onChanged={onChanged}
+            // This cell renders inside the Table, whose ancestor chain includes the shell's
+            // `backdrop-filter` view-content wrapper — see `LinksPopoverProps.usePortal`'s own
+            // doc for why that traps a `position: fixed` popover's viewport-relative coordinates
+            // and why only this caller (not `WorkItemDetail`'s drawer) needs to opt out of it.
+            usePortal
           />
         )}
       </div>

@@ -3,6 +3,7 @@
 import {
   useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore,
 } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ClipboardList, Code2, ExternalLink, FileText, Globe, GraduationCap, HardDrive, Link2,
   LogIn, PenTool, Plus, Trash2, X, type LucideIcon,
@@ -283,6 +284,16 @@ export interface LinksPopoverProps {
   /** Re-pulls the work payload after a successful add or delete, so `link_count` everywhere —
    *  this cell's own summary included — agrees with what was just written. */
   onChanged:  () => void | Promise<void>;
+  /** Default `false`, preserving this component's original "no changes needed" behaviour for
+   *  `WorkItemDetail.tsx` (see the docblock below). The Table's `LinksCell` passes `true`: its
+   *  ancestor chain includes the shell's `backdrop-filter` view-content wrapper, which makes
+   *  this panel's `position: fixed` resolve against THAT wrapper's box instead of the viewport
+   *  — the portal escapes it. `WorkItemDetail`'s own panel is deliberately not glass (its own
+   *  docblock names the identical mechanism as the reason), so it never had this bug and must
+   *  not opt in: its Tab-trap (`handleKeyDown`) walks focusable elements via
+   *  `panelRef.current.querySelectorAll(...)`, a DOM-tree query that a portalled child would
+   *  fall outside of, which would let Tab escape the drawer while this popover holds focus. */
+  usePortal?: boolean;
 }
 
 /**
@@ -309,7 +320,7 @@ export interface LinksPopoverProps {
  * controls.
  */
 export default function LinksPopover({
-  ownerKind, ownerId, title, linkCount, triggerRef, onClose, onChanged,
+  ownerKind, ownerId, title, linkCount, triggerRef, onClose, onChanged, usePortal = false,
 }: LinksPopoverProps) {
   const ids     = useId();
   const labelId = `${ids}-label`;
@@ -500,7 +511,12 @@ export default function LinksPopover({
   const showing = links ?? [];
   const isEmpty = status === 'ready' && showing.length === 0;
 
-  return (
+  // Portalled to `document.body` when `usePortal` (see the prop's own doc for which callers
+  // need this and why). Safe for either caller because the outside-click/scroll handlers above
+  // already test `panelRef`/`triggerRef` directly rather than relying on DOM containment through
+  // a shared parent, and because a portal only moves DOM placement — the React tree (event
+  // bubbling, context, styled-jsx's build-time scoping below) is unaffected either way.
+  const panel = (
     <div
       ref={panelRef}
       role="dialog"
@@ -752,6 +768,8 @@ export default function LinksPopover({
       `}</style>
     </div>
   );
+
+  return usePortal ? createPortal(panel, document.body) : panel;
 }
 
 const VISUALLY_HIDDEN: React.CSSProperties = {

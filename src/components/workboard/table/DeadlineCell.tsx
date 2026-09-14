@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Calendar, Clock, X } from 'lucide-react';
 // Type-only import from `workItems.ts` — that module imports `pool` (mysql2) at module scope,
 // so a *value* import here would drag the driver into this client bundle and 500 the page.
@@ -285,19 +286,22 @@ const LABEL_STYLE: React.CSSProperties = {
  * controls. This matches those two so the module's overlays read as one object.
  */
 function DeadlinePopover({
-  item, values, anchor, onCancel, onSave,
+  item, values, anchor, onCancel, onSave, panelRef,
 }: {
   item:     WorkItem;
   values:   DeadlineValues;
   anchor:   AnchorRect;
   onCancel: () => void;
   onSave:   (next: DeadlineValues) => void;
+  /** Owned by `DeadlineCell`, not created here — its own outside-click/scroll dismissal needs
+   *  to test this exact node, and a ref this component created internally would be invisible
+   *  outside it. See the portal note below for why that stopped being optional. */
+  panelRef: React.RefObject<HTMLFormElement | null>;
 }) {
   const ids = useId();
   const dateId = `${ids}-date`;
   const timeId = `${ids}-time`;
 
-  const panelRef = useRef<HTMLFormElement>(null);
   const dateRef  = useRef<HTMLInputElement>(null);
 
   // Drafts, seeded from the values the cell is *showing* (stored or optimistic) and normalised
@@ -353,7 +357,20 @@ function DeadlinePopover({
     onSave(next);
   };
 
-  return (
+  // Portalled to `document.body` rather than rendered where this component sits in the table:
+  // this panel is `position: fixed` specifically so its viewport-relative coordinates (computed
+  // above from `window.innerWidth`/`innerHeight`) place it correctly — but `position: fixed`
+  // resolves against the nearest ancestor that establishes a containing block for it, and any
+  // ancestor with `backdrop-filter` (or `transform`/`filter`/`perspective`/`contain`) is exactly
+  // such an ancestor. The Table's own view-content wrapper has `backdropFilter: 'blur(14px)'`
+  // (`WorkboardShell.tsx`'s `GLASS`), so without the portal this panel's "viewport-relative"
+  // coordinates were actually being resolved against THAT wrapper's box, landing it in the wrong
+  // place. `WorkItemDetail.tsx`'s own docblock already names this exact mechanism for why its
+  // drawer deliberately isn't glass; this is the same bug, on a popover that can't avoid its
+  // ancestor's styling the way a whole panel can, so it escapes structurally instead. A portal
+  // changes only where this renders in the DOM — the React tree (event bubbling, context,
+  // styled-jsx's build-time scoping below) is unaffected.
+  return createPortal(
     <form
       ref={panelRef}
       role="dialog"
@@ -501,7 +518,8 @@ function DeadlinePopover({
           filter: brightness(0.97);
         }
       `}</style>
-    </form>
+    </form>,
+    document.body,
   );
 }
 
@@ -561,6 +579,11 @@ export default function DeadlineCell({ item, column, style, todayStr, editor }: 
 
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef   = useRef<HTMLButtonElement>(null);
+  // Owned here, not inside `DeadlinePopover`, because the popover is now portalled to
+  // `document.body` (see its own comment) and is therefore no longer a DOM descendant of
+  // `containerRef` — the outside-click handler below must test this ref independently instead
+  // of relying on DOM containment to cover both the trigger and the panel in one check.
+  const panelRef      = useRef<HTMLFormElement>(null);
   // `disabled={pending}` is what stops the race, but browsers blur an element the instant it
   // becomes disabled — a keyboard user who just saved is dropped to `document.body` for the round
   // trip, and nothing puts them back by default. `wasFocused` records whether *this* trigger
@@ -577,11 +600,13 @@ export default function DeadlineCell({ item, column, style, todayStr, editor }: 
     }
   }, [pending]);
 
-  // Ruling 3's outside-click and scroll dismissal, owned by the cell because the cell owns the
-  // container that holds both the trigger and (a DOM descendant, even though it is
-  // `position: fixed`) the panel. Same `mousedown` + `contains` shape as `WorkBoardView`'s
-  // "Move to" menu; including the trigger in the "inside" test is what stops a click on it from
-  // closing and immediately reopening.
+  // Ruling 3's outside-click and scroll dismissal, owned by the cell because the cell owns
+  // both refs the check needs. `containerRef` covers the trigger (including the "inside" test
+  // that stops a click on it from closing and immediately reopening, same shape as
+  // `WorkBoardView`'s "Move to" menu); `panelRef` covers the popover separately, since it is
+  // portalled to `document.body` and is no longer `containerRef`'s DOM descendant the way it
+  // was before the portal fix — DOM containment alone can no longer answer "inside or outside"
+  // for both pieces at once.
   // `close` alone, not the whole `editor`: the hook returns a fresh object every render, so
   // depending on `editor` would tear down and re-attach these listeners on every parent render.
   // `close` is a `useCallback` with no dependencies, so it is stable for the table's lifetime.
@@ -589,7 +614,10 @@ export default function DeadlineCell({ item, column, style, todayStr, editor }: 
   useEffect(() => {
     if (!isOrigin) return;
     const handlePointerDown = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) closeEditor();
+      const target = e.target as Node;
+      if (containerRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      closeEditor();
     };
     // Capture phase: the table's own scroll container is what usually moves, and its scroll
     // events do not bubble to `window`. A fixed panel would otherwise stay put while its row
@@ -704,6 +732,7 @@ export default function DeadlineCell({ item, column, style, todayStr, editor }: 
             anchor={editor.open.anchor}
             onCancel={closeAndRefocus}
             onSave={handleSave}
+            panelRef={panelRef}
           />
         )}
       </div>
