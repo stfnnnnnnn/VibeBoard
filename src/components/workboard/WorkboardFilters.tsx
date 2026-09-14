@@ -351,9 +351,13 @@ function ProjectOptionRow({
           // below regardless of which value it repeats. Omitting it here relies on this being a
           // bare `<button>` with no other background source: Tailwind's preflight (`@tailwind
           // base`, active in this app — see `globals.css`) already resets `button` to
-          // `background-color: transparent`, and because that reset lives in Tailwind's `base`
-          // CSS layer it loses to this file's unlayered `styled-jsx` rules on its own, so the
-          // hover rule still wins cleanly once this stops re-asserting the same value inline.
+          // `background-color: transparent`. This repo is on Tailwind 3.4 (confirmed: no
+          // `@layer` in the compiled CSS output), where `@layer base` is a build-time grouping
+          // with no runtime cascade-layer semantics — the reset wins here on plain specificity
+          // (`button {}` is (0,0,1), `.vb-filters-option.jsx-<hash>:hover {}` is (0,3,0)), not
+          // because of any layer priority. On a future Tailwind 4 upgrade, `@layer` becomes a
+          // real native CSS cascade layer that always loses to any unlayered rule regardless of
+          // specificity — the conclusion here would still hold, but for that reason instead.
           background: selected ? 'rgba(37,111,146,0.12)' : undefined,
           fontFamily: FONT, fontSize: '0.8rem',
           fontWeight: selected ? 700 : 500,

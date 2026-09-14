@@ -269,17 +269,37 @@ export default function WorkBoardView({ items, context = 'all', todayStr, isFilt
    *  management, not a value the render output depends on, so it must not trigger a re-render
    *  when it changes. */
   const triggerRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  /** One column container per `WorkStage`, keyed the same way `triggerRefs` is — the fallback
+   *  focus target for `focusTrigger` when the moved item has no new trigger to find (see below). */
+  const columnRefs = useRef<Map<WorkStage, HTMLDivElement>>(new Map());
 
   function registerTrigger(key: string, el: HTMLButtonElement | null) {
     if (el) triggerRefs.current.set(key, el);
     else triggerRefs.current.delete(key);
   }
 
+  function registerColumn(key: WorkStage, el: HTMLDivElement | null) {
+    if (el) columnRefs.current.set(key, el);
+    else columnRefs.current.delete(key);
+  }
+
   /** Focuses whichever trigger button is *currently* registered under `key` — called only after
    *  a move has resolved and the board has re-rendered, so this reads the moved item's NEW
-   *  trigger (in its new column), never the stale one that was already destroyed by then. */
-  function focusTrigger(key: string) {
-    triggerRefs.current.get(key)?.focus();
+   *  trigger (in its new column), never the stale one that was already destroyed by then.
+   *
+   *  `fallbackColumnKey` covers the one case where no new trigger will ever appear: the board's
+   *  own `items` prop is `visibleItems`, already narrowed by the shell's filters — a move that
+   *  changes `work_stage`/`work_status` can push the item straight out of an active status
+   *  filter, so it never remounts anywhere on this board and `triggerRefs` never gains a new
+   *  entry for it. Falling through to `<body>` there would be the exact P1-5 symptom this fix
+   *  exists to close, just on a narrower path. The destination column's own container is instead
+   *  focused — it is `tabIndex={-1}` precisely so this imperative case can reach it without it
+   *  ever becoming a natural Tab stop, and it names the fact of the move (the column heading is
+   *  its first rendered content) even though the moved card itself is gone from view. */
+  function focusTrigger(key: string, fallbackColumnKey: WorkStage) {
+    const trigger = triggerRefs.current.get(key);
+    if (trigger) { trigger.focus(); return; }
+    columnRefs.current.get(fallbackColumnKey)?.focus();
   }
 
   const columns = buildColumns(context);
@@ -372,6 +392,11 @@ export default function WorkBoardView({ items, context = 'all', todayStr, isFilt
         return (
           <div
             key={col.key}
+            ref={el => registerColumn(col.key, el)}
+            // -1: an imperative focus target only, for `focusTrigger`'s fallback — never a
+            // natural Tab stop, exactly like `WorkItemDetail.tsx`'s panel root serves the same
+            // dual role there.
+            tabIndex={-1}
             className={`vb-board-col${isOver ? ' drag-over' : ''}`}
             onDragOver={e => { e.preventDefault(); if (dragOverCol !== col.key) setDragOverCol(col.key); }}
             onDragLeave={e => {
@@ -431,7 +456,7 @@ export default function WorkBoardView({ items, context = 'all', todayStr, isFilt
                   // resumes.
                   onMove={async next => {
                     await moveItem(item, next);
-                    requestAnimationFrame(() => focusTrigger(itemKey(item)));
+                    requestAnimationFrame(() => focusTrigger(itemKey(item), next));
                   }}
                   triggerRef={el => registerTrigger(itemKey(item), el)}
                 />
