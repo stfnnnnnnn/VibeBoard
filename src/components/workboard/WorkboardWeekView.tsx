@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, AlertTriangle, Bell, CalendarClock } from 'lucide-react';
-import { courseColor } from '@/lib/workboard/color';
+import { courseColor, courseTextColor } from '@/lib/workboard/color';
 import { addDays } from '@/lib/workboard/dates';
 
 interface ClassOccurrence {
@@ -129,13 +129,14 @@ export default function WorkboardWeekView({ initialWeek }: { initialWeek: Workbo
                   const top = ((toMinutes(c.start_time) - GRID_START) / 60) * HOUR_HEIGHT;
                   const height = ((toMinutes(c.end_time) - toMinutes(c.start_time)) / 60) * HOUR_HEIGHT;
                   const color = courseColor(c.course_code);
+                  const textColor = courseTextColor(c.course_code);
                   return (
                     <div key={`c${c.block_id}`} title={c.override?.note ?? undefined} style={{
                       position: 'absolute', top: `${top + 1}px`, height: `${Math.max(height - 2, 24)}px`, left: '2px', right: '2px',
                       background: `${color}16`, border: `1.5px solid ${color}55`, borderLeft: `3px solid ${color}`,
                       borderRadius: '8px', padding: '3px 6px', opacity: cancelled ? 0.5 : 1,
                     }}>
-                      <span style={{ fontSize: '0.66rem', fontWeight: 800, color, textDecoration: cancelled ? 'line-through' : 'none' }}>
+                      <span style={{ fontSize: '0.66rem', fontWeight: 800, color: textColor, textDecoration: cancelled ? 'line-through' : 'none' }}>
                         {c.course_code}{c.override?.modality ? ` (${c.override.modality})` : ''}
                       </span>
                     </div>
@@ -150,7 +151,10 @@ export default function WorkboardWeekView({ initialWeek }: { initialWeek: Workbo
                       background: 'rgba(242,167,192,0.18)', border: '1.5px dashed #f2a7c099', borderLeft: '3px solid #f2a7c0',
                       borderRadius: '8px', padding: '3px 6px',
                     }}>
-                      <span style={{ fontSize: '0.66rem', fontWeight: 800, color: '#a0507a' }}>{e.title}</span>
+                      {/* #8a4468 is #f2a7c0's ratified darkened text pair (§16a "Life"), not a fresh
+                          hardcode: events use a fixed pink treatment rather than a per-course hash,
+                          so courseTextColor (keyed by course code) doesn't apply here. */}
+                      <span style={{ fontSize: '0.66rem', fontWeight: 800, color: '#8a4468' }}>{e.title}</span>
                     </div>
                   );
                 })}

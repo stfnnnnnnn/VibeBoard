@@ -1,14 +1,18 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { LayoutGrid, MoreVertical, SearchX } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { LayoutGrid, SearchX } from 'lucide-react';
 // Type-only imports from `workItems.ts` — that module imports `pool` (mysql2) at module
 // scope for its DB-access exports, so a runtime import here would drag mysql2 into this
 // client bundle (see WorkboardShell.tsx's and WorkItemRow.tsx's comments on the same hazard).
 import type { WorkItem } from '@/lib/workboard/workItems';
 // `setWorkStage` is the single place owned-vs-academic endpoint routing lives (Tasks 11/16) —
-// imported and reused here rather than rebuilt, per this task's brief.
-import { setWorkStage } from '../WorkItemRow';
+// imported and reused here rather than rebuilt, per this task's brief. `RowOverflowMenu` is the
+// shared "more options" trigger + menu (Task 40's audit, P2-3) — this file used to carry its own
+// independent `BoardCardMenu` implementation; it is now the canonical one, extracted into
+// `WorkItemRow.tsx` (already this module's home for row primitives the views share) and
+// imported here the same way `WorkTableView` imports `WorkTitleButton` from the same file.
+import { setWorkStage, RowOverflowMenu } from '../WorkItemRow';
 // The stage vocabulary. Pool-free by construction — `workContexts.ts` has no imports at all —
 // so these are safe as runtime (not type-only) imports from a client component.
 import {
@@ -103,127 +107,8 @@ function itemKey(item: Pick<WorkItem, 'source' | 'id'>): string {
   return `${item.source}-${item.id}`;
 }
 
-/** Card overflow menu — the keyboard-guaranteed "Move to" path required alongside drag
- *  (`dragging-alternative`, WCAG 2.2 AA), and deliberately the *same* `setWorkStage` call the
- *  drop handler makes rather than a reduced fallback. It lists every column of the current set
- *  except the one the card is already in: two entries under My Work, four under Academic,
- *  five under Projects. */
-function BoardCardMenu({
-  item, columns, currentKey, onMove,
-}: {
-  item: WorkItem;
-  columns: BoardColumn[];
-  currentKey: WorkStage;
-  onMove: (next: WorkStage) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
-
-  const targets = columns.filter(c => c.key !== currentKey);
-
-  useEffect(() => {
-    if (!open) return;
-    itemRefs.current[0]?.focus();
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handlePointerDown = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handlePointerDown);
-    return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [open]);
-
-  const closeAndRefocus = () => {
-    setOpen(false);
-    triggerRef.current?.focus();
-  };
-
-  const handleMenuKeyDown = (e: React.KeyboardEvent) => {
-    const focusable = itemRefs.current.filter((el): el is HTMLButtonElement => el !== null);
-    const currentIndex = focusable.findIndex(el => el === document.activeElement);
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      focusable[(currentIndex + 1 + focusable.length) % focusable.length]?.focus();
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      focusable[(currentIndex - 1 + focusable.length) % focusable.length]?.focus();
-    } else if (e.key === 'Home') {
-      e.preventDefault();
-      focusable[0]?.focus();
-    } else if (e.key === 'End') {
-      e.preventDefault();
-      focusable[focusable.length - 1]?.focus();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      closeAndRefocus();
-    } else if (e.key === 'Tab') {
-      setOpen(false);
-    }
-  };
-
-  return (
-    <div ref={containerRef} style={{ position: 'relative', flexShrink: 0 }}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="vb-board-overflow"
-        aria-label={`More options for "${item.title}"`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="More options"
-        onClick={() => setOpen(o => !o)}
-        style={{
-          width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'transparent', border: 'none', borderRadius: '8px', color: '#5c6b80',
-          cursor: 'pointer', flexShrink: 0,
-        }}
-      >
-        <MoreVertical size={16} />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          aria-label="Move to"
-          className="vb-board-menu"
-          onKeyDown={handleMenuKeyDown}
-          style={{
-            position: 'absolute', right: 0, top: '36px', zIndex: 20, minWidth: '160px',
-            background: '#fff', borderRadius: '10px', border: '1px solid rgba(200,210,230,0.6)',
-            boxShadow: '0 8px 24px rgba(31,38,68,0.18)', padding: '4px', overflow: 'hidden',
-          }}
-        >
-          <div style={{ padding: '6px 10px 4px', fontFamily: FONT, fontSize: '0.68rem', fontWeight: 700, color: '#8a94a6', textTransform: 'uppercase' }}>
-            Move to
-          </div>
-          {targets.map((col, i) => (
-            <button
-              key={col.key}
-              ref={el => { itemRefs.current[i] = el; }}
-              type="button"
-              role="menuitem"
-              className="vb-board-menu-item"
-              onClick={() => { closeAndRefocus(); onMove(col.key); }}
-              style={{
-                display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
-                background: 'transparent', border: 'none', borderRadius: '6px', cursor: 'pointer',
-                fontFamily: FONT, fontSize: '0.82rem', fontWeight: 600, color: '#2d3748',
-              }}
-            >
-              {col.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function BoardCard({
-  item, todayStr, columns, currentKey, blocked, dragging, onDragStart, onDragEnd, onMove,
+  item, todayStr, columns, currentKey, blocked, dragging, onDragStart, onDragEnd, onMove, triggerRef,
 }: {
   item: WorkItem;
   todayStr: string;
@@ -236,7 +121,15 @@ function BoardCard({
   dragging: boolean;
   onDragStart: (e: React.DragEvent) => void;
   onDragEnd: () => void;
-  onMove: (next: WorkStage) => void;
+  /** Resolves once the move has actually landed (P1-5) — `WorkBoardView` awaits its own
+   *  `moveItem` call inside this before it can safely refocus the moved item's new trigger, so
+   *  this must genuinely return the promise rather than fire-and-forget it. */
+  onMove: (next: WorkStage) => void | Promise<void>;
+  /** Registers this card's overflow trigger into `WorkBoardView`'s board-level map, keyed by the
+   *  item's stable identity — see that file's `triggerRefs` for why the ref has to live there
+   *  rather than on the card: it must survive the card moving to a different column's DOM
+   *  subtree, which unmounts this component and mounts a new one. */
+  triggerRef: (el: HTMLButtonElement | null) => void;
 }) {
   const meta = buildMeta(item, todayStr);
   const edgeColor = EDGE_COLOR[item.priority];
@@ -267,7 +160,21 @@ function BoardCard({
         >
           {item.title}
         </span>
-        <BoardCardMenu item={item} columns={columns} currentKey={currentKey} onMove={onMove} />
+        {/* The keyboard-guaranteed "Move to" path required alongside drag (`dragging-alternative`,
+            WCAG 2.2 AA) — deliberately the *same* `setWorkStage` call the drop handler makes
+            rather than a reduced fallback. It lists every column of the current set except the
+            one the card is already in: two entries under My Work, four under Academic, five
+            under Projects. */}
+        <RowOverflowMenu
+          triggerAriaLabel={`More options for "${item.title}"`}
+          menuAriaLabel="Move to"
+          items={columns.filter(c => c.key !== currentKey).map(col => ({
+            key: col.key,
+            label: col.label,
+            onClick: () => onMove(col.key),
+          }))}
+          triggerRef={triggerRef}
+        />
       </div>
 
       {(item.priority === 'high' || blocked) && (
@@ -350,6 +257,31 @@ export default function WorkBoardView({ items, context = 'all', todayStr, isFilt
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<WorkStage | null>(null);
 
+  /** Each rendered card's overflow-trigger button, keyed by `itemKey(item)` rather than by
+   *  column — held at this top level, not inside `BoardCard`, specifically so it survives a
+   *  card moving to a different column's DOM subtree (P1-5). A move re-parents the card: React
+   *  unmounts the `BoardCard` under its old column and mounts a new one under the destination
+   *  column, so any ref `BoardCard` held itself would be destroyed along with the old trigger.
+   *  Keying by the item's stable identity (not the column) means the same map entry is simply
+   *  overwritten by the new instance's own ref callback once it mounts.
+   *
+   *  A plain mutable `Map` in a ref, not state — this is DOM bookkeeping for imperative focus
+   *  management, not a value the render output depends on, so it must not trigger a re-render
+   *  when it changes. */
+  const triggerRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+
+  function registerTrigger(key: string, el: HTMLButtonElement | null) {
+    if (el) triggerRefs.current.set(key, el);
+    else triggerRefs.current.delete(key);
+  }
+
+  /** Focuses whichever trigger button is *currently* registered under `key` — called only after
+   *  a move has resolved and the board has re-rendered, so this reads the moved item's NEW
+   *  trigger (in its new column), never the stale one that was already destroyed by then. */
+  function focusTrigger(key: string) {
+    triggerRefs.current.get(key)?.focus();
+  }
+
   const columns = buildColumns(context);
 
   const handleDragStart = (e: React.DragEvent, item: WorkItem) => {
@@ -365,7 +297,15 @@ export default function WorkBoardView({ items, context = 'all', todayStr, isFilt
 
   /** The single move path — both the drop handler and the card's "Move to" menu land here, so
    *  the keyboard route is the drag route rather than an approximation of it. Never sends
-   *  `work_status`: the endpoints derive it from the stage. */
+   *  `work_status`: the endpoints derive it from the stage.
+   *
+   *  Its returned promise must resolve only once the board has actually finished refreshing
+   *  (P1-5): the menu's `onMove` call above awaits this specific promise before refocusing the
+   *  moved item's new trigger, so if this function ever stopped awaiting `onChanged()` — or a
+   *  future caller wrapped it in something that swallowed the promise, as `BoardCard`'s old
+   *  `onMove={next => moveItem(item, next)}` typing silently allowed — that refocus would fire
+   *  before the move had actually landed and target a trigger that either doesn't exist yet or
+   *  is about to be torn down. */
   const moveItem = async (item: WorkItem, next: WorkStage) => {
     if (columnKeyOf(item, context) === next) return;
     const res = await setWorkStage(item, next);
@@ -478,7 +418,22 @@ export default function WorkBoardView({ items, context = 'all', todayStr, isFilt
                   dragging={draggingKey === itemKey(item)}
                   onDragStart={e => handleDragStart(e, item)}
                   onDragEnd={handleDragEnd}
-                  onMove={next => moveItem(item, next)}
+                  // Awaited, not fire-and-forgot (P1-5): the menu's item `onClick` (inside
+                  // `RowOverflowMenu`) calls this and does nothing further with it, so the
+                  // refocus-after-move below only runs once `moveItem` itself — the network
+                  // round trip plus `onChanged`'s refresh — has actually settled. Only then is
+                  // the board re-rendered with this item under its new column, so only then can
+                  // `focusTrigger` find the NEW trigger rather than the one that is about to be
+                  // (or already was) unmounted. The `requestAnimationFrame` gives React's commit
+                  // for that re-render a chance to land — and `registerTrigger`'s own ref
+                  // callback to fire — before the lookup, rather than assuming the state update
+                  // inside `onChanged` has already flushed to the DOM by the time this `await`
+                  // resumes.
+                  onMove={async next => {
+                    await moveItem(item, next);
+                    requestAnimationFrame(() => focusTrigger(itemKey(item)));
+                  }}
+                  triggerRef={el => registerTrigger(itemKey(item), el)}
                 />
               ))
             )}
@@ -531,20 +486,12 @@ export default function WorkBoardView({ items, context = 'all', todayStr, isFilt
             transition: none;
           }
         }
-        .vb-board-overflow:focus-visible {
-          outline: 2px solid #2a7fa8;
-          outline-offset: 2px;
-        }
-        .vb-board-overflow:hover {
-          background: rgba(200,210,230,0.3);
-        }
-        .vb-board-menu-item:hover {
-          background: rgba(116,188,217,0.12);
-        }
-        .vb-board-menu-item:focus-visible {
-          outline: 2px solid #2a7fa8;
-          outline-offset: -2px;
-        }
+        /* The card's overflow trigger and its menu items are RowOverflowMenu (from
+           WorkItemRow.tsx) now, not a local BoardCardMenu -- their hover/focus-visible rules
+           moved with it into that component's own scoped style-jsx block, which is also what
+           actually fixes P2-1's .vb-board-overflow:hover / .vb-board-menu-item:hover (both
+           were previously beaten by an inline background: transparent on the same elements;
+           the new component simply does not set that inline value -- see its own comments). */
       `}</style>
     </div>
   );

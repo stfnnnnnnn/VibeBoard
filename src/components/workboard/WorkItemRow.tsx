@@ -203,10 +203,12 @@ const VISUALLY_HIDDEN: React.CSSProperties = {
  * scopes a rule to the JSX tree the `<style jsx>` tag is part of; JSX built in a `const` inside a
  * component and spliced in as `{thing}` is a *separate* tree and never receives the scope class,
  * so the rules below would compile cleanly and match nothing. (That is not hypothetical: this
- * file's own `checkbox` and `overflowButton` consts have exactly that shape, and their
- * `.vb-row-checkbox` / `.vb-row-overflow` / `.vb-row-menu-item` rules are inert today for this
- * reason — see this task's report.) A component with its own `<style jsx>` is the shape that
- * works, and the shape `CardLinksButton` in `WorkTableView` already uses.
+ * file's own `checkbox` and `overflowButton` consts used to have exactly that shape, and their
+ * `.vb-row-checkbox` / `.vb-row-overflow` / `.vb-row-menu-item` rules were inert for this reason
+ * — see this task's report, P1-3. They are now `RowCheckbox` and `RowOverflowMenu` below, each a
+ * real component with its own `<style jsx>`, for the same reason this component is.) A component
+ * with its own `<style jsx>` is the shape that works, and the shape `CardLinksButton` in
+ * `WorkTableView` already uses.
  *
  * A real `<button>`, not an `onClick` on the old `<span>`: a click handler on static text is
  * neither keyboard reachable nor announced as actionable, so the drawer would exist for mouse
@@ -267,6 +269,211 @@ export function WorkTitleButton({ item, isDone, style, onOpenDetail }: {
   );
 }
 
+/**
+ * The row's completion checkbox — same rationale as `WorkTitleButton` above, smaller control.
+ * It used to be a `const` built inline in `WorkItemRow` and spliced in as `{checkbox}`, which is
+ * exactly the shape that docblock warns is dead by construction: its `.vb-row-checkbox` rule
+ * compiled cleanly and matched nothing (see this task's report, P1-3). Pulling it out into its
+ * own component with its own `<style jsx>` fixes that the same way `WorkTitleButton` already
+ * does, with no change to its markup, values, or behaviour (the `<label>` wrapper, the
+ * disabled-while-pending state, the dynamic `aria-label`).
+ */
+function RowCheckbox({ item, isDone, pending, onToggle }: {
+  item:    WorkItem;
+  isDone:  boolean;
+  pending: boolean;
+  onToggle: () => void | Promise<void>;
+}) {
+  return (
+    <>
+      <label style={{
+        width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0, cursor: pending ? 'default' : 'pointer',
+      }}>
+        <input
+          type="checkbox"
+          className="vb-row-checkbox"
+          checked={isDone}
+          disabled={pending}
+          onChange={onToggle}
+          aria-label={isDone ? `Mark "${item.title}" as not done` : `Mark "${item.title}" as done`}
+          style={{ width: '20px', height: '20px', cursor: pending ? 'default' : 'pointer', accentColor: '#256f92' }}
+        />
+      </label>
+
+      <style jsx>{`
+        .vb-row-checkbox:focus-visible { outline: 2px solid #2a7fa8; outline-offset: 2px; border-radius: 4px; }
+      `}</style>
+    </>
+  );
+}
+
+export interface RowOverflowMenuItem {
+  key:   string;
+  label: string;
+  /** May return a promise; `RowOverflowMenu` itself does not await it (it has no further work
+   *  to do once the menu is closed and the click is dispatched — see the component docblock for
+   *  why the Board's post-move refocus specifically cannot live here). A caller that needs to
+   *  do something once its own action resolves — like `WorkBoardView`'s move — awaits its own
+   *  promise inside its `onClick`, on its own terms. */
+  onClick: () => void | Promise<void>;
+}
+
+/**
+ * A row's "more options" trigger + menu, shared by the Focus row (this file) and the Board
+ * (`WorkBoardView`). Both used to carry their own independent implementation of the same
+ * control (P2-3 in this task's report): the Board's `BoardCardMenu` moved focus into the menu
+ * on open, supported ArrowUp/ArrowDown/Home/End, and refocused the trigger on Escape;
+ * `WorkItemRow`'s did none of that, and its Escape handler dropped focus to `<body>` if the one
+ * menu item held it. This is the Board's already-correct implementation, extracted here and
+ * generalised over an `items` list so neither surface has to maintain its own copy — this file
+ * is already established (see `WorkTitleButton` above) as the module's home for row primitives
+ * the views share, and `WorkBoardView` imports this the same way `WorkTableView` imports
+ * `WorkTitleButton`.
+ *
+ * **It is a component, not a `const` holding JSX** — the same load-bearing shape `WorkTitleButton`
+ * demonstrates. The old `overflowButton` const in this file, and the old `BoardCardMenu`'s
+ * sibling rules living in `WorkBoardView`'s own `<style jsx global>` block, both worked around
+ * styled-jsx's scoping in ways that either broke it (the const) or opted out of it entirely
+ * (`global`, which is why the Board's rules survived mechanism A but not mechanism B — see P2-1).
+ * A real component with its own ordinary `<style jsx>` scopes correctly *and* keeps the
+ * rules scoped to this control specifically, rather than leaking them globally.
+ *
+ * Escape closes the menu and refocuses the trigger immediately — nothing has moved, so the
+ * trigger this component owns is still the right target. A menu item's own click does the same
+ * `closeAndRefocus()` for the same reason `BoardCardMenu` always did: it is a correct default
+ * for an item that does nothing further (e.g. this file's own "Edit"), and it is a harmless,
+ * superseded-in-time stopgap for `WorkBoardView`'s "Move to" items, whose trigger is about to be
+ * unmounted once the move resolves and the card re-renders in its new column (P1-5) — by the
+ * time that happens, this component's own refocus has long since fired and simply gets
+ * overridden by whatever the caller's own `onClick` focuses afterward. This component has no
+ * visibility into which column an item ends up in, so it cannot be the one to make that later
+ * correction; only the caller, which owns the item's identity and the board-level trigger
+ * registry, can (see `WorkBoardView`'s `triggerRefs`/`registerTrigger`/`focusTrigger`).
+ */
+export function RowOverflowMenu({ triggerAriaLabel, menuAriaLabel, items, triggerRef }: {
+  triggerAriaLabel: string;
+  menuAriaLabel:    string;
+  items:            RowOverflowMenuItem[];
+  /** Lets a caller track this row's trigger DOM node by the item's own stable identity across
+   *  re-renders and reparenting — a card moving to a different column's subtree, specifically.
+   *  Optional because only `WorkBoardView` needs it; the Focus row's own usage has nothing to
+   *  reparent so it simply omits this prop. */
+  triggerRef?: (el: HTMLButtonElement | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerElRef = useRef<HTMLButtonElement | null>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    itemRefs.current[0]?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [open]);
+
+  const closeAndRefocus = () => {
+    setOpen(false);
+    triggerElRef.current?.focus();
+  };
+
+  const handleMenuKeyDown = (e: React.KeyboardEvent) => {
+    const focusable = itemRefs.current.filter((el): el is HTMLButtonElement => el !== null);
+    const currentIndex = focusable.findIndex(el => el === document.activeElement);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      focusable[(currentIndex + 1 + focusable.length) % focusable.length]?.focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      focusable[(currentIndex - 1 + focusable.length) % focusable.length]?.focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      focusable[0]?.focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      focusable[focusable.length - 1]?.focus();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeAndRefocus();
+    } else if (e.key === 'Tab') {
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        ref={el => { triggerElRef.current = el; triggerRef?.(el); }}
+        type="button"
+        className="vb-row-overflow"
+        aria-label={triggerAriaLabel}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={triggerAriaLabel}
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          border: 'none', borderRadius: '8px', color: '#5c6b80', cursor: 'pointer', flexShrink: 0,
+          // No inline `background: 'transparent'` here (P2-1): this app's global button reset
+          // (`globals.css`'s `@tailwind base`, i.e. Tailwind Preflight) already sets
+          // `background-color: transparent` on every `<button>`, so the resting state is
+          // identical either way — but an inline value would out-specificity the `:hover` rule
+          // below the same way it did on this exact element before this fix.
+        }}
+      >
+        <MoreVertical size={16} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label={menuAriaLabel}
+          className="vb-row-overflow-menu"
+          onKeyDown={handleMenuKeyDown}
+          style={{
+            position: 'absolute', right: 0, top: '36px', zIndex: 20, minWidth: '160px',
+            background: '#fff', borderRadius: '10px', border: '1px solid rgba(200,210,230,0.6)',
+            boxShadow: '0 8px 24px rgba(31,38,68,0.18)', padding: '4px', overflow: 'hidden',
+          }}
+        >
+          {items.map((item, i) => (
+            <button
+              key={item.key}
+              ref={el => { itemRefs.current[i] = el; }}
+              type="button"
+              role="menuitem"
+              className="vb-row-overflow-menu-item"
+              onClick={() => { closeAndRefocus(); item.onClick(); }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
+                border: 'none', borderRadius: '6px', cursor: 'pointer',
+                fontFamily: FONT, fontSize: '0.82rem', fontWeight: 600, color: '#2d3748',
+                // Same no-inline-background note as the trigger above.
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <style jsx>{`
+        .vb-row-overflow:focus-visible { outline: 2px solid #2a7fa8; outline-offset: 2px; }
+        .vb-row-overflow:hover:not(:disabled) { background: rgba(200,210,230,0.3); }
+        .vb-row-overflow-menu-item:hover { background: rgba(116,188,217,0.12); }
+        .vb-row-overflow-menu-item:focus-visible { outline: 2px solid #2a7fa8; outline-offset: -2px; }
+      `}</style>
+    </div>
+  );
+}
+
 export interface WorkItemRowProps {
   item:       WorkItem;
   /** "YYYY-MM-DD" — `work.generated_at`, so every row in the payload agrees on "today". */
@@ -289,27 +496,9 @@ export interface WorkItemRowProps {
 
 export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChanged, onEdit, onOpenDetail }: WorkItemRowProps) {
   const [pending, setPending] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const meta = buildMeta(item, todayStr);
   const edgeColor = EDGE_COLOR[item.priority];
   const divider = isLast ? 'none' : '1px solid rgba(200,210,230,0.35)';
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handlePointerDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleKey);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleKey);
-    };
-  }, [menuOpen]);
 
   const isDone = item.work_status === 'done';
 
@@ -335,20 +524,7 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
   };
 
   const checkbox = (
-    <label style={{
-      width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      flexShrink: 0, cursor: pending ? 'default' : 'pointer',
-    }}>
-      <input
-        type="checkbox"
-        className="vb-row-checkbox"
-        checked={isDone}
-        disabled={pending}
-        onChange={handleToggle}
-        aria-label={isDone ? `Mark "${item.title}" as not done` : `Mark "${item.title}" as done`}
-        style={{ width: '20px', height: '20px', cursor: pending ? 'default' : 'pointer', accentColor: '#256f92' }}
-      />
-    </label>
+    <RowCheckbox item={item} isDone={isDone} pending={pending} onToggle={handleToggle} />
   );
 
   /** The row's title, in whichever layout is rendering — see `WorkTitleButton` above for why it
@@ -358,52 +534,15 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
   );
 
   // Rendered per the direction doc's §3 row structure (6 of 6 elements). Task 13 wires this
-  // up to a single "Edit" action opening the create/edit dialog; Task 15's Board is expected
-  // to add a "Move to →" submenu alongside it rather than building a second trigger.
+  // up to a single "Edit" action opening the create/edit dialog. `RowOverflowMenu` (above) is
+  // the Board's own overflow control (Task 15's "Move to →" submenu), shared here rather than
+  // rebuilt — see its docblock for why the two used to drift (P2-3) and no longer do.
   const overflowButton = (
-    <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
-      <button
-        type="button"
-        className="vb-row-overflow"
-        aria-label="More options"
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
-        title="More options"
-        onClick={() => setMenuOpen(o => !o)}
-        style={{
-          width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'transparent', border: 'none', borderRadius: '8px', color: '#5c6b80',
-          cursor: 'pointer', flexShrink: 0,
-        }}
-      >
-        <MoreVertical size={16} />
-      </button>
-      {menuOpen && (
-        <div
-          role="menu"
-          className="vb-row-menu"
-          style={{
-            position: 'absolute', right: 0, top: '36px', zIndex: 20, minWidth: '120px',
-            background: '#fff', borderRadius: '10px', border: '1px solid rgba(200,210,230,0.6)',
-            boxShadow: '0 8px 24px rgba(31,38,68,0.18)', padding: '4px', overflow: 'hidden',
-          }}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            className="vb-row-menu-item"
-            onClick={() => { setMenuOpen(false); onEdit(item); }}
-            style={{
-              display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
-              background: 'transparent', border: 'none', borderRadius: '6px', cursor: 'pointer',
-              fontFamily: FONT, fontSize: '0.82rem', fontWeight: 600, color: '#2d3748',
-            }}
-          >
-            Edit
-          </button>
-        </div>
-      )}
-    </div>
+    <RowOverflowMenu
+      triggerAriaLabel="More options"
+      menuAriaLabel="More options"
+      items={[{ key: 'edit', label: 'Edit', onClick: () => onEdit(item) }]}
+    />
   );
 
   return (
@@ -470,11 +609,6 @@ export default function WorkItemRow({ item, todayStr, isDesktop, isLast, onChang
       <style jsx>{`
         .vb-work-row { background: transparent; transition: background 120ms ease; }
         .vb-work-row:hover, .vb-work-row:focus-within { background: rgba(116,188,217,0.06); }
-        .vb-row-checkbox:focus-visible { outline: 2px solid #2a7fa8; outline-offset: 2px; border-radius: 4px; }
-        .vb-row-overflow:focus-visible { outline: 2px solid #2a7fa8; outline-offset: 2px; }
-        .vb-row-overflow:hover:not(:disabled) { background: rgba(200,210,230,0.3); }
-        .vb-row-menu-item:hover { background: rgba(116,188,217,0.12); }
-        .vb-row-menu-item:focus-visible { outline: 2px solid #2a7fa8; outline-offset: -2px; }
       `}</style>
     </div>
   );

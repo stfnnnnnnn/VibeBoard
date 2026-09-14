@@ -34,6 +34,39 @@ const CATEGORY_HUE: Record<WorkCategory, string> = {
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const CHART_HEIGHT = 64; // px, the tallest bar's height when a day equals the week's max
 
+/** Audit P2-4: the workload chart conveys per-day totals and category split entirely
+ *  through bar heights and colours, with a `title` on a non-focusable `<div>` as its only
+ *  text equivalent — not reliably announced by a screen reader and unreachable by keyboard.
+ *  This is this module's established visually-hidden pattern, duplicated locally per this
+ *  codebase's own convention rather than imported across sibling files (same shape as
+ *  `WorkItemRow.tsx`'s and `LinksCell.tsx`'s `VISUALLY_HIDDEN`) — clipped to 1px and
+ *  positioned off-flow rather than `display:none`, so it stays in the accessibility tree. */
+const VISUALLY_HIDDEN: React.CSSProperties = {
+  position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px',
+  overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
+};
+
+/** "Monday, September 8" from a "YYYY-MM-DD" string. UTC, matching this module's and
+ *  `dates.ts`'s convention of treating these strings as calendar dates, not instants. */
+function formatFullDay(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
+}
+
+/** The chart's text equivalent for one day (WCAG 1.1.1): total plus the non-zero category
+ *  breakdown, in the same voice as the Overdue stat card's subtitle (`WorkboardStats.tsx`'s
+ *  "N past due — oldest from <date>"). Zero-count categories are omitted so a light day
+ *  reads as "no items due" rather than a robotic "0 academic, 0 project, 0 organization,
+ *  0 life". `WORK_CATEGORIES` keys (`academic`, `project`, `organization`, `life`) are
+ *  themselves the words this sentence needs, so no separate label map is introduced. */
+function describeDayWorkload(day: WorkloadDay): string {
+  const label = formatFullDay(day.date);
+  if (day.total === 0) return `${label}: no items due.`;
+  const breakdown = WORK_CATEGORIES.filter(cat => day[cat] > 0).map(cat => `${day[cat]} ${cat}`);
+  const noun = day.total === 1 ? 'item' : 'items';
+  return `${label}: ${day.total} ${noun} due — ${breakdown.join(', ')}.`;
+}
+
 function PanelHeader({ Icon, children }: { Icon: typeof BarChart3; children: React.ReactNode }) {
   return (
     <h3 style={{
@@ -83,8 +116,18 @@ function WorkloadChart({ workload }: { workload: WorkloadDay[] }) {
                   {day.total}
                 </span>
               )}
+              {/* The chart's real text equivalent (P2-4): a screen reader reaches this before
+                  the decorative bar below it, in the same left-to-right day order a sighted
+                  user scans the chart in. */}
+              <span style={VISUALLY_HIDDEN}>{describeDayWorkload(day)}</span>
+              {/* `aria-hidden`: purely decorative now that the sentence above carries the
+                  day's total and category split as real text. `title` previously stood in
+                  for that (`${day.date}: ${day.total} due`) but only ever reached a sighted
+                  mouse user on hover — never announced by a screen reader on a non-focusable
+                  `<div>`, and unreachable by keyboard either way — so it is removed rather
+                  than kept redundant-and-confusing beside the hidden sentence. */}
               <div
-                title={`${day.date}: ${day.total} due`}
+                aria-hidden="true"
                 style={{
                   width: '100%', height: `${barHeight}px`, borderRadius: '3px 3px 0 0',
                   overflow: 'hidden', display: 'flex', flexDirection: 'column-reverse',

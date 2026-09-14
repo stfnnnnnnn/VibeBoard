@@ -285,7 +285,18 @@ export default function WorkTimelineView({ items, weekStart, today, isFiltered, 
     : buildContextLanes(items, context, weekStart);
 
   return (
-    <div className="vb-timeline" style={{ overflowX: 'auto', paddingBottom: '4px' }}>
+    // Scroll container, not the page: must be reachable and operable by keyboard alone, since
+    // on any viewport narrower than `totalWidth` the four-week axis extends past the fold.
+    // Matches `WorkTableView.tsx`'s `.vb-table-scroll` treatment exactly (role/aria-label/
+    // tabIndex + a `:focus-visible` outline supplied via the stylesheet below — `outline` must
+    // never be set inline here, or it becomes another dead-CSS instance).
+    <div
+      className="vb-timeline"
+      style={{ overflowX: 'auto', paddingBottom: '4px' }}
+      role="region"
+      aria-label="Timeline"
+      tabIndex={0}
+    >
       <div style={{ position: 'relative', width: `${totalWidth}px`, minWidth: '100%' }}>
         {/* Date header row — weekday + day-of-month per column, micro-label style (§1). */}
         <div style={{ display: 'flex', height: `${HEADER_HEIGHT}px` }}>
@@ -368,10 +379,16 @@ export default function WorkTimelineView({ items, weekStart, today, isFiltered, 
                 borderBottom: '1px solid rgba(200,210,230,0.25)',
               }}
             >
+              {/* P3-3: a bar starting on the first visible day (`left: 0`) can vertically
+                  intersect this label's box, and bars carry no z-index, so the label needs a
+                  solid backing to stay legible rather than letting a bar's fill show through
+                  around its glyphs. `#fbfbfd` is this module's established off-white solid-panel
+                  surface colour; kept small so it still reads as a label, not a stray rectangle. */}
               <span style={{
                 position: 'absolute', left: '8px', top: '4px', zIndex: 2,
                 fontFamily: DM_FONT, fontSize: '0.68rem', fontWeight: 800, color: '#8a94a6',
                 textTransform: 'uppercase', letterSpacing: '0.04em', pointerEvents: 'none',
+                background: '#fbfbfd', padding: '1px 4px', borderRadius: '4px',
               }}>
                 {label}
               </span>
@@ -379,7 +396,14 @@ export default function WorkTimelineView({ items, weekStart, today, isFiltered, 
               {plotted.map(p => {
                 const color = EDGE_COLOR[p.item.priority];
                 if (p.kind === 'bar') {
-                  const labelFits = p.width >= 60;
+                  // P1-1: the title always renders outside the bar, in the page-background
+                  // `#2d3748` treatment. An in-bar white label was previously shown for bars
+                  // wide enough to fit it (`width >= 60`), but white-on-fill computed to
+                  // 1.73:1 (normal priority) and 1.40:1 (low) against WCAG AA's 4.5:1 — a
+                  // failure on the common case, since normal is the default priority. The
+                  // bar's fill colour itself stays (it is non-text decoration at 3:1+); only
+                  // the label's position is now unconditional, matching the one treatment that
+                  // already passed contrast.
                   return (
                     <div
                       key={itemKey(p.item)}
@@ -388,26 +412,16 @@ export default function WorkTimelineView({ items, weekStart, today, isFiltered, 
                         position: 'absolute', left: `${p.left}px`, width: `${p.width}px`, height: '22px',
                         top: '50%', transform: 'translateY(-50%)', borderRadius: '6px',
                         background: color, border: `1.5px solid ${darken(color, 0.2)}`,
-                        display: 'flex', alignItems: 'center', overflow: 'hidden',
-                        paddingLeft: labelFits ? '6px' : 0, boxSizing: 'border-box',
+                        boxSizing: 'border-box',
                       }}
                     >
-                      {labelFits ? (
-                        <span style={{
-                          fontFamily: FONT, fontSize: '0.68rem', fontWeight: 700, color: '#fff',
-                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                        }}>
-                          {p.item.title}
-                        </span>
-                      ) : (
-                        <span style={{
-                          position: 'absolute', left: `${p.width + 6}px`, top: '50%', transform: 'translateY(-50%)',
-                          fontFamily: FONT, fontSize: '0.68rem', fontWeight: 700, color: '#2d3748',
-                          whiteSpace: 'nowrap',
-                        }}>
-                          {p.item.title}
-                        </span>
-                      )}
+                      <span style={{
+                        position: 'absolute', left: `${p.width + 6}px`, top: '50%', transform: 'translateY(-50%)',
+                        fontFamily: FONT, fontSize: '0.68rem', fontWeight: 700, color: '#2d3748',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {p.item.title}
+                      </span>
                     </div>
                   );
                 }
@@ -429,6 +443,12 @@ export default function WorkTimelineView({ items, weekStart, today, isFiltered, 
           ))}
         </div>
       </div>
+      <style jsx>{`
+        .vb-timeline:focus-visible {
+          outline: 2px solid #2a7fa8;
+          outline-offset: 2px;
+        }
+      `}</style>
     </div>
   );
 }
