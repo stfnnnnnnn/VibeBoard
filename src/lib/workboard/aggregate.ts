@@ -1,6 +1,6 @@
 import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
-import { addDays } from '@/lib/workboard/dates';
+import { addDays, type OverrideModality } from '@/lib/workboard/dates';
 
 /** A recurring class meeting on one calendar date, possibly annotated by `override`. Two
  *  distinct kinds of row share this shape:
@@ -27,7 +27,7 @@ export interface ClassOccurrence {
   is_online:        boolean;
   override: {
     id:               number;
-    modality:         'online' | 'cancelled' | 'rescheduled' | null;
+    modality:         OverrideModality;
     note:             string | null;
     moved_date:       string | null;   // "YYYY-MM-DD", set only when modality is 'rescheduled'
     moved_start_time: string | null;   // "HH:MM"

@@ -19,7 +19,7 @@ import type { WorkContext } from '@/lib/workboard/workContexts';
 // *value* exports, but `import type` is erased entirely, so none of that reaches this client
 // bundle. The one canonical source for these four shapes, not a locally re-typed guess at them.
 import type { ClassOccurrence, WorkboardEventItem, ConflictWarning, DayLoad } from '@/lib/workboard/aggregate';
-import { addDays, dueDateOf, mondayOf, validateOverrideModality } from '@/lib/workboard/dates';
+import { addDays, dueDateOf, mondayOf, validateOverrideModality, type OverrideModality } from '@/lib/workboard/dates';
 import { dueStateOf, formatDeadlineTime } from '@/lib/workboard/dueSemantics';
 // Pool-free (see that module's own header) — the shared raw/darkened course-hue pair, already
 // used by `WorkboardWeekView.tsx` for the identical class-block rendering this file now folds
@@ -57,6 +57,17 @@ const CATEGORY_TEXT: Record<WorkCategory, string> = {
 };
 
 const LEVEL_COLOR: Record<DayLoad['level'], string> = { low: '#74bcd9', medium: '#f2a7c0', high: '#e0607c' };
+
+/** Display text for a non-null, non-'rescheduled' `OverrideModality` — 'rescheduled' is excluded
+ *  from the type on purpose (it never reaches `ClassCard`'s suffix line: a ghost replaces the
+ *  whole line with the moved-to slot instead, and a make-up's own "From <date>" tag already
+ *  says so). One shared map so the popover's `<select>` labels and the card's suffix can never
+ *  read differently for the same value. */
+const MODALITY_LABEL: Record<Exclude<OverrideModality, 'rescheduled' | null>, string> = {
+  online_sync:  'online (sync)',
+  online_async: 'online (async)',
+  cancelled:    'cancelled',
+};
 
 /** `'all'` is the shell's My Work tab — every context at once. Mirrors `WorkBoardView`'s
  *  `BoardContext` and `WorkTableView`'s `TableContext`, and takes the same value from the
@@ -612,7 +623,7 @@ function ClassCard({
               {/* Not for 'rescheduled': a make-up card is the only occurrence that reaches this
                   branch with that modality, and its own "From <date>" tag just below already
                   says so more usefully than repeating the word here. */}
-              {c.override?.modality && c.override.modality !== 'rescheduled' ? ` · ${c.override.modality}` : ''}
+              {c.override?.modality && c.override.modality !== 'rescheduled' ? ` · ${MODALITY_LABEL[c.override.modality]}` : ''}
             </>}
       </span>
       {isMakeup && c.moved_from && (
@@ -731,7 +742,7 @@ async function messageFrom(res: Response, fallback: string): Promise<string> {
     : fallback;
 }
 
-type ModalityChoice = 'online' | 'cancelled' | 'rescheduled' | '';
+type ModalityChoice = 'online_sync' | 'online_async' | 'cancelled' | 'rescheduled' | '';
 
 /**
  * The single-day schedule-exception editor: cancel a meeting, mark it online, or move it to a
@@ -922,8 +933,9 @@ function ClassOverridePopover({
           onChange={e => setModality(e.target.value as ModalityChoice)}
           style={POP_INPUT_STYLE}
         >
-          <option value="">Regular class</option>
-          <option value="online">Online / async</option>
+          <option value="">Face to face class</option>
+          <option value="online_sync">Online (synchronous)</option>
+          <option value="online_async">Online (asynchronous)</option>
           <option value="cancelled">Cancelled</option>
           <option value="rescheduled">Rescheduled (make-up class)</option>
         </select>

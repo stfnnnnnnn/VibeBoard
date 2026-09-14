@@ -81,22 +81,39 @@ export function normaliseDeadlineTime(value: string): string | null {
   return `${match[1]}:${match[2]}:${match[3] ?? '00'}`;
 }
 
+/** The occurrence-level modality vocabulary — `null` means "regular, face-to-face, no
+ *  exception". Two DB-distinct online flavours (`online_sync`, a live remote meeting at the
+ *  usual time; `online_async`, no live meeting at all) rather than one, and `rescheduled` for a
+ *  make-up class moved to a different day/time (see `ScheduleOverrideInput`'s own doc). */
+export type OverrideModality = 'online_sync' | 'online_async' | 'cancelled' | 'rescheduled' | null;
+
 /** Shared by `POST /api/workboard/schedule-overrides` and `PATCH .../[id]`, and — since this
  *  module is pool-free — by the Timeline reschedule popover itself, so a bad moved-date/time
- *  combination is caught before the request round-trip rather than only after. Returns the
- *  four reschedule-relevant fields, defaulted to `null` where the caller omitted them, or an
- *  error message to surface as-is. `blockId`/`overrideDate` (which occurrence this annotates)
- *  are deliberately outside this function's scope — only POST sets them, and they're immutable
- *  once created. */
+ *  combination is caught before the request round-trip rather than only after.
+ *
+ *  Deliberately returns the SAME snake_case shape it accepts (the wire format), not the
+ *  camelCase `ScheduleOverrideInput`/`ScheduleOverrideUpdate` shape those two routes ultimately
+ *  need — this function validates wire data, it doesn't map it to a DB-call shape, and each
+ *  route does that one-line mapping itself. The two API routes need this because the JSON they
+ *  receive over the wire is what they validate; the popover needs it because it constructs the
+ *  request BODY it's about to send from these same validated fields, and would otherwise have
+ *  to convert a validated result back into the wire shape it started from before it could use
+ *  it — the exact mismatch (`{ movedDate }` sent where the server reads `moved_date`) that
+ *  originally shipped here and made every reschedule attempt 400 silently.
+ *
+ *  Returns an error message to surface as-is otherwise. `block_id`/`override_date` (which
+ *  occurrence this annotates) are deliberately outside this function's scope — only POST sets
+ *  them, and they're immutable once created. */
 export function validateOverrideModality(body: {
   modality?: unknown; moved_date?: unknown; moved_start_time?: unknown; moved_end_time?: unknown;
 }): { error: string } | {
-  modality: 'online' | 'cancelled' | 'rescheduled' | null;
-  movedDate: string | null; movedStartTime: string | null; movedEndTime: string | null;
+  modality: OverrideModality;
+  moved_date: string | null; moved_start_time: string | null; moved_end_time: string | null;
 } {
   const { modality, moved_date, moved_start_time, moved_end_time } = body;
-  if (modality != null && modality !== 'online' && modality !== 'cancelled' && modality !== 'rescheduled') {
-    return { error: 'modality must be "online", "cancelled", "rescheduled", or omitted' };
+  if (modality != null && modality !== 'online_sync' && modality !== 'online_async'
+    && modality !== 'cancelled' && modality !== 'rescheduled') {
+    return { error: 'modality must be "online_sync", "online_async", "cancelled", "rescheduled", or omitted' };
   }
   if (modality === 'rescheduled') {
     if (typeof moved_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(moved_date)) {
@@ -109,9 +126,9 @@ export function validateOverrideModality(body: {
     if (moved_end_time <= moved_start_time) {
       return { error: 'moved_end_time must be after moved_start_time' };
     }
-    return { modality, movedDate: moved_date, movedStartTime: moved_start_time, movedEndTime: moved_end_time };
+    return { modality, moved_date, moved_start_time, moved_end_time };
   }
   // Any other modality (or none) annotates the occurrence in place — a moved-to slot from a
   // PATCH that's switching *away* from 'rescheduled' must be cleared, not left dangling.
-  return { modality: modality ?? null, movedDate: null, movedStartTime: null, movedEndTime: null };
+  return { modality: modality ?? null, moved_date: null, moved_start_time: null, moved_end_time: null };
 }

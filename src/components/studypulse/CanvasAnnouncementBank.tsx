@@ -67,7 +67,7 @@ const FILTER_LABELS: Record<Filter, string> = {
 
 interface EventDraft { title: string; location: string; starts_at: string; ends_at: string; user_subject_id: number | null }
 interface ReminderDraft { title: string; remind_at: string }
-interface ScheduleChangeDraft { block_id: number | null; override_date: string; modality: 'online' | 'cancelled'; note: string }
+interface ScheduleChangeDraft { block_id: number | null; override_date: string; modality: 'online_sync' | 'online_async' | 'cancelled'; note: string }
 interface ScheduleBlockOption { block_id: number; course_code: string; section: string | null; day_of_week: number }
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -89,7 +89,7 @@ export default function CanvasAnnouncementBank({ items, onChange }: { items: Ann
   // Event / Reminder / Schedule Change sub-forms
   const [eventDraft, setEventDraft] = useState<EventDraft>({ title: '', location: '', starts_at: '', ends_at: '', user_subject_id: null });
   const [reminderDraft, setReminderDraft] = useState<ReminderDraft>({ title: '', remind_at: '' });
-  const [scheduleDraft, setScheduleDraft] = useState<ScheduleChangeDraft>({ block_id: null, override_date: '', modality: 'online', note: '' });
+  const [scheduleDraft, setScheduleDraft] = useState<ScheduleChangeDraft>({ block_id: null, override_date: '', modality: 'online_sync', note: '' });
   const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlockOption[]>([]);
 
   const filtered = useMemo(() => items.filter(item => {
@@ -109,7 +109,7 @@ export default function CanvasAnnouncementBank({ items, onChange }: { items: Ann
     setTargetType(item.suggested_category.kind === 'legacy' ? item.suggested_category.target : 'activities');
     setEventDraft({ title: item.title, location: '', starts_at: '', ends_at: '', user_subject_id: item.user_subject_id });
     setReminderDraft({ title: item.title, remind_at: '' });
-    setScheduleDraft({ block_id: null, override_date: '', modality: 'online', note: '' });
+    setScheduleDraft({ block_id: null, override_date: '', modality: 'online_sync', note: '' });
 
     const subjectId = item.user_subject_id;
     if (item.subject_mode === 'custom' && subjectId && !periodsBySubject[subjectId]) {
@@ -406,8 +406,9 @@ export default function CanvasAnnouncementBank({ items, onChange }: { items: Ann
                       ))}
                     </select>
                     <input type="date" value={scheduleDraft.override_date} onChange={e => setScheduleDraft(prev => ({ ...prev, override_date: e.target.value }))} className="cab2-select" style={selectStyle} />
-                    <select value={scheduleDraft.modality} onChange={e => setScheduleDraft(prev => ({ ...prev, modality: e.target.value as 'online' | 'cancelled' }))} className="cab2-select" style={selectStyle}>
-                      <option value="online">Async / Online</option>
+                    <select value={scheduleDraft.modality} onChange={e => setScheduleDraft(prev => ({ ...prev, modality: e.target.value as 'online_sync' | 'online_async' | 'cancelled' }))} className="cab2-select" style={selectStyle}>
+                      <option value="online_sync">Online (synchronous)</option>
+                      <option value="online_async">Online (asynchronous)</option>
                       <option value="cancelled">Cancelled</option>
                     </select>
                   </div>

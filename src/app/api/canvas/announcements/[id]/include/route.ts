@@ -41,7 +41,7 @@ interface ScheduleChangeDestination {
   type: 'schedule_change';
   block_id: number;
   override_date: string;
-  modality?: 'online' | 'cancelled' | null;
+  modality?: 'online_sync' | 'online_async' | 'cancelled' | null;
   note?: string | null;
 }
 type DestinationInput = TaskDestination | EventDestination | ReminderDestination | ScheduleChangeDestination;

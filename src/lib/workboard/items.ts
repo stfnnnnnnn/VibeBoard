@@ -1,6 +1,7 @@
 import pool from '@/lib/db';
 import type { ResultSetHeader } from 'mysql2';
 import type { SqlExecutor } from '@/lib/studypulseEntries';
+import type { OverrideModality } from '@/lib/workboard/dates';
 
 export interface WorkboardItemInput {
   userId:               number;
@@ -30,12 +31,13 @@ export async function insertWorkboardItem(
 }
 
 /** `movedDate`/`movedStartTime`/`movedEndTime` are set together, and only when `modality` is
- *  `'rescheduled'` — a make-up class's new slot. `null` for `'online'`/`'cancelled'`/`null`,
- *  which annotate the occurrence in place rather than relocating it. */
+ *  `'rescheduled'` — a make-up class's new slot. `null` for anything else (`'online_sync'`,
+ *  `'online_async'`, `'cancelled'`, or `null`), which annotate the occurrence in place rather
+ *  than relocating it. */
 export interface ScheduleOverrideInput {
   blockId:              number;
   overrideDate:         string;  // "YYYY-MM-DD"
-  modality:             'online' | 'cancelled' | 'rescheduled' | null;
+  modality:             OverrideModality;
   note:                 string | null;
   movedDate:            string | null;  // "YYYY-MM-DD"
   movedStartTime:       string | null;  // "HH:MM"
@@ -63,7 +65,7 @@ export async function insertScheduleOverride(
  *  occurrence this override annotates (see `ScheduleOverrideInput`'s own doc); those are fixed
  *  at creation, exactly like `insertScheduleOverride`'s equivalents. */
 export interface ScheduleOverrideUpdate {
-  modality:       'online' | 'cancelled' | 'rescheduled' | null;
+  modality:       OverrideModality;
   note:           string | null;
   movedDate:      string | null;
   movedStartTime: string | null;

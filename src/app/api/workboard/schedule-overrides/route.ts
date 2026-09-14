@@ -29,7 +29,9 @@ export async function POST(req: NextRequest) {
   try {
     const { overrideId } = await insertScheduleOverride({
       blockId: block_id, overrideDate: override_date, note: note || null,
-      ...validated, sourceType: 'manual', sourceAnnouncementId: null,
+      modality: validated.modality, movedDate: validated.moved_date,
+      movedStartTime: validated.moved_start_time, movedEndTime: validated.moved_end_time,
+      sourceType: 'manual', sourceAnnouncementId: null,
     });
     return Response.json({ status: 'success', override_id: overrideId });
   } catch (err: unknown) {

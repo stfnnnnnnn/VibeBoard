@@ -512,7 +512,14 @@ export async function ensureWorkboardSchema(): Promise<void> {
   // 'rescheduled'; enforced at the API layer (schedule_overrides has no CHECK for it because
   // MySQL CHECK clauses can't cheaply express "all three or none" against three plain nullable
   // columns the way this table's other CHECKs express "exactly one of these FKs").
-  await pool.query(`ALTER TABLE schedule_overrides MODIFY COLUMN modality ENUM('online','cancelled','rescheduled') NULL`);
+  //
+  // `online` is split into `online_sync`/`online_async` in the same breath (the UI asked to
+  // distinguish a live remote meeting from an asynchronous one) — existing rows are migrated to
+  // `online_sync` BEFORE the column is narrowed to the new vocabulary, since a MODIFY that drops
+  // an enum value out from under rows still holding it would silently blank them to `''`
+  // (MySQL's documented behaviour for a value no longer in the list) rather than erroring.
+  await pool.query(`UPDATE schedule_overrides SET modality = 'online_sync' WHERE modality = 'online'`);
+  await pool.query(`ALTER TABLE schedule_overrides MODIFY COLUMN modality ENUM('online_sync','online_async','cancelled','rescheduled') NULL`);
   for (const [col, clause] of [
     ['moved_date',       `ADD COLUMN moved_date DATE NULL`],
     ['moved_start_time', `ADD COLUMN moved_start_time TIME NULL`],

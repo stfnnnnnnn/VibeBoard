@@ -29,7 +29,10 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   const validated = validateOverrideModality(body);
   if ('error' in validated) return Response.json({ error: validated.error }, { status: 400 });
 
-  await updateScheduleOverride(overrideId, { ...validated, note: body.note || null });
+  await updateScheduleOverride(overrideId, {
+    modality: validated.modality, note: body.note || null,
+    movedDate: validated.moved_date, movedStartTime: validated.moved_start_time, movedEndTime: validated.moved_end_time,
+  });
   return Response.json({ status: 'success' });
 }
 
