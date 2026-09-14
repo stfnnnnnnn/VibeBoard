@@ -80,3 +80,38 @@ export function normaliseDeadlineTime(value: string): string | null {
   if (!match) return null;
   return `${match[1]}:${match[2]}:${match[3] ?? '00'}`;
 }
+
+/** Shared by `POST /api/workboard/schedule-overrides` and `PATCH .../[id]`, and — since this
+ *  module is pool-free — by the Timeline reschedule popover itself, so a bad moved-date/time
+ *  combination is caught before the request round-trip rather than only after. Returns the
+ *  four reschedule-relevant fields, defaulted to `null` where the caller omitted them, or an
+ *  error message to surface as-is. `blockId`/`overrideDate` (which occurrence this annotates)
+ *  are deliberately outside this function's scope — only POST sets them, and they're immutable
+ *  once created. */
+export function validateOverrideModality(body: {
+  modality?: unknown; moved_date?: unknown; moved_start_time?: unknown; moved_end_time?: unknown;
+}): { error: string } | {
+  modality: 'online' | 'cancelled' | 'rescheduled' | null;
+  movedDate: string | null; movedStartTime: string | null; movedEndTime: string | null;
+} {
+  const { modality, moved_date, moved_start_time, moved_end_time } = body;
+  if (modality != null && modality !== 'online' && modality !== 'cancelled' && modality !== 'rescheduled') {
+    return { error: 'modality must be "online", "cancelled", "rescheduled", or omitted' };
+  }
+  if (modality === 'rescheduled') {
+    if (typeof moved_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(moved_date)) {
+      return { error: 'A rescheduled class needs moved_date (YYYY-MM-DD)' };
+    }
+    if (typeof moved_start_time !== 'string' || !TIME_PATTERN.test(moved_start_time)
+      || typeof moved_end_time !== 'string' || !TIME_PATTERN.test(moved_end_time)) {
+      return { error: 'A rescheduled class needs moved_start_time and moved_end_time (HH:MM)' };
+    }
+    if (moved_end_time <= moved_start_time) {
+      return { error: 'moved_end_time must be after moved_start_time' };
+    }
+    return { modality, movedDate: moved_date, movedStartTime: moved_start_time, movedEndTime: moved_end_time };
+  }
+  // Any other modality (or none) annotates the occurrence in place — a moved-to slot from a
+  // PATCH that's switching *away* from 'rescheduled' must be cleared, not left dangling.
+  return { modality: modality ?? null, movedDate: null, movedStartTime: null, movedEndTime: null };
+}

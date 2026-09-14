@@ -11,13 +11,15 @@ import WorkboardStats from './WorkboardStats';
 import WorkboardRail from './WorkboardRail';
 import WorkItemDialog, { type DialogTarget } from './WorkItemDialog';
 import WorkItemDetail from './WorkItemDetail';
+import NewItemTypeChooser, { type NewItemType } from './NewItemTypeChooser';
+import WorkboardEventDialog, { type EventDialogTarget } from './WorkboardEventDialog';
 // Spec §23's Filters popover. `matchesFilters` is the pure predicate this shell composes into
 // `visibleItems` below — the popover owns the panel's UI, this file owns where the result is
 // applied, so all four views keep filtering through exactly one memo.
 import WorkboardFilters, {
   EMPTY_FILTERS, countActiveFilters, matchesFilters, type FilterState,
 } from './WorkboardFilters';
-import type { WorkboardWeek } from '@/lib/workboard/aggregate';
+import type { WorkboardWeek, WorkboardEventItem } from '@/lib/workboard/aggregate';
 import type { WorkItem, ProjectSummary } from '@/lib/workboard/workItems';
 // `WORK_CATEGORIES`/`WorkCategory` come from `workCategories.ts`, not `workItems.ts` — the
 // latter imports `@/lib/db` (mysql2), which cannot be bundled into this client component.
@@ -134,6 +136,17 @@ export default function WorkboardShell(
   const [week, setWeek] = useState<WorkboardWeek>(initialWeek);
   const [weekLoading, setWeekLoading] = useState(false);
   const [dialogTarget, setDialogTarget] = useState<DialogTarget | null>(null);
+  /** "New Work Item" opens this first, not `dialogTarget` directly — a Task and an
+   *  Event/Reminder are different tables behind one button (see `NewItemTypeChooser`'s own
+   *  doc), so the button's first job is finding out which the user means. `true` only while
+   *  this initial choice is showing; the moment one is made it closes and hands off to
+   *  `dialogTarget` (Task) or `eventDialogTarget` (Event/Reminder) below. */
+  const [typeChooserOpen, setTypeChooserOpen] = useState(false);
+  /** `dialogTarget`'s sibling for the other table `openCreateDialog` can now reach —
+   *  `workboard_items`, via `WorkboardEventDialog`. Also opened directly (skipping the
+   *  chooser) when Timeline's `EventCard` is clicked to edit one that already exists, since at
+   *  that point the type is already settled by which row was clicked. */
+  const [eventDialogTarget, setEventDialogTarget] = useState<EventDialogTarget | null>(null);
   /** The item whose detail drawer is open, or null. Same shape and same lifetime as
    *  `dialogTarget` above — the drawer is the dialog's sibling, not a second kind of state. */
   const [detailItem, setDetailItem] = useState<WorkItem | null>(null);
@@ -161,8 +174,26 @@ export default function WorkboardShell(
     }
   };
 
-  const openCreateDialog = () => setDialogTarget({ mode: 'create' });
+  const openCreateDialog = () => setTypeChooserOpen(true);
   const openEditDialog = (item: WorkItem) => setDialogTarget({ mode: 'edit', item });
+
+  /** The chooser's one job: decide which of the two dialogs "New Work Item" actually meant. */
+  const handleChooseType = (type: NewItemType) => {
+    setTypeChooserOpen(false);
+    if (type === 'task') setDialogTarget({ mode: 'create' });
+    else setEventDialogTarget({ mode: 'create', itemType: type });
+  };
+
+  const openEditEventDialog = (item: WorkboardEventItem) => setEventDialogTarget({ mode: 'edit', item });
+
+  /** Re-fetches the CURRENTLY visible week without navigating — `goToWeek` with `week`'s own
+   *  `week_start` still re-runs the fetch, which is exactly "reload what an event/reminder
+   *  write just changed" for `WorkboardEventDialog`'s `onSaved`. Timeline's own override editor
+   *  does the equivalent by calling `onWeekChange` directly (see its own comment for why it
+   *  avoids this wrapper specifically); this one is fine to use here because closing the type
+   *  chooser or the event dialog was never coupled to `focusedDay` the way Timeline's internal
+   *  navigation is. */
+  const refreshWeek = () => goToWeek(week.week_start);
 
   const openDetail = (item: WorkItem) => setDetailItem(item);
   const closeDetail = () => setDetailItem(null);
@@ -421,7 +452,7 @@ export default function WorkboardShell(
             onClick={openCreateDialog}
             style={{ width: 'auto', minHeight: '40px', padding: '8px 18px', boxSizing: 'border-box' }}
           >
-            New Work Item
+            New Item
           </button>
 
           <div style={{ position: 'relative', minWidth: '220px' }}>
@@ -446,7 +477,7 @@ export default function WorkboardShell(
               form. Placed immediately after the search box because the two do the same job —
               narrowing what the view below shows — and reading "Search … Filters" left to right
               keeps the pair together at the toolbar's trailing edge, where the panel can anchor
-              to the trigger's right edge without crossing the New Work Item button.
+              to the trigger's right edge without crossing the New Item button.
               `context={category}` is the same value `visibleItems` filters by, deliberately: the
               popover's status vocabulary and its project grouping both have to describe the slice
               the user is actually looking at. */}
@@ -547,6 +578,7 @@ export default function WorkboardShell(
                 events={[...week.events, ...week.reminders]}
                 onWeekChange={goToWeek}
                 weekLoading={weekLoading}
+                onEditEvent={openEditEventDialog}
               />
             )}
           </div>
@@ -560,6 +592,10 @@ export default function WorkboardShell(
         )}
       </div>
 
+      {typeChooserOpen && (
+        <NewItemTypeChooser onChoose={handleChooseType} onClose={() => setTypeChooserOpen(false)} />
+      )}
+
       {dialogTarget && (
         <WorkItemDialog
           target={dialogTarget}
@@ -567,6 +603,14 @@ export default function WorkboardShell(
           onClose={() => setDialogTarget(null)}
           onSaved={refreshWork}
           onProjectCreated={handleProjectCreated}
+        />
+      )}
+
+      {eventDialogTarget && (
+        <WorkboardEventDialog
+          target={eventDialogTarget}
+          onClose={() => setEventDialogTarget(null)}
+          onSaved={refreshWeek}
         />
       )}
 

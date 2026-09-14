@@ -428,7 +428,7 @@ export default function WorkBoardView({ items, context = 'all', todayStr, isFilt
           Work items you create will show up here as cards.
         </p>
         <button type="button" className="vb-btn-pink" onClick={onNewItem} style={{ width: 'auto', padding: '10px 22px' }}>
-          New Work Item
+          New Item
         </button>
       </div>
     );

@@ -29,11 +29,17 @@ export async function insertWorkboardItem(
   return { itemId: r.insertId };
 }
 
+/** `movedDate`/`movedStartTime`/`movedEndTime` are set together, and only when `modality` is
+ *  `'rescheduled'` — a make-up class's new slot. `null` for `'online'`/`'cancelled'`/`null`,
+ *  which annotate the occurrence in place rather than relocating it. */
 export interface ScheduleOverrideInput {
   blockId:              number;
   overrideDate:         string;  // "YYYY-MM-DD"
-  modality:             'online' | 'cancelled' | null;
+  modality:             'online' | 'cancelled' | 'rescheduled' | null;
   note:                 string | null;
+  movedDate:            string | null;  // "YYYY-MM-DD"
+  movedStartTime:       string | null;  // "HH:MM"
+  movedEndTime:         string | null;  // "HH:MM"
   sourceType:           'manual' | 'canvas_announcement';
   sourceAnnouncementId: number | null;
 }
@@ -43,9 +49,35 @@ export async function insertScheduleOverride(
 ): Promise<{ overrideId: number }> {
   const [r] = await db.execute<ResultSetHeader>(
     `INSERT INTO schedule_overrides
-       (block_id, override_date, modality, note, source_type, source_announcement_id)
-     VALUES (?,?,?,?,?,?)`,
-    [input.blockId, input.overrideDate, input.modality, input.note, input.sourceType, input.sourceAnnouncementId],
+       (block_id, override_date, modality, note, moved_date, moved_start_time, moved_end_time,
+        source_type, source_announcement_id)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    [input.blockId, input.overrideDate, input.modality, input.note,
+     input.movedDate, input.movedStartTime, input.movedEndTime,
+     input.sourceType, input.sourceAnnouncementId],
   );
   return { overrideId: r.insertId };
 }
+
+/** The fields a PATCH can change — never `blockId`/`overrideDate`, which identify WHICH
+ *  occurrence this override annotates (see `ScheduleOverrideInput`'s own doc); those are fixed
+ *  at creation, exactly like `insertScheduleOverride`'s equivalents. */
+export interface ScheduleOverrideUpdate {
+  modality:       'online' | 'cancelled' | 'rescheduled' | null;
+  note:           string | null;
+  movedDate:      string | null;
+  movedStartTime: string | null;
+  movedEndTime:   string | null;
+}
+
+export async function updateScheduleOverride(
+  overrideId: number, input: ScheduleOverrideUpdate, db: SqlExecutor = pool,
+): Promise<void> {
+  await db.execute(
+    `UPDATE schedule_overrides
+     SET modality = ?, note = ?, moved_date = ?, moved_start_time = ?, moved_end_time = ?
+     WHERE id = ?`,
+    [input.modality, input.note, input.movedDate, input.movedStartTime, input.movedEndTime, overrideId],
+  );
+}
+

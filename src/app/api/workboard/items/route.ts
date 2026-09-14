@@ -23,6 +23,9 @@ export async function POST(req: NextRequest) {
   if (item_type === 'event' && (!starts_at || !ends_at)) {
     return Response.json({ error: 'Events require starts_at and ends_at' }, { status: 400 });
   }
+  if (item_type === 'reminder' && !remind_at) {
+    return Response.json({ error: 'Reminders require remind_at' }, { status: 400 });
+  }
   if (user_subject_id != null) {
     const [owns] = await pool.execute<RowDataPacket[]>(
       'SELECT 1 FROM user_subjects WHERE user_subject_id = ? AND user_id = ?', [user_subject_id, userId],

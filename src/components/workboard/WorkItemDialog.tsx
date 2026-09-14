@@ -518,9 +518,10 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   }, [context, organizations]);
 
   useEffect(() => {
-    // Restore focus to whatever opened this dialog (a row's "Edit" menu item, the shell's or
-    // the empty state's "New Work Item" button) once it closes — otherwise a keyboard user
-    // lands back on `document.body` and has to re-tab from the top of the page.
+    // Restore focus to whatever opened this dialog (a row's "Edit" menu item, or — since
+    // `NewItemTypeChooser` now sits between a "New Item" button and this dialog — whichever
+    // element the chooser itself restored focus to, moments earlier) once it closes; otherwise
+    // a keyboard user lands back on `document.body` and has to re-tab from the top of the page.
     const opener = document.activeElement as HTMLElement | null;
     firstFieldRef.current?.focus();
     const prevOverflow = document.body.style.overflow;

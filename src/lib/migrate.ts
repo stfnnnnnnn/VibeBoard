@@ -506,6 +506,23 @@ export async function ensureWorkboardSchema(): Promise<void> {
     )
   `);
 
+  // Single-day reschedule (make-up classes): `override_date` stays the occurrence's OWN
+  // original date (it's the lookup key `getWorkboardWeek` joins on, unchanged) — these three
+  // columns are where it moved TO. All three are set together, only when modality is
+  // 'rescheduled'; enforced at the API layer (schedule_overrides has no CHECK for it because
+  // MySQL CHECK clauses can't cheaply express "all three or none" against three plain nullable
+  // columns the way this table's other CHECKs express "exactly one of these FKs").
+  await pool.query(`ALTER TABLE schedule_overrides MODIFY COLUMN modality ENUM('online','cancelled','rescheduled') NULL`);
+  for (const [col, clause] of [
+    ['moved_date',       `ADD COLUMN moved_date DATE NULL`],
+    ['moved_start_time', `ADD COLUMN moved_start_time TIME NULL`],
+    ['moved_end_time',   `ADD COLUMN moved_end_time TIME NULL`],
+  ] as [string, string][]) {
+    if (!(await columnExists('schedule_overrides', col))) {
+      await pool.query(`ALTER TABLE schedule_overrides ${clause}`);
+    }
+  }
+
   if (!(await columnExists('canvas_announcement_links', 'workboard_item_id'))) {
     await pool.query(`
       ALTER TABLE canvas_announcement_links

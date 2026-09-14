@@ -196,7 +196,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
         } else {
           linkedId = (await insertScheduleOverride({
             blockId: d.block_id, overrideDate: d.override_date, modality: d.modality ?? null,
-            note: d.note ?? null, sourceType: 'canvas_announcement', sourceAnnouncementId: announcementId,
+            note: d.note ?? null, movedDate: null, movedStartTime: null, movedEndTime: null,
+            sourceType: 'canvas_announcement', sourceAnnouncementId: announcementId,
           }, conn)).overrideId;
           linkColumn = 'schedule_override_id';
         }

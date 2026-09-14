@@ -619,7 +619,7 @@ export default function WorkTableView({
             Add your first work item to get started.
           </p>
           <button type="button" className="vb-btn-pink" onClick={onNewItem} style={{ width: 'auto', padding: '10px 22px' }}>
-            New Work Item
+            New Item
           </button>
         </div>
       );
@@ -647,7 +647,7 @@ export default function WorkTableView({
     // the two tests above are what make the `CONTEXT_LABELS` lookup below type-check.
     // New to Table: a context the user has simply not put any work into yet. Distinct from the
     // two states above because the fix *is* available from this view — direction doc §5e only
-    // grants an action button when that is true — so this one offers New Work Item.
+    // grants an action button when that is true — so this one offers New Item.
     return (
       <div style={{ textAlign: 'center', padding: '60px 20px' }}>
         <Table2 size={48} color="#9aa4b5" style={{ marginBottom: '14px' }} />
@@ -658,7 +658,7 @@ export default function WorkTableView({
           Work items you add under this context will appear here as rows.
         </p>
         <button type="button" className="vb-btn-pink" onClick={onNewItem} style={{ width: 'auto', padding: '10px 22px' }}>
-          New Work Item
+          New Item
         </button>
       </div>
     );

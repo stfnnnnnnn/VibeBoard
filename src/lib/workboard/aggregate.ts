@@ -2,6 +2,18 @@ import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
 import { addDays } from '@/lib/workboard/dates';
 
+/** A recurring class meeting on one calendar date, possibly annotated by `override`. Two
+ *  distinct kinds of row share this shape:
+ *   - a REGULAR occurrence, generated from `schedule_blocks`' weekly template — `moved_from`
+ *     is absent. If `override` is set, it annotates THIS date: cancelled, marked online, or
+ *     (for a make-up class) moved elsewhere, in which case this occurrence is a ghost — the
+ *     class doesn't meet here, `override.moved_date`/`moved_start_time`/`moved_end_time` say
+ *     where it moved to instead.
+ *   - a MAKE-UP occurrence — synthesized from a `'rescheduled'` override's moved-to slot,
+ *     landing on `override.moved_date` (which may fall in a different week than the block's
+ *     own recurring day). `moved_from` is set to the ORIGINAL occurrence's date, so the UI can
+ *     render "Rescheduled from <date>" — and unlike the ghost above, this one really happens:
+ *     conflict/heatmap logic must count it, not skip it (see `occursHere` below). */
 export interface ClassOccurrence {
   block_id:         number;
   user_subject_id:  number | null;
@@ -13,7 +25,15 @@ export interface ClassOccurrence {
   end_time:         string;   // "HH:MM"
   venue:            string | null;
   is_online:        boolean;
-  override:         { modality: 'online' | 'cancelled' | null; note: string | null } | null;
+  override: {
+    id:               number;
+    modality:         'online' | 'cancelled' | 'rescheduled' | null;
+    note:             string | null;
+    moved_date:       string | null;   // "YYYY-MM-DD", set only when modality is 'rescheduled'
+    moved_start_time: string | null;   // "HH:MM"
+    moved_end_time:   string | null;   // "HH:MM"
+  } | null;
+  moved_from?: string;   // "YYYY-MM-DD" — present only on a synthesized make-up occurrence
 }
 
 export interface DeadlineItem {
@@ -101,13 +121,26 @@ function rangesOverlap(aStart: number, aEnd: number, bStart: number, bEnd: numbe
   return aStart < bEnd && bStart < aEnd;
 }
 
+/** Whether a class actually meets at this occurrence's own date/time — as opposed to merely
+ *  appearing in the list so the UI has something to render there. A cancelled or rescheduled
+ *  occurrence with no `moved_from` is a ghost (the class isn't happening on ITS date; for
+ *  'rescheduled' it's happening on `override.moved_date` instead, which is where the make-up
+ *  occurrence carrying `moved_from` lives) — conflict detection and the heatmap must skip
+ *  exactly the ghost and count exactly the make-up, which is what checking `moved_from` first
+ *  gets right: a make-up's OWN `override.modality` also reads `'rescheduled'`, so a check that
+ *  only looked at `modality` would wrongly exclude the very occurrence that does happen. */
+function occursHere(c: ClassOccurrence): boolean {
+  if (c.moved_from !== undefined) return true;
+  return c.override?.modality !== 'cancelled' && c.override?.modality !== 'rescheduled';
+}
+
 export function detectConflicts(
   classOccurrences: ClassOccurrence[], events: WorkboardEventItem[],
 ): ConflictWarning[] {
   const byDate = new Map<string, { label: string; start: number; end: number }[]>();
 
   for (const c of classOccurrences) {
-    if (c.override?.modality === 'cancelled') continue;
+    if (!occursHere(c)) continue;
     const list = byDate.get(c.date) ?? [];
     list.push({ label: `${c.course_code} class`, start: timeToMinutes(c.start_time), end: timeToMinutes(c.end_time) });
     byDate.set(c.date, list);
@@ -177,7 +210,7 @@ export function computeHeatmap(
   for (let i = 0; i < 7; i++) {
     const date = addDays(weekStart, i);
 
-    const classesOnDay = classOccurrences.filter(c => c.date === date && c.override?.modality !== 'cancelled');
+    const classesOnDay = classOccurrences.filter(c => c.date === date && occursHere(c));
     const classHours = classesOnDay.reduce(
       (sum, c) => sum + (timeToMinutes(c.end_time) - timeToMinutes(c.start_time)) / 60, 0,
     );
@@ -207,7 +240,8 @@ export async function getWorkboardWeek(userId: number, weekStart: string): Promi
   );
 
   const [overrideRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT so.block_id, so.override_date, so.modality, so.note
+    `SELECT so.id, so.block_id, so.override_date, so.modality, so.note,
+            so.moved_date, so.moved_start_time, so.moved_end_time
      FROM schedule_overrides so
      JOIN schedule_blocks sb ON sb.block_id = so.block_id
      WHERE sb.user_id = ? AND so.override_date BETWEEN ? AND ?`,
@@ -217,6 +251,12 @@ export async function getWorkboardWeek(userId: number, weekStart: string): Promi
   for (const o of overrideRows) {
     overrideByKey.set(`${o.block_id}:${String(o.override_date).slice(0, 10)}`, o);
   }
+  const toOverride = (o: RowDataPacket): ClassOccurrence['override'] => ({
+    id: o.id, modality: o.modality, note: o.note,
+    moved_date: o.moved_date ? String(o.moved_date).slice(0, 10) : null,
+    moved_start_time: o.moved_start_time ? String(o.moved_start_time).slice(0, 5) : null,
+    moved_end_time: o.moved_end_time ? String(o.moved_end_time).slice(0, 5) : null,
+  });
 
   const classOccurrences: ClassOccurrence[] = [];
   for (const b of blockRows) {
@@ -229,7 +269,37 @@ export async function getWorkboardWeek(userId: number, weekStart: string): Promi
       subject_name: b.subject_name, section: b.section, date,
       start_time: String(b.start_time).slice(0, 5), end_time: String(b.end_time).slice(0, 5),
       venue: b.venue, is_online: Boolean(b.is_online),
-      override: override ? { modality: override.modality, note: override.note } : null,
+      override: override ? toOverride(override) : null,
+    });
+  }
+
+  // Make-up occurrences: a 'rescheduled' override's NEW slot, which can land in a different
+  // week than its own `override_date` (the query above, filtered by `override_date`, would
+  // never see it if the block's regular weekly date and its moved-to date fall on opposite
+  // sides of a week boundary). Queried independently, by `moved_date` instead — the row found
+  // here may be the SAME override already present in `overrideRows` above (a same-week move),
+  // in which case the block loop already pushed its ghost; this loop only ever adds the
+  // make-up side, never touches the ghost.
+  const [makeupRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT so.id, so.block_id, so.override_date, so.modality, so.note,
+            so.moved_date, so.moved_start_time, so.moved_end_time,
+            sb.user_subject_id, sb.course_code, sb.section, sb.venue, sb.is_online, s.subject_name
+     FROM schedule_overrides so
+     JOIN schedule_blocks sb ON sb.block_id = so.block_id
+     LEFT JOIN user_subjects us ON sb.user_subject_id = us.user_subject_id
+     LEFT JOIN subjects s ON us.subject_id = s.subject_id
+     WHERE sb.user_id = ? AND so.modality = 'rescheduled' AND so.moved_date BETWEEN ? AND ?`,
+    [userId, weekStart, weekEnd],
+  );
+  for (const o of makeupRows) {
+    classOccurrences.push({
+      block_id: o.block_id, user_subject_id: o.user_subject_id, course_code: o.course_code,
+      subject_name: o.subject_name, section: o.section,
+      date: String(o.moved_date).slice(0, 10),
+      start_time: String(o.moved_start_time).slice(0, 5), end_time: String(o.moved_end_time).slice(0, 5),
+      venue: o.venue, is_online: Boolean(o.is_online),
+      override: toOverride(o),
+      moved_from: String(o.override_date).slice(0, 10),
     });
   }
 

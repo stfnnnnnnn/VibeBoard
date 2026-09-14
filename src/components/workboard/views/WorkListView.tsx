@@ -128,7 +128,7 @@ export default function WorkListView({ items: allItems, todayStr, isFiltered, on
           Add your first work item to get started.
         </p>
         <button type="button" className="vb-btn-pink" onClick={onNewItem} style={{ width: 'auto', padding: '10px 22px' }}>
-          New Work Item
+          New Item
         </button>
       </div>
     );
