@@ -15,7 +15,7 @@ import type { WorkContext } from '@/lib/workboard/workContexts';
 // *value* exports, but `import type` is erased entirely, so none of that reaches this client
 // bundle. The one canonical source for these four shapes, not a locally re-typed guess at them.
 import type { ClassOccurrence, WorkboardEventItem, ConflictWarning, DayLoad } from '@/lib/workboard/aggregate';
-import { addDays, dueDateOf } from '@/lib/workboard/dates';
+import { addDays, dueDateOf, mondayOf } from '@/lib/workboard/dates';
 import { dueStateOf, formatDeadlineTime } from '@/lib/workboard/dueSemantics';
 // Pool-free (see that module's own header) — the shared raw/darkened course-hue pair, already
 // used by `WorkboardWeekView.tsx` for the identical class-block rendering this file now folds
@@ -200,6 +200,9 @@ export default function WorkTimelineView({
 
   const dayDates = Array.from({ length: WINDOW_DAYS }, (_, i) => addDays(weekStart, i));
   const weekEnd  = dayDates[WINDOW_DAYS - 1];
+  // Compared against `weekStart` to grey out "Today" once it's already the visible week — a
+  // week can be reached going forward OR back, so this can't just be "disable Next".
+  const isCurrentWeek = weekStart === mondayOf(today);
 
   const plotted = items.map(item => plot(item, weekStart)).filter((p): p is Plotted => p !== null);
   const bars    = plotted.filter((p): p is PlottedBar => p.kind === 'bar');
@@ -241,6 +244,20 @@ export default function WorkTimelineView({
             }}
           >
             <ChevronLeft size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={() => goToWeek(mondayOf(today))}
+            disabled={weekLoading || isCurrentWeek}
+            className="vb-tl-nav"
+            style={{
+              height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              borderRadius: '8px', border: '1px solid rgba(200,210,230,0.6)', background: 'rgba(255,255,255,0.6)',
+              padding: '0 12px', fontFamily: FONT, fontSize: '0.76rem', fontWeight: 700, color: '#5c6b80',
+              cursor: weekLoading || isCurrentWeek ? 'default' : 'pointer', opacity: weekLoading || isCurrentWeek ? 0.5 : 1,
+            }}
+          >
+            Today
           </button>
           <button
             type="button"
@@ -314,8 +331,17 @@ export default function WorkTimelineView({
       {/* Day columns — the primary layout. Each column stacks that day's class blocks, work
           items, and events/reminders as cards, in that order. Clicking a day's header expands
           it (more room, unaffected by the others shrinking) and shrinks the rest to a slim
-          strip; a second click returns the week to even columns. */}
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+          strip; a second click returns the week to even columns.
+          `alignItems: 'stretch'` (the flex default, set explicitly here) is what makes every
+          column the SAME height regardless of how much that day holds: each is a flex item in
+          one row, so all of them stretch to match whichever one needs the most room — a quiet
+          Tuesday no longer reads as a visually "smaller" day than a packed Monday next to it.
+          Focusing a day grows this same effect: its cards render `expanded` (more fields per
+          card, taller), which grows the whole row's height, and every column — focused or
+          not — stretches to match; the width swing is deliberately mild (1.7:0.85:1, not the
+          earlier 3:0.6:1) since the row's new height already does most of the "this day is now
+          the center of attention" work. */}
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
         {dayDates.map((date, i) => {
           const isToday    = date === today;
           const isFocused  = focusedDay === date;
@@ -323,13 +349,16 @@ export default function WorkTimelineView({
           const load       = heatmapFor(date);
           const dayConflicts = conflictsByDay(date);
           const d = new Date(`${date}T00:00:00Z`);
+          const dayItems   = markersByDay.get(date) ?? [];
+          const doneCount  = dayItems.filter(p => p.item.work_status === 'done').length;
 
           return (
             <div
               key={date}
               style={{
-                flex: isFocused ? '3 1 0' : isDimmed ? '0.6 1 0' : '1 1 0',
-                minWidth: 0, transition: 'flex-grow 180ms ease',
+                flex: isFocused ? '1.7 1 0' : isDimmed ? '0.85 1 0' : '1 1 0',
+                minWidth: 0, minHeight: '220px', transition: 'flex-grow 180ms ease',
+                display: 'flex', flexDirection: 'column',
                 background: 'rgba(255,255,255,0.4)', borderRadius: '14px',
                 border: isToday ? '1.5px solid #74bcd9' : '1px solid rgba(200,210,230,0.4)',
                 padding: '8px', boxSizing: 'border-box',
@@ -369,13 +398,36 @@ export default function WorkTimelineView({
                 </span>
               </button>
 
+              {/* This day's work-item completion, at a glance — the same signal Focus and
+                  Board's per-column meta already give per-item, rolled up per-day here since a
+                  focused-out, narrow column has no room left for per-card text. Red rather than
+                  the done-teal the instant one of today's items is overdue: a day that's "60%
+                  done but the other 40% is late" is not the same shade of fine as "60% done, on
+                  track", and the bar is the only thing still visible on a dimmed column. */}
+              {dayItems.length > 0 && (
+                <div
+                  role="progressbar"
+                  aria-valuenow={doneCount}
+                  aria-valuemin={0}
+                  aria-valuemax={dayItems.length}
+                  aria-label={`${doneCount} of ${dayItems.length} work item${dayItems.length === 1 ? '' : 's'} done`}
+                  style={{ height: '3px', borderRadius: '999px', background: 'rgba(200,210,230,0.35)', marginBottom: '7px', overflow: 'hidden', flexShrink: 0 }}
+                >
+                  <div style={{
+                    height: '100%', width: `${(doneCount / dayItems.length) * 100}%`, borderRadius: '999px',
+                    background: dayItems.some(p => dueStateOf(p.item, today) === 'overdue') ? '#e0607c' : '#74bcd9',
+                    transition: 'width 200ms ease',
+                  }} />
+                </div>
+              )}
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                 {classesByDay(date).map(c => <ClassCard key={`c${c.block_id}`} c={c} expanded={isFocused} />)}
-                {(markersByDay.get(date) ?? []).map(p => (
+                {dayItems.map(p => (
                   <WorkCard key={itemKey(p.item)} item={p.item} today={today} expanded={isFocused} />
                 ))}
                 {eventsByDay(date).map(e => <EventCard key={`e${e.id}`} e={e} expanded={isFocused} />)}
-                {classesByDay(date).length === 0 && (markersByDay.get(date) ?? []).length === 0 && eventsByDay(date).length === 0 && (
+                {classesByDay(date).length === 0 && dayItems.length === 0 && eventsByDay(date).length === 0 && (
                   <span style={{ fontFamily: FONT, fontSize: '0.7rem', color: '#9aa4b5', padding: '4px 2px' }}>
                     {isDimmed ? '' : 'Nothing scheduled'}
                   </span>

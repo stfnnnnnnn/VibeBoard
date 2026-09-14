@@ -25,6 +25,16 @@ export function addDays(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** The Monday ("YYYY-MM-DD") of the ISO week containing `dateStr`, computed in UTC — same
+ *  convention as `addDays`, and the same Monday-start `aggregate.ts`'s own (pool-importing,
+ *  so unreachable from a client bundle) `mondayOf()` uses for the whole-board week. Kept here,
+ *  pool-free, so a client component (`WorkTimelineView.tsx`'s "Today" jump) can compute the
+ *  Monday of an arbitrary date — usually `today` — without reaching into that module. */
+export function mondayOf(dateStr: string): string {
+  const day = new Date(`${dateStr}T00:00:00Z`).getUTCDay(); // 0=Sun..6=Sat
+  return addDays(dateStr, day === 0 ? -6 : 1 - day);
+}
+
 /** Current instant's wall-clock reading in Asia/Manila, as "YYYY-MM-DD HH:MM:SS" for a
  *  DATETIME column. Every consumer of `workboard_work_items.completed_at`
  *  (`workStats.ts`'s `completed7d`, `workItems.ts`'s 14-day retention cutoff) does

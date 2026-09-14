@@ -52,6 +52,26 @@ export type BoardContext = WorkContext | 'all';
  *  (`todo`/`in_progress`/`done`) incapable of producing an illegal stage for any item. */
 const MY_WORK_STAGES: WorkStatus[] = ['todo', 'in_progress', 'done'];
 
+/** Gives each column its own quiet identity instead of eight identical white panels — the
+ *  Board's own request for something "more special" without inventing a new hue vocabulary:
+ *  `blocked` reuses the exact amber the in-card Blocked badge already means (§2a), `done`
+ *  is the one genuinely new colour (green reads as "complete" nowhere else in this app, so it
+ *  can't collide with a category or priority meaning), and every stage in between gets the
+ *  same calm "in motion" teal — the point is only to separate "not started yet" / "moving" /
+ *  "stuck" / "finished" at a glance, not to give every one of the eight stages its own hue.
+ *  A `Record<WorkStage, …>` for the same reason `STAGE_EMPTY_TEXT` is one: a stage added to
+ *  `workContexts.ts` is forced to have this decided rather than silently falling through. */
+const STAGE_TINT: Record<WorkStage, { wash: string; accent: string; text: string }> = {
+  backlog:         { wash: 'rgba(138,148,166,0.07)', accent: 'rgba(138,148,166,0.55)', text: '#5c6b80' },
+  todo:            { wash: 'rgba(138,148,166,0.07)', accent: 'rgba(138,148,166,0.55)', text: '#5c6b80' },
+  in_progress:     { wash: 'rgba(116,188,217,0.09)', accent: '#74bcd9', text: '#256f92' },
+  ready_to_submit: { wash: 'rgba(116,188,217,0.09)', accent: '#74bcd9', text: '#256f92' },
+  submitted:       { wash: 'rgba(116,188,217,0.09)', accent: '#74bcd9', text: '#256f92' },
+  review:          { wash: 'rgba(116,188,217,0.09)', accent: '#74bcd9', text: '#256f92' },
+  blocked:         { wash: 'rgba(240,163,92,0.12)',  accent: '#8a5010', text: '#8a5010' },
+  done:            { wash: 'rgba(107,181,138,0.14)', accent: '#2f8f5b', text: '#1f6b42' },
+};
+
 /** A `Record<WorkStage, …>` so a stage added to `workContexts.ts` cannot reach the Board
  *  without someone deciding what its empty column says. */
 const STAGE_EMPTY_TEXT: Record<WorkStage, string> = {
@@ -419,6 +439,8 @@ export default function WorkBoardView({ items, context = 'all', todayStr, isFilt
       {columns.map(col => {
         const colItems = items.filter(i => columnKeyOf(i, context) === col.key);
         const isOver = dragOverCol === col.key;
+        const tint = STAGE_TINT[col.key];
+        const overdueCount = colItems.filter(i => dueStateOf(i, todayStr) === 'overdue').length;
         return (
           <div
             key={col.key}
@@ -434,22 +456,45 @@ export default function WorkBoardView({ items, context = 'all', todayStr, isFilt
             }}
             onDrop={e => handleDrop(e, col.key)}
             style={{
-              background: 'rgba(255,255,255,0.18)', borderRadius: '18px', padding: '14px 10px',
-              boxSizing: 'border-box',
+              // Two layers, not one: the flat tint colour on top for the column's own identity
+              // (§the STAGE_TINT doc above), the original translucent white underneath so the
+              // column still reads as part of the same GLASS surface every other column and
+              // view uses — replacing it outright would make Board's columns the one place in
+              // the app with a plain flat-colour panel instead of the shared glass treatment.
+              background: `linear-gradient(${tint.wash}, ${tint.wash}), rgba(255,255,255,0.18)`,
+              borderTop: `3px solid ${tint.accent}`,
+              borderRadius: '18px', padding: '14px 10px', boxSizing: 'border-box',
             }}
           >
             <div style={{
-              display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+              display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '6px',
               paddingBottom: '10px', marginBottom: '10px', borderBottom: '1px solid rgba(200,210,230,0.35)',
             }}>
               <span style={{ fontFamily: DM_FONT, fontSize: '0.95rem', fontWeight: 800, color: '#2d3748' }}>
                 {col.label}
               </span>
-              <span style={{
-                display: 'inline-flex', alignItems: 'center', borderRadius: '999px', padding: '2px 9px',
-                background: 'rgba(255,255,255,0.5)', color: '#5c6b80', fontFamily: FONT, fontSize: '0.7rem', fontWeight: 700,
-              }}>
-                {colItems.length}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                {/* Only the count that already meant something everywhere else in this app
+                    (§ this task's WorkCard/BoardCard META_COLOR work) — a column can hold
+                    several overdue cards whose own red text is easy to miss among the rest,
+                    so the column heading says so once instead of relying on each card alone. */}
+                {overdueCount > 0 && (
+                  <span
+                    aria-label={`${overdueCount} overdue`}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', borderRadius: '999px', padding: '2px 8px',
+                      background: 'rgba(224,96,124,0.15)', color: '#922e48', fontFamily: FONT, fontSize: '0.68rem', fontWeight: 700,
+                    }}
+                  >
+                    {overdueCount} overdue
+                  </span>
+                )}
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', borderRadius: '999px', padding: '2px 9px',
+                  background: 'rgba(255,255,255,0.5)', color: tint.text, fontFamily: FONT, fontSize: '0.7rem', fontWeight: 700,
+                }}>
+                  {colItems.length}
+                </span>
               </span>
             </div>
 
@@ -525,7 +570,11 @@ export default function WorkBoardView({ items, context = 'all', todayStr, isFilt
 
       <style jsx global>{`
         .vb-board-card {
-          transition: box-shadow 120ms ease, opacity 120ms ease;
+          transition: box-shadow 120ms ease, opacity 120ms ease, transform 120ms ease;
+        }
+        .vb-board-card:hover:not(.dragging) {
+          box-shadow: 0 6px 16px rgba(31,38,68,0.12);
+          transform: translateY(-2px);
         }
         .vb-board-card.dragging {
           box-shadow: 0 10px 24px rgba(31,38,68,0.18);
@@ -535,6 +584,9 @@ export default function WorkBoardView({ items, context = 'all', todayStr, isFilt
         }
         @media (prefers-reduced-motion: reduce) {
           .vb-board-card.dragging {
+            transform: none;
+          }
+          .vb-board-card:hover:not(.dragging) {
             transform: none;
           }
           .vb-board-card {
