@@ -35,10 +35,11 @@ export interface WorkPayload {
 }
 
 /** Spec §5/§6's view set: Focus | Table | Board | Timeline. Calendar is deliberately absent —
- *  it lives at its own `/workboard/calendar` route now, reached from the toolbar's secondary
- *  "Week calendar ↗" link rather than from this selector. The `list` key is kept as-is while
- *  its label reads "Focus": §4 renames the view in the UI only, and a key rename would cascade
- *  through state, tab `id`s and `WorkListView` for no user-visible gain. */
+ *  what it used to show (class schedule, conflicts, the workload heatmap) is now part of
+ *  Timeline's own week view, and `/workboard/calendar` redirects here rather than keeping a
+ *  second, narrower copy of the same data. The `list` key is kept as-is while its label reads
+ *  "Focus": §4 renames the view in the UI only, and a key rename would cascade through state,
+ *  tab `id`s and `WorkListView` for no user-visible gain. */
 export type ViewKey = 'list' | 'table' | 'board' | 'timeline';
 
 const VIEWS: { key: ViewKey; label: string; Icon: typeof List }[] = [
@@ -125,6 +126,13 @@ export default function WorkboardShell(
   /** The Filters popover's state, owned here rather than inside the popover so `visibleItems`
    *  can read it — the popover is the editor, this is the value every view filters by. */
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
+  /** Timeline's own navigable week — independent of `work.week_start` (the whole board's fixed
+   *  Monday, used by the stat cards), since paging Timeline forward/backward must never move a
+   *  number that describes the whole board. Seeded from the same server-rendered payload
+   *  `page.tsx` already fetches for this — this prop went unread from Task 36 (when Calendar
+   *  moved to its own route) until now, when Timeline absorbed Calendar's data. */
+  const [week, setWeek] = useState<WorkboardWeek>(initialWeek);
+  const [weekLoading, setWeekLoading] = useState(false);
   const [dialogTarget, setDialogTarget] = useState<DialogTarget | null>(null);
   /** The item whose detail drawer is open, or null. Same shape and same lifetime as
    *  `dialogTarget` above — the drawer is the dialog's sibling, not a second kind of state. */
@@ -137,6 +145,20 @@ export default function WorkboardShell(
   const refreshWork = async () => {
     const res = await fetch('/api/workboard/work');
     if (res.ok) setWork(await res.json());
+  };
+
+  /** Fetches a different week's class schedule/conflicts/heatmap/events for Timeline — the
+   *  same endpoint and shape `WorkboardWeekView.tsx`'s Calendar page already used for the
+   *  identical navigation. `weekLoading` disables Timeline's own nav buttons so a second click
+   *  cannot race the first and land the two out of order. */
+  const goToWeek = async (weekStart: string) => {
+    setWeekLoading(true);
+    try {
+      const res = await fetch(`/api/workboard/week?start=${weekStart}`);
+      if (res.ok) setWeek(await res.json());
+    } finally {
+      setWeekLoading(false);
+    }
   };
 
   const openCreateDialog = () => setDialogTarget({ mode: 'create' });
@@ -393,21 +415,6 @@ export default function WorkboardShell(
         </div>
 
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Addendum §21's discreet entry point to `/workboard/calendar`. Deliberately a plain
-              muted link rather than another entry in `VIEWS`: it leaves the page instead of
-              swapping the tabpanel, so it is neither a `role="tab"` nor styled like one (no
-              pill, no fill, no icon badge). Its wording names the destination — "Week calendar",
-              with the ↗ that marks a navigation away — rather than presenting it as a peer view. */}
-          <Link
-            href="/workboard/calendar"
-            style={{
-              color: '#5c6b80', fontSize: '0.8rem', fontWeight: 600,
-              textDecoration: 'none', whiteSpace: 'nowrap',
-            }}
-          >
-            Week calendar <span aria-hidden>↗</span>
-          </Link>
-
           <button
             type="button"
             className="vb-btn-pink"
@@ -457,7 +464,9 @@ export default function WorkboardShell(
           date axis get the full canvas, and moves below the main content (instead of beside
           it) from 1023px down on Focus, where it stays visible rather than collapsing. Focus
           is now the only view that gets the rail at all: Calendar, the other view that used to
-          carry it, has moved to its own `/workboard/calendar` route.
+          carry it, no longer exists as its own view — its week schedule/conflicts/heatmap/
+          events are now folded into Timeline's own week columns, and `/workboard/calendar`
+          redirects here rather than rendering anything of its own.
           Both `flex-direction` and `align-items` are kept out of the inline style
           below and set only in the stylesheet (same specificity reasoning as elsewhere in this
           task): `align-items: flex-start` cross-aligns the two side-by-side columns to their
@@ -471,9 +480,9 @@ export default function WorkboardShell(
             tab is currently selected. Direction doc §11: all four views (Focus/Table/Board/
             Timeline) share one GLASS outer panel — the shell's own view-content container, which
             none of the views applies itself, so it is applied once, here, rather than four times.
-            Now that Calendar has moved to its own `/workboard/calendar` route, every view this
-            shell can show wants the wrapper, so it is rendered unconditionally with no
-            exclusion left to branch on. */}
+            Calendar was never one of the four and still isn't (its function lives inside
+            Timeline now), so every view this shell can show wants the wrapper, with no exclusion
+            left to branch on. */}
         <div id="vb-view-panel" role="tabpanel" aria-labelledby={`vb-view-tab-${view}`} tabIndex={0} style={{ flex: '1 1 auto', minWidth: 0 }}>
           <div style={{ ...GLASS, padding: '20px', boxSizing: 'border-box' }}>
             {view === 'list' && (
@@ -518,7 +527,10 @@ export default function WorkboardShell(
             {view === 'timeline' && (
               <WorkTimelineView
                 items={visibleItems}
-                weekStart={work.week_start}
+                // `week.week_start`, NOT `work.week_start`: Timeline pages its own week
+                // independently of the whole-board Monday the stat cards use — see `week`'s own
+                // declaration above for why the two must stay decoupled.
+                weekStart={week.week_start}
                 today={work.generated_at}
                 isFiltered={isFiltered}
                 // The same value `visibleItems` is filtered by, same as Table's and Board's
@@ -526,6 +538,15 @@ export default function WorkboardShell(
                 // so omitting this would fail `tsc` rather than silently keeping My Work's four
                 // fixed lanes under every tab (Task 16's Board-context history, repeated here).
                 context={category}
+                classOccurrences={week.class_occurrences}
+                conflicts={week.conflicts}
+                heatmap={week.heatmap}
+                // Calendar's payload keeps events and reminders as two separate arrays server-
+                // side (both the same `WorkboardEventItem` shape, discriminated by `item_type`);
+                // Timeline shows them in one merged day-column stack, so they arrive as one prop.
+                events={[...week.events, ...week.reminders]}
+                onWeekChange={goToWeek}
+                weekLoading={weekLoading}
               />
             )}
           </div>

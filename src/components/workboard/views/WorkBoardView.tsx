@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { LayoutGrid, SearchX } from 'lucide-react';
+import { LayoutGrid, SearchX, Link2 } from 'lucide-react';
 // Type-only imports from `workItems.ts` — that module imports `pool` (mysql2) at module
 // scope for its DB-access exports, so a runtime import here would drag mysql2 into this
 // client bundle (see WorkboardShell.tsx's and WorkItemRow.tsx's comments on the same hazard).
@@ -20,10 +20,10 @@ import {
   type WorkContext, type WorkStage, type WorkStatus,
 } from '@/lib/workboard/workContexts';
 import { courseColor } from '@/lib/workboard/color';
-import { dueDateOf } from '@/lib/workboard/dates';
-// The single source of due-label truth. It is pool-free — it imports only `dates.ts`,
-// which has no imports at all, plus a type-only `WorkItem` that erases at compile time.
-import { formatDueLabel } from '@/lib/workboard/dueSemantics';
+// The single source of due-label/state truth. Both are pool-free — they import only
+// `dates.ts`, which has no imports at all, plus a type-only `WorkItem` that erases at compile
+// time.
+import { dueStateOf, formatDueLabel, formatDeadlineTime, type DueState } from '@/lib/workboard/dueSemantics';
 
 const FONT      = "'Inter','DM Sans','Segoe UI',sans-serif";
 const DM_FONT   = "'DM Sans','Segoe UI',sans-serif";
@@ -92,15 +92,33 @@ function columnKeyOf(item: WorkItem, context: BoardContext): WorkStage {
   return isStageLegal(context, stage) ? stage : item.work_status;
 }
 
-function buildMeta(item: WorkItem, todayStr: string): { text: string | null; overdue: boolean } {
-  const due = dueDateOf(item);
+/** §17a's due-state colour map, the same `Record<DueState, string>` `WorkItemRow.tsx`'s
+ *  `META_COLOR` already uses — a card completed *after* its deadline used to read plain
+ *  `#5c6b80` here (a bare `overdue` boolean, false for any done item regardless of when it was
+ *  completed), while Focus painted the identical fact `#8a5010`. Keyed by the same `DueState`
+ *  the whole module derives from, so a future state is forced to have its colour decided here
+ *  rather than silently defaulting into the wrong one of these two meanings. */
+const META_COLOR: Record<DueState, string> = {
+  none:           '#5c6b80',
+  upcoming:       '#5c6b80',
+  due_today:      '#5c6b80',
+  completed:      '#5c6b80',
+  completed_late: '#8a5010',
+  overdue:        '#922e48',
+};
+
+function buildMeta(item: WorkItem, todayStr: string): { text: string | null; color: string } {
   // Status-aware: a card completed before its deadline reads "Completed · Sep 7",
   // never "Overdue". The old local copy keyed off the date alone.
   const dueLabel = formatDueLabel(item, todayStr);
+  const timeLabel = formatDeadlineTime(item);
   const estimateLabel = item.estimated_hours !== null ? `${item.estimated_hours}h` : null;
-  const parts = [dueLabel, estimateLabel].filter((p): p is string => p !== null);
-  const overdue = due !== null && due < todayStr && item.work_status !== 'done';
-  return { text: parts.length ? parts.join(' · ') : null, overdue };
+  const parts = [
+    dueLabel,
+    timeLabel !== '—' ? timeLabel : null,
+    estimateLabel,
+  ].filter((p): p is string => p !== null);
+  return { text: parts.length ? parts.join(' · ') : null, color: META_COLOR[dueStateOf(item, todayStr)] };
 }
 
 function itemKey(item: Pick<WorkItem, 'source' | 'id'>): string {
@@ -224,9 +242,21 @@ function BoardCard({
         )}
       </div>
 
-      {meta.text && (
-        <div style={{ marginTop: '6px', fontFamily: FONT, fontSize: '0.76rem', fontWeight: 500, color: meta.overdue ? '#922e48' : '#5c6b80' }}>
-          {meta.text}
+      {(meta.text || item.link_count > 0) && (
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginTop: '6px' }}>
+          {meta.text && (
+            <span style={{ fontFamily: FONT, fontSize: '0.76rem', fontWeight: 500, color: meta.color }}>
+              {meta.text}
+            </span>
+          )}
+          {item.link_count > 0 && (
+            <span
+              aria-label={`${item.link_count} link${item.link_count === 1 ? '' : 's'}`}
+              style={{ display: 'flex', alignItems: 'center', gap: '3px', fontFamily: FONT, fontSize: '0.76rem', fontWeight: 500, color: '#8a94a6' }}
+            >
+              <Link2 size={12} aria-hidden /> <span aria-hidden>{item.link_count}</span>
+            </span>
+          )}
         </div>
       )}
     </div>
