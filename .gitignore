@@ -38,3 +38,6 @@ vibeboard/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Brainstorming visual companion mockups
+.superpowers/
