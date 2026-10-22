@@ -4,14 +4,16 @@ node_modules/
 # Next.js
 .next/
 out/
+next-env.d.ts
 
 # Vercel
 .vercel/
 
-# environment variables — never commit these
+# environment variables — never commit these (see .env.example for the keys)
 .env
 .env.local
 .env.*.local
+.env*.local
 
 # logs
 *.log
@@ -22,6 +24,7 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # editor
 .vscode/
@@ -34,10 +37,25 @@ Thumbs.db
 # build output
 dist/
 build/
+
+# old create-next-app scaffold kept locally; the real app lives in src/
 vibeboard/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
 
-# Brainstorming visual companion mockups
+# Python bytecode
+__pycache__/
+*.pyc
+
+# AI coding-agent tooling and local session state (not part of the app)
+.claude/
+.agents/
+skills-lock.json
+.remember/
 .superpowers/
+.playwright-mcp/
+
+# local debug dumps
+debug_*.json
+debug_*.txt
