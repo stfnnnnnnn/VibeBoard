@@ -1,11 +1,14 @@
 import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
 import {
-  ACADEMIC_TABLES, urgencyFromPriority,
+  ACADEMIC_TABLES, deriveAcademicStage, urgencyFromPriority,
   type AcademicSource, type WorkPriority,
 } from '@/lib/workboard/workItems';
-import { isStageLegal, normaliseStage, type WorkStage, type WorkStatus } from '@/lib/workboard/workContexts';
-import { normaliseDeadlineTime } from '@/lib/workboard/dates';
+import {
+  isRevisionStage, isStageLegal, isWaitingStage, normaliseStage, normaliseWaitingReason,
+  type WorkStage, type WorkStatus,
+} from '@/lib/workboard/workContexts';
+import { manilaNowDatetime, normaliseDeadlineTime } from '@/lib/workboard/dates';
 import { todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
 
 /** "YYYY-MM-DD" for today in Manila time — never derive "today" from `new Date()`'s own
@@ -39,6 +42,8 @@ export interface AcademicPatch {
   priority?:         WorkPriority;
   estimated_hours?:  number | null;
   start_date?:       string | null;
+  /** The revision note for `submitted` ("For Revision"); ignored outside a waiting stage. */
+  blocked_reason?:   string | null;
 }
 
 /**
@@ -71,7 +76,8 @@ export async function patchAcademicItem(
   //     sources; `grade_entries` rows simply never trip the guard that reads them.
   const [owns] = await pool.execute<RowDataPacket[]>(
     `SELECT t.\`${spec.pk}\` AS id, t.status AS current_status, m.work_stage AS current_stage,
-            t.score AS current_score, t.items AS current_items, t.grade AS current_grade
+            t.score AS current_score, t.items AS current_items, t.grade AS current_grade,
+            t.accomplished_at AS current_accomplished_at, m.blocked_since AS current_blocked_since
        FROM \`${spec.table}\` t
        JOIN user_subjects us ON us.user_subject_id = t.user_subject_id
        LEFT JOIN workboard_entry_meta m
@@ -88,17 +94,15 @@ export async function patchAcademicItem(
   // A stage implies its status; a bare status (v2 callers) implies the matching stage —
   // 'todo', 'in_progress' and 'done' are all legal academic stage names, so the cast is
   // sound for every value the route lets through. `stage` is what the overlay stores;
-  // `status` is what Study Pulse gets. Both `submitted` and `done` normalise to 'done',
-  // so either one marks the entry complete while the overlay remembers which it was.
+  // `status` is what Study Pulse gets. `submitted` ("For Revision") normalises to
+  // 'in_progress' — an active state — so moving into it sets the entry back to Pending,
+  // except on a graded entry (see `revisionOnGraded` below).
   const stage: WorkStage | undefined =
     patch.work_stage ?? (patch.work_status ? patch.work_status as WorkStage : undefined);
   const status: WorkStatus | undefined = stage ? normaliseStage(stage) : patch.work_status;
 
-  const incomingStatus = status === 'done' ? 'Done' : status !== undefined ? 'Pending' : undefined;
-  const statusChanging = incomingStatus !== undefined && incomingStatus !== currentStatus;
-
-  // The stage counterpart of that gate. A bare `work_status` — which both the edit dialog
-  // (it resends the whole form) and `WorkItemRow.setWorkStatus` send — must not flatten a
+  // The stage counterpart of the status gate below. A bare `work_status` — which both the
+  // edit dialog (it resends the whole form) and any status-only PATCH send — must not flatten a
   // finer stored stage it never meant to touch: `ready_to_submit` normalises to
   // 'in_progress', so an unchanged status would otherwise rewrite it to plain
   // 'in_progress'. Write the stage only when an explicit `work_stage` asked for it, when
@@ -112,6 +116,17 @@ export async function patchAcademicItem(
       usableStoredStage === null ||
       normaliseStage(usableStoredStage) !== status
     );
+
+  // A graded entry's trigger pins it Done, so a revision stage on one (moving into it, or a
+  // dialog save that keeps it) lives in the overlay only: the entry is left untouched rather
+  // than refused with `AcademicItemGradedError`. The read path shows the overlay's
+  // `submitted` over the Done entry.
+  const effectiveStage = stageChanging ? stage! : usableStoredStage;
+  const revisionOnGraded = spec.hasGradedTrigger && isGraded && isRevisionStage(effectiveStage);
+
+  const incomingStatus = status === 'done' ? 'Done' : status !== undefined ? 'Pending' : undefined;
+  const statusChanging =
+    incomingStatus !== undefined && incomingStatus !== currentStatus && !revisionOnGraded;
 
   // Whole-branch review Finding C-1: `activities`/`quizzes`/`exams` each carry a
   // `BEFORE UPDATE` trigger that forces `status = 'Done'` the instant `score`/`items`/`grade`
@@ -186,6 +201,31 @@ export async function patchAcademicItem(
     }
     if (patch.start_date !== undefined) {
       overlayCols.push('start_date'); overlayVals.push(patch.start_date);
+    }
+
+    // blocked_reason / blocked_since: the same transition rules as the work-items PATCH
+    // route, against the stored overlay stage. `blocked_since` is server-stamped.
+    const reasonValue = normaliseWaitingReason(patch.blocked_reason);
+    // Judged on the stage the read path shows: a `submitted` overlay that Study Pulse has
+    // since overridden (completed after being sent back) is not waiting, so re-entering
+    // For Revision stamps a fresh `blocked_since` rather than keeping the stale one.
+    const wasWaiting = usableStoredStage !== null && isWaitingStage(deriveAcademicStage(
+      currentStatus, usableStoredStage, null,
+      owns[0].current_accomplished_at, owns[0].current_blocked_since,
+    ));
+    if (stageChanging) {
+      const isWaiting = isWaitingStage(stage);
+      if (isWaiting && !wasWaiting) {
+        overlayCols.push('blocked_since', 'blocked_reason');
+        overlayVals.push(manilaNowDatetime(), reasonValue);
+      } else if (!isWaiting && wasWaiting) {
+        overlayCols.push('blocked_since', 'blocked_reason');
+        overlayVals.push(null, null);
+      } else if (isWaiting && wasWaiting && patch.blocked_reason !== undefined) {
+        overlayCols.push('blocked_reason'); overlayVals.push(reasonValue);
+      }
+    } else if (patch.blocked_reason !== undefined && wasWaiting) {
+      overlayCols.push('blocked_reason'); overlayVals.push(reasonValue);
     }
 
     if (overlayCols.length) {

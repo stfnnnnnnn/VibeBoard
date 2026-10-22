@@ -12,14 +12,16 @@ import type { WorkItem } from '@/lib/workboard/workItems';
 import { setWorkStage } from '../WorkItemRow';
 // Pool-free by construction (`workContexts.ts` has no imports at all), so these are safe as
 // runtime imports from a client component.
-import { STAGES_BY_CONTEXT, STAGE_LABELS, type WorkStage } from '@/lib/workboard/workContexts';
-// The module's one failure surface, shared with `PriorityCell`. Task 20 shipped a bare
-// `alert()` here as an accepted stopgap and its report asked for this extraction the moment a
-// second cell became interactive; the behaviour is identical (`alert` under the hood), but
-// "how a table cell reports failure" is now one decision rather than one per cell.
+import {
+  STAGES_BY_CONTEXT, STAGE_LABELS, isWaitingStage, type WorkStage,
+} from '@/lib/workboard/workContexts';
+// The pill's glow-dot colour, shared with the Board's lane headers.
+import { statusDot } from '@/lib/workboard/ui/statusDot';
+// The module's one failure surface, shared with every interactive cell: an error toast with Retry.
 import { reportTableCellError } from './tableCellError';
-
-const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
+// Shared with the Board move and the drawer: the waiting prompt, 4xx-vs-retry, and Undo.
+import { offerStageUndo, reportStageFailure, waitingPrompt } from '../stageChange';
+import WaitingPopover from '../ui/WaitingPopover';
 
 /** `context` is read straight from the free-form `category` column, so the lookup below can
  *  miss on a legacy or hand-edited row — the same miss `cellValue` guards with `?? DASH`.
@@ -73,6 +75,9 @@ export default function StatusCell({ item, style, onChanged }: StatusCellProps) 
   // restores it there and only there — a user who tabbed away in the meantime, or a select
   // that disabled from some other row's action, must not steal focus back.
   const selectRef = useRef<HTMLSelectElement>(null);
+  const cellRef = useRef<HTMLTableCellElement>(null);
+  /** A change into a waiting stage, held until `WaitingPopover` supplies its reason (spec 10.3). */
+  const [askingFor, setAskingFor] = useState<WorkStage | null>(null);
   const wasFocused = useRef(false);
   /** The optimistic override, tagged with the stage it was applied *over*. Reconciliation is
    *  therefore pure — no effect, no render-phase `setState`: once the refreshed payload
@@ -92,6 +97,7 @@ export default function StatusCell({ item, style, onChanged }: StatusCellProps) 
   // is not — so the stray value gets an option of its own, disabled, so it displays honestly
   // but cannot be chosen back and rejected with a 400.
   const stray = stages.includes(shown) ? null : shown;
+  const dot = statusDot(shown);
 
   // Runs on every `pending` transition, not only false→true→false in one breath, because
   // React may batch across the round trip. Firing only when the select was the one focused
@@ -104,49 +110,54 @@ export default function StatusCell({ item, style, onChanged }: StatusCellProps) 
     }
   }, [pending]);
 
-  const handleChange = async (next: WorkStage) => {
+  const commitChange = async (next: WorkStage, reason?: string | null) => {
     // Belt-and-braces behind `disabled={pending}`: ruling 5's guarantee that a fast double
     // change cannot produce two racing PATCHes whose responses land out of order.
     if (pending || next === shown) return;
 
     wasFocused.current = document.activeElement === selectRef.current;
+    const prev = stage;
+    const prevReason = item.blocked_reason;
     setOptimistic({ over: stage, value: next });
     setPending(true);
     try {
       // `.catch(() => null)` rather than a `try` around the whole body: only `fetch` itself
       // rejecting counts as a network failure here. Letting `onChanged`'s own rejection reach
       // a shared catch would report "could not change the status" for a write that succeeded.
-      const res = await setWorkStage(item, next).catch(() => null);
+      const res = await setWorkStage(item, next, reason).catch(() => null);
 
-      if (res === null) {
+      if (res === null || !res.ok) {
+        // Ruling 2: revert AND say why. A 4xx carries the server's reason and no Retry; a
+        // network failure or 5xx keeps Retry (see `reportStageFailure`).
         setOptimistic(null);
-        reportTableCellError(NETWORK_ERROR);
-        return;
-      }
-      if (!res.ok) {
-        // Ruling 2: revert AND say why. Both PATCH routes answer a rejected stage with
-        // `{ error: '"review" is not a valid stage for academic work' }`, which is far more
-        // use than a generic failure — but an HTML error page or an empty 500 body is not
-        // JSON, hence the fallback. A `console.error` alone is what the v2 review flagged.
-        const body: unknown = await res.json().catch(() => null);
-        const message =
-          typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string'
-            ? (body as { error: string }).error
-            : GENERIC_ERROR;
-        setOptimistic(null);
-        reportTableCellError(message);
+        await reportStageFailure(res, {
+          fallback: GENERIC_ERROR, network: NETWORK_ERROR,
+          retry: () => commitChange(next, reason), report: reportTableCellError,
+        });
         return;
       }
       // Ruling 3's reconcile half: the optimistic value made the control feel instant, this
       // makes the stats, the workload chart and every other view agree with it.
       await onChanged();
+      // The override is tagged with `prev`, so it would match again once Undo restores it.
+      offerStageUndo(item, prev, prevReason, next, onChanged, {
+        report: reportTableCellError, beforeUndo: () => setOptimistic(null),
+      });
     } finally {
       setPending(false);
     }
   };
 
+  const handleChange = (next: WorkStage) => {
+    if (pending || next === shown) return;
+    // Waiting stages ask for their reason first; cancelling cancels the change.
+    if (isWaitingStage(next)) { setAskingFor(next); return; }
+    void commitChange(next);
+  };
+
   return (
     <td
+      ref={cellRef}
       style={{
         ...style,
         // The only override. The shared `7px` vertical padding is sized for a line of text;
@@ -157,51 +168,116 @@ export default function StatusCell({ item, style, onChanged }: StatusCellProps) 
         padding: '2px 12px',
       }}
     >
-      <select
-        ref={selectRef}
-        className="vb-status-select"
-        value={shown}
-        disabled={pending}
-        // A table full of unlabelled "Status" selects is unnavigable, so the name identifies
-        // the row. No visible label exists for it to contradict, so WCAG 2.5.3 is not in play.
-        aria-label={`Status for "${item.title}"`}
-        onChange={e => { void handleChange(e.target.value as WorkStage); }}
-        style={{
-          // The dialog's control language (`CONTROL_STYLE` in `WorkItemDialog.tsx`),
-          // compressed for a table cell: same background, same border, same text colour,
-          // smaller radius and type. Deliberately NOT `appearance: none` — the native
-          // disclosure arrow is the affordance that says this cell is editable at all.
-          boxSizing: 'border-box', minHeight: '26px', borderRadius: '8px',
-          padding: '2px 4px 2px 7px', background: 'rgba(255,255,255,0.6)',
-          border: '1px solid rgba(200,210,230,0.6)', fontFamily: FONT, fontSize: '0.76rem',
-          fontWeight: 600, color: '#2d3748', lineHeight: 1.2,
-          cursor: pending ? 'progress' : 'pointer',
-          // Opacity, not a colour swap: the UA's own disabled rendering greys the text below
-          // §8's contrast floor, and this is a transient in-flight state, not a permanently
-          // unavailable control.
-          opacity: pending ? 0.65 : 1,
-        }}
+      {/* Refine spec §6: the trigger reads as a glass pill with its status dot. The native
+          select still fills the whole pill, so every pixel of it opens the menu; the dot sits on
+          top with no pointer events. */}
+      <span
+        className="wb-gpill vb-status-pill"
+        // Opacity, not a colour swap: the UA's own disabled rendering greys the text below
+        // §8's contrast floor, and this is a transient in-flight state.
+        style={{ opacity: pending ? 0.65 : 1 }}
       >
-        {stray !== null && (
-          <option value={stray} disabled>{STAGE_LABELS[stray]}</option>
-        )}
-        {stages.map(s => (
-          <option key={s} value={s}>{STAGE_LABELS[s]}</option>
-        ))}
-      </select>
+        <span
+          aria-hidden
+          className={dot.flat ? 'wb-gdot wb-gdot--flat vb-status-dot' : 'wb-gdot vb-status-dot'}
+          style={{ '--dot': dot.color } as React.CSSProperties}
+        />
+        <select
+          ref={selectRef}
+          className="vb-status-select"
+          value={shown}
+          disabled={pending}
+          // A table full of unlabelled "Status" selects is unnavigable, so the name identifies
+          // the row. No visible label exists for it to contradict, so WCAG 2.5.3 is not in play.
+          aria-label={`Status for "${item.title}"`}
+          onChange={e => handleChange(e.target.value as WorkStage)}
+          style={{ cursor: pending ? 'progress' : 'pointer' }}
+        >
+          {stray !== null && (
+            <option value={stray} disabled>{STAGE_LABELS[stray]}</option>
+          )}
+          {stages.map(s => (
+            <option key={s} value={s}>{STAGE_LABELS[s]}</option>
+          ))}
+        </select>
+      </span>
 
-      {/* These rules MUST live here and not in `WorkTableView`. Each component gets its own
-          styled-jsx scope hash, so a `.vb-status-select` rule written in the view would
-          compile cleanly and match nothing — the trap three tasks in this plan have hit. */}
+      <WaitingPopover
+        open={askingFor !== null}
+        anchor={cellRef.current}
+        title={item.title}
+        prompt={askingFor !== null ? waitingPrompt(askingFor, item.title) : undefined}
+        onCancel={() => {
+          setAskingFor(null);
+          selectRef.current?.focus({ preventScroll: true });
+        }}
+        onConfirm={reason => {
+          const next = askingFor;
+          setAskingFor(null);
+          // Back on the select before the popover unmounts, so focus never drops to body.
+          selectRef.current?.focus({ preventScroll: true });
+          if (next !== null) void commitChange(next, reason);
+        }}
+      />
+
+      {/* These rules MUST live here and not in `WorkTableView`: each component gets its own
+          styled-jsx scope hash. The caret stays hidden until the row is hovered or the select
+          takes focus (ruling R7). Every visual declaration is here rather than
+          inline, because an inline border or background would beat these rules. */}
       <style jsx>{`
-        /* §9's ring, on the darker blue — :focus-visible so a mouse click does not leave a
-           ring nobody asked for, while keyboard arrival through the column always does. */
-        .vb-status-select:focus-visible {
-          outline: 2px solid #2a7fa8;
-          outline-offset: 2px;
+        /* The pill (.wb-gpill) draws the fill, border and highlight; the select inside it is
+           transparent and carries the padding, so the whole pill is the click target. */
+        .vb-status-pill {
+          position: relative;
+          padding: 0;
+          max-width: 100%;
+          box-sizing: border-box;
         }
-        .vb-status-select:hover:not(:disabled) {
-          border-color: rgba(140,160,190,0.75);
+        .vb-status-dot {
+          position: absolute;
+          left: 10px;
+          top: 50%;
+          margin-top: -4px;
+          pointer-events: none;
+        }
+        .vb-status-select {
+          appearance: none;
+          -webkit-appearance: none;
+          box-sizing: border-box;
+          min-height: 26px;
+          max-width: 100%;
+          border: 0;
+          border-radius: 999px;
+          padding: 3px 20px 3px 25px;
+          font: inherit;
+          line-height: 1.2;
+          color: inherit;
+          background-color: transparent;
+          /* A down caret from two token-coloured half-squares; hidden until hover or focus. */
+          background-image:
+            linear-gradient(45deg, transparent 50%, var(--wb-text-subtle) 50%),
+            linear-gradient(135deg, var(--wb-text-subtle) 50%, transparent 50%);
+          background-position: calc(100% - 13px) 55%, calc(100% - 8px) 55%;
+          background-repeat: no-repeat;
+          background-size: 0 0, 0 0;
+        }
+        @media (hover: hover) and (pointer: fine) {
+          :global(.vb-table-row:hover) .vb-status-pill {
+            background: var(--wb-surface);
+          }
+          :global(.vb-table-row:hover) .vb-status-select:not(:disabled) {
+            background-size: 5px 5px, 5px 5px;
+          }
+        }
+        .vb-status-select:focus-visible {
+          outline: 2px solid var(--wb-blue-strong);
+          outline-offset: 2px;
+          background-size: 5px 5px, 5px 5px;
+        }
+        @media (hover: none) {
+          .vb-status-select {
+            background-size: 5px 5px, 5px 5px;
+          }
         }
       `}</style>
     </td>

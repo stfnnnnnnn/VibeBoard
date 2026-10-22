@@ -1,42 +1,45 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ExternalLink, Link2, Plus, Trash2, X } from 'lucide-react';
+import { ExternalLink, Link2, Pencil, Plus, Trash2, X } from 'lucide-react';
 // Type-only imports from three modules that reach `pool` (mysql2) at module scope. `import type`
-// is erased entirely by TypeScript, so no driver reaches this client bundle — the same shape
-// `LinksPopover`, `StatusCell`, `WorkItemRow` and `WorkTableView` all use for `WorkItem`. A
-// *value* import from any of the three would 500 the page.
+// is erased entirely by TypeScript, so no driver reaches this client bundle. A *value* import
+// from any of the three would 500 the page.
 import type { WorkItem } from '@/lib/workboard/workItems';
 import type { Subtask } from '@/lib/workboard/subtasks';
 import type { WorkLink } from '@/lib/workboard/links';
-// Pool-free by construction (`workContexts.ts` has no imports at all), so these are safe as
-// runtime imports from a client component.
+// Pool-free by construction, so these are safe as runtime imports from a client component.
 import {
-  CONTEXT_LABELS, LIFE_AREA_LABELS, STAGES_BY_CONTEXT, STAGE_LABELS, type WorkStage,
+  CONTEXT_LABELS, LIFE_AREA_LABELS, STAGES_BY_CONTEXT, STAGE_LABELS, isWaitingStage, waitingLabel,
+  type WorkStage,
 } from '@/lib/workboard/workContexts';
-// `setWorkStage` is the single place owned-vs-academic endpoint routing lives (Tasks 11/16).
-// Imported, never re-derived — this drawer must not know that academic items patch a different
-// route from owned ones, for exactly the reason `StatusCell` must not.
+import { daysSince } from '@/lib/workboard/dates';
+// `setWorkStage` is the single place owned-vs-academic endpoint routing lives. Imported, never
+// re-derived — this drawer must not know that academic items patch a different route.
 import { setWorkStage } from './WorkItemRow';
-// Deadline wording for the whole module. Reused rather than re-formatted so the drawer cannot
-// word a date differently from the row underneath it.
-import { dueStateOf, formatDeadline, formatDeadlineTime, type DueState } from '@/lib/workboard/dueSemantics';
+import { patchItem } from './workApi';
+import { messageFrom, offerStageUndo, reportStageFailure, waitingPrompt } from './stageChange';
+// Deadline wording for the whole module, reused so the drawer cannot word a date differently
+// from the row underneath it.
+import { dueStateOf, formatDeadline, formatDeadlineTime } from '@/lib/workboard/dueSemantics';
+import { DUE_ACCENT, DUE_SR_SUFFIX } from '@/lib/workboard/ui/dueColors';
 // The links editor, plus the shared owner-links store `LinksCell` and the phone card both read.
-// The LINKS section below renders that store's contents as a plain inline list and hands every
-// *mutation* to this same standalone popover — nothing about add/delete is re-implemented here.
+// The LINKS section renders that store's contents as a plain inline list and hands every
+// *mutation* to this same popover — nothing about add/delete is re-implemented here.
 import LinksPopover, { linkTypeMeta, loadOwnerLinks, useOwnerLinks } from './LinksPopover';
-// The module's one failure surface, shared with the four Table cells and `LinksPopover`.
 import { reportTableCellError } from './table/tableCellError';
-
-const FONT        = "'Inter','DM Sans','Segoe UI',sans-serif";
-const HEADER_FONT = "'DM Sans','Segoe UI',sans-serif";
+import WbOverlay from './ui/WbOverlay';
+import WbCheckbox from './ui/WbCheckbox';
+import WaitingPopover from './ui/WaitingPopover';
+import { toastError } from './ui/WbToaster';
+import { contextChip } from './views/FocusRow';
 
 const DASH = '—';
 
-const NETWORK_ERROR       = 'Could not reach the server. Check your connection and try again.';
-const STATUS_ERROR        = 'Could not change the status. Please try again.';
-const SUBTASK_LIST_ERROR  = 'Could not load the subtasks. Please try again.';
-const SUBTASK_ADD_ERROR   = 'Could not add the subtask. Please try again.';
+const NETWORK_ERROR        = 'Could not reach the server. Check your connection and try again.';
+const STATUS_ERROR         = 'Could not change the status. Please try again.';
+const SUBTASK_LIST_ERROR   = 'Could not load the subtasks. Please try again.';
+const SUBTASK_ADD_ERROR    = 'Could not add the subtask. Please try again.';
 const SUBTASK_TOGGLE_ERROR = 'Could not update the subtask. Please try again.';
 const SUBTASK_DELETE_ERROR = 'Could not remove the subtask. Please try again.';
 
@@ -50,88 +53,63 @@ const PRIORITY_LABEL: Record<WorkItem['priority'], string> = {
   high: 'High', normal: 'Normal', low: 'Low',
 };
 
-/** `DeadlineCell`'s `DEADLINE_COLOR`, value for value, so a date that reads late in the Table
- *  reads late here. Keyed by `DueState` so a seventh state fails the build. */
-const DUE_COLOR: Record<DueState, string> = {
-  none:           '#5c6b80',
-  upcoming:       '#5c6b80',
-  due_today:      '#5c6b80',
-  completed:      '#5c6b80',
-  completed_late: '#8a5010',
-  overdue:        '#922e48',
-};
-
-/** `DeadlineCell`'s `DEADLINE_SR_SUFFIX`. The drawer shows a bare date, so without this the
- *  lateness would be conveyed by colour alone. */
-const DUE_SR_SUFFIX: Partial<Record<DueState, string>> = {
-  overdue:        ' (overdue)',
-  completed_late: ' (completed late)',
-};
-
-/** §1's micro-label, the same type treatment `LinksPopover`'s header and the Table's column
- *  headers use — this drawer's three section headings (SUBTASKS / LINKS / NOTES). */
+/** The 11px uppercase 800-weight micro-label: this drawer's section headings. */
 const SECTION_LABEL_STYLE: React.CSSProperties = {
-  display: 'block', fontFamily: FONT, fontSize: '0.7rem', fontWeight: 800,
-  letterSpacing: '0.04em', textTransform: 'uppercase', color: '#5c6b80',
+  display: 'block', font: '800 var(--wb-fs-11) var(--wb-font-ui)',
+  letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--wb-text-muted)',
 };
 
-/** The dialog's `CONTROL_STYLE`, compressed one notch for a 400px-wide panel. Same background,
- *  same border, same text colour — the module's one control language. */
 const CONTROL_STYLE: React.CSSProperties = {
-  boxSizing: 'border-box', minHeight: '32px', borderRadius: '10px',
-  padding: '5px 9px', background: 'rgba(255,255,255,0.6)',
-  border: '1px solid rgba(200,210,230,0.6)', fontFamily: FONT, fontSize: '0.82rem',
-  fontWeight: 500, color: '#2d3748',
+  boxSizing: 'border-box', minHeight: '32px', borderRadius: 'var(--wb-r-md)',
+  padding: '5px 9px', background: 'var(--wb-surface)',
+  border: '1px solid var(--wb-border)', font: '500 var(--wb-fs-13) var(--wb-font-ui)',
+  color: 'var(--wb-text)',
 };
 
 const NOTE_STYLE: React.CSSProperties = {
-  margin: 0, fontFamily: FONT, fontSize: '0.78rem', fontWeight: 500,
-  color: '#5c6b80', lineHeight: 1.45,
+  margin: 0, font: '500 var(--wb-fs-13) var(--wb-font-ui)',
+  color: 'var(--wb-text-muted)', lineHeight: 1.45,
 };
 
-/** `work_stage` is typed `WorkStage` but stored in a free-form `VARCHAR(24)`, so the type is a
- *  compile-time assertion over DB text rather than a runtime guarantee. Falling back to
- *  `work_status` keeps a row with an unrecognised stage showing a real label instead of a blank
- *  control; every `WorkStatus` is itself a legal stage in every context. `StatusCell`'s helper,
- *  same reasoning — neither is exported. */
+const DT_STYLE: React.CSSProperties = {
+  margin: 0, font: '600 var(--wb-fs-12) var(--wb-font-ui)', color: 'var(--wb-text-muted)',
+  alignSelf: 'center',
+};
+
+const DD_STYLE: React.CSSProperties = {
+  margin: 0, minWidth: 0, font: '500 var(--wb-fs-13) var(--wb-font-ui)', color: 'var(--wb-text)',
+  overflowWrap: 'anywhere',
+};
+
+const SECTION_STYLE: React.CSSProperties = {
+  borderTop: '1px solid var(--wb-hairline)', paddingTop: '14px',
+};
+
+/** `work_stage` is stored in a free-form VARCHAR, so the type is a compile-time assertion over
+ *  DB text. Falling back to `work_status` keeps an unrecognised stage showing a real label;
+ *  every `WorkStatus` is itself a legal stage in every context. `StatusCell`'s helper. */
 function stageOf(item: WorkItem): WorkStage {
   const raw: string = item.work_stage;
   return raw in STAGE_LABELS ? (raw as WorkStage) : item.work_status;
 }
 
-/** `StatusCell`'s `FALLBACK_STAGES`: `context` is read straight from the free-form `category`
- *  column, so the vocabulary lookup can miss on a legacy or hand-edited row. These three are
- *  legal in every context, so such a row still gets a usable select rather than an empty one. */
+/** `StatusCell`'s `FALLBACK_STAGES`: legal in every context, so a legacy row whose context
+ *  misses the vocabulary lookup still gets a usable select. */
 const FALLBACK_STAGES: readonly WorkStage[] = ['todo', 'in_progress', 'done'];
 
-/**
- * `"Academic · CS0061"`, `"Projects · Final System"`, `"Academic · CS0061 · Final System"`.
- *
- * Built from the *same* first-class fields the Table's own columns project — `course_code`,
- * `organization_name`, `project_name`, `life_area` — in the order the contexts nest, so the
- * drawer and the row underneath it can never disagree about where a work item lives. Nothing
- * here re-derives a name from an id or re-reads `chip_label`'s collapsed chain, with one
- * exception: `chip_label` is the *last* resort, used only when none of the four produced a
- * second part (a shape today's payload does not produce, since `chip_label` is itself derived
- * from exactly these fields — it is here so a future source that populates only the chip still
- * says something rather than nothing).
- *
- * The context word comes from `CONTEXT_LABELS`, so it reads identically to the Table's Context
- * column and the dialog's Context select — "Projects", never a second spelling of it.
- */
-export function hierarchyLine(item: WorkItem): string {
-  const parts: string[] = [CONTEXT_LABELS[item.context] ?? item.context];
-  if (item.course_code)       parts.push(item.course_code);
-  if (item.organization_name) parts.push(item.organization_name);
-  if (item.project_name)      parts.push(item.project_name);
-  if (item.life_area)         parts.push(LIFE_AREA_LABELS[item.life_area] ?? item.life_area);
-  if (parts.length === 1 && item.chip_label) parts.push(item.chip_label);
-  return parts.join(' · ');
+/** The context-dependent "where does this live" row: Course for Academic, Organization,
+ *  Area for Life, Project otherwise. */
+function placeRow(item: WorkItem): { label: string; value: string | null } {
+  switch (item.context) {
+    case 'academic':     return { label: 'Course', value: item.course_code };
+    case 'organization': return { label: 'Organization', value: item.organization_name };
+    case 'life':         return { label: 'Area', value: item.life_area ? (LIFE_AREA_LABELS[item.life_area] ?? item.life_area) : null };
+    default:             return { label: 'Project', value: item.project_name };
+  }
 }
 
-/** The server's answer, validated rather than trusted: this is JSON off the wire, and a shape
- *  mismatch must read as a failed load, not as a render-time crash inside a `.map`.
- *  `LinksPopover`'s `parseLinks`, one collection over. */
+/** The server's answer, validated rather than trusted: a shape mismatch must read as a failed
+ *  load, not as a render-time crash inside a `.map`. */
 function parseSubtasks(body: unknown): Subtask[] | null {
   if (typeof body !== 'object' || body === null) return null;
   const raw = (body as { subtasks?: unknown }).subtasks;
@@ -145,8 +123,7 @@ function parseSubtasks(body: unknown): Subtask[] | null {
     parsed.push({
       id:       row.id,
       title:    row.title,
-      // The route maps TINYINT(1) to a real boolean, but a `1` off an older deployment must
-      // still read as done rather than as a type error at the checkbox.
+      // A `1` off an older deployment must still read as done.
       is_done:  row.is_done === true || row.is_done === 1,
       position: typeof row.position === 'number' ? row.position : 0,
     });
@@ -154,93 +131,89 @@ function parseSubtasks(body: unknown): Subtask[] | null {
   return parsed;
 }
 
-/** The sibling cells' message extraction, verbatim: report what the server said when it said
- *  something, and a generic sentence when the body is an HTML error page or an empty 500. */
-async function messageFrom(res: Response, fallback: string): Promise<string> {
-  const body: unknown = await res.json().catch(() => null);
-  return typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string'
-    ? (body as { error: string }).error
-    : fallback;
-}
-
 export interface WorkItemDetailProps {
+  /** Drives the overlay's enter/exit; the shell keeps the drawer mounted through the exit via
+   *  `usePresence`. */
+  open:      boolean;
+  /** Opened from the keyboard: no enter animation (spec 4.3). */
+  instant?:  boolean;
   item:      WorkItem;
   /** "YYYY-MM-DD" — `work.generated_at`, so the drawer agrees with every row about "today". */
   todayStr:  string;
   onClose:   () => void;
-  /** Re-pulls the whole work payload after a successful write, so the row underneath — its
-   *  `subtask_done`/`subtask_total` counts and its `link_count` included — agrees with what was
-   *  just written. The shell wires this to the same `refreshWork` the edit dialog's `onSaved`
-   *  gets. */
+  /** Re-pulls the whole work payload after a successful write, so the row underneath agrees
+   *  with what was just written. */
   onChanged: () => void | Promise<void>;
+  /** Owned items only: the shell's deferred delete (hide, Undo toast, DELETE on expiry). */
+  onDelete?: (item: WorkItem) => void;
+  /** Opens the full edit dialog for this item; the drawer closes itself first. */
+  onEdit?:   (item: WorkItem) => void;
 }
 
+type WaitingAsk = { mode: 'move'; next: WorkStage } | { mode: 'edit' };
+
 /**
- * The work-item detail drawer (§26): every field that would otherwise have to be crammed into
- * the main views gets a home here, so List/Table/Board can stay concise.
+ * The work-item detail drawer (spec 10.2) on `WbOverlay`'s `drawer` variant: a right-hand panel
+ * at 768px and up, a bottom sheet below. The overlay owns the focus trap, Esc, the scrim and
+ * opener-focus restoration.
  *
- * **A right-hand drawer, not a centered modal — but the same dialog.** The container differs
- * (full-height panel pinned to the right edge rather than a centered card), and nothing else
- * does: the focus trap, the Escape handling, the backdrop click, the opener-focus restoration
- * and the `role="dialog"`/`aria-modal`/`aria-labelledby` wiring are `WorkItemDialog`'s, reused
- * line for line. A second modal implementation with its own keyboard behaviour would be a
- * regression in consistency, not a feature.
- *
- * **Read-mostly, with two exceptions.** Status is a real control here (the same `setWorkStage`
- * write, through the same endpoint routing, in the same tagged-optimistic shape `StatusCell`
- * uses) and the SUBTASKS section is fully editable. Everything else — title, priority, deadline,
- * time, estimate, notes — is displayed and edited through the edit dialog, which the row's
- * overflow "Edit" action still opens. The two entry points are complementary: the title opens
- * *this*, the overflow menu opens *that*.
- *
- * **The title is never editable here.** Renaming an owned item goes through the edit dialog;
- * an academic-sourced item cannot be renamed at all (its title lives in Study Pulse, and
- * `AcademicFieldSet` renders no title input for exactly that reason).
- *
- * **Nothing branches on `isAcademic`.** Subtasks and links attach to a polymorphic owner —
- * `item.source` *is* the `owner_kind` and `item.id` the `owner_id` — so both sections work
- * identically for an owned row and a Study Pulse one with no special case on either side of the
- * wire. Status keys off `item.context` generically, which is what gives an academic item its
- * five stages and a Life item its three without an `if` anywhere.
- *
- * Solid `#fbfbfd` rather than §11's glass recipe: it matches `WorkItemDialog` (the surface this
- * is a variant of), and — load-bearing — `backdrop-filter` on this panel would make it the
- * containing block for `position: fixed` descendants, which is precisely how `LinksPopover`
- * escapes scroll containers. A glass drawer would break the popover it hosts.
+ * Owned items get an inline-editable title and a Delete button. Academic (Study Pulse) items
+ * show a plain title — Study Pulse owns it — and cannot be deleted here. Subtasks and links
+ * attach to a polymorphic owner (`item.source` is the `owner_kind`), so both sections work for
+ * either source without a special case.
  */
-export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: WorkItemDetailProps) {
-  const panelRef     = useRef<HTMLDivElement>(null);
-  const firstFieldRef = useRef<HTMLSelectElement>(null);
+export default function WorkItemDetail({ open, instant = false, item, todayStr, onClose, onChanged, onDelete, onEdit }: WorkItemDetailProps) {
+  const statusRef       = useRef<HTMLSelectElement>(null);
+  const closeRef        = useRef<HTMLButtonElement>(null);
   const linksTriggerRef = useRef<HTMLButtonElement>(null);
+  const reasonEditRef   = useRef<HTMLButtonElement>(null);
+
+  const isOwned = item.source === 'owned';
+
+  /* ─── Title ──────────────────────────────────────────────────────────────────────────── */
+  const [titleDraft, setTitleDraft] = useState<string | null>(null);
+  /** Tagged like the status override: once the refreshed payload carries a different title the
+   *  tag no longer matches and the override falls away. */
+  const [titleOverride, setTitleOverride] = useState<{ over: string; value: string } | null>(null);
+  const shownTitle = titleOverride !== null && titleOverride.over === item.title ? titleOverride.value : item.title;
+
+  const commitTitle = async () => {
+    if (titleDraft === null) return;
+    const next = titleDraft.trim();
+    setTitleDraft(null);
+    if (next === '' || next === shownTitle) return;
+    setTitleOverride({ over: item.title, value: next });
+    const res = await patchItem(item, { title: next }).catch(() => null);
+    if (!res || !res.ok) {
+      setTitleOverride(null);
+      toastError(res ? await messageFrom(res, `Couldn't rename "${item.title}"`) : NETWORK_ERROR);
+      return;
+    }
+    await onChanged();
+  };
 
   /* ─── Status ─────────────────────────────────────────────────────────────────────────── */
   const stage = stageOf(item);
   const [statusPending, setStatusPending] = useState(false);
-  // `disabled={statusPending}` (below) is what stops the double-PATCH race, but a browser
-  // blurs an element the instant it disables. Outside a modal that is a minor annoyance;
-  // inside this drawer's own focus trap it is a hole — focus falls to `document.body`, which
-  // the trap's `onKeyDown` never reaches, so Escape stops closing the drawer and Tab walks
-  // into the page behind it until something refocuses the panel. `StatusCell`'s fix, ported:
-  // remember whether this select owned focus at the moment it disabled, and restore it there
-  // and only there once the request settles.
+  // A browser blurs an element the instant it disables; restore focus to the select once the
+  // request settles if it held focus when it disabled, so Esc and Tab keep working.
   const statusWasFocused = useRef(false);
   useEffect(() => {
     if (!statusPending && statusWasFocused.current) {
-      firstFieldRef.current?.focus();
+      statusRef.current?.focus();
       statusWasFocused.current = false;
     }
   }, [statusPending]);
-  /** `StatusCell`'s tagged optimistic override: reconciliation is pure — once the refreshed
-   *  payload arrives with a different `stage` the tag no longer matches and the override falls
-   *  away on its own, with no frame in which the old value flashes back. */
+  /** `StatusCell`'s tagged optimistic override. */
   const [optimistic, setOptimistic] = useState<{ over: WorkStage; value: WorkStage } | null>(null);
   const shownStage = optimistic !== null && optimistic.over === stage ? optimistic.value : stage;
   const stages = STAGES_BY_CONTEXT[item.context] ?? FALLBACK_STAGES;
-  // A stored stage outside its context's vocabulary is possible (free-form column; an item moved
-  // between contexts by a hand-edit). A `<select>` whose `value` matches no `<option>` renders
-  // the *first* one, which would report the item's status as something it is not — so the stray
-  // value gets an option of its own, disabled, honest but unchoosable.
+  // A stored stage outside its context's vocabulary gets a disabled option of its own, so the
+  // select never reports the item's status as its first option instead.
   const strayStage = stages.includes(shownStage) ? null : shownStage;
+
+  /** A move into a waiting stage, or an edit of the reason, waiting on the popover. */
+  const [waitingAsk, setWaitingAsk] = useState<WaitingAsk | null>(null);
 
   /* ─── Subtasks ───────────────────────────────────────────────────────────────────────── */
   const [subtasks, setSubtasks]           = useState<Subtask[] | null>(null);
@@ -248,8 +221,7 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
   const [draftTitle, setDraftTitle]       = useState('');
   const [addError, setAddError]           = useState<string | null>(null);
   const [adding, setAdding]               = useState(false);
-  /** Keyed by subtask id, exactly as `LinksPopover` keys its deletes: one row's write must not
-   *  disable every other row's controls. */
+  /** Keyed by subtask id: one row's write must not disable every other row's controls. */
   const [busyIds, setBusyIds]             = useState<ReadonlySet<number>>(() => new Set());
 
   /* ─── Links ──────────────────────────────────────────────────────────────────────────── */
@@ -257,17 +229,14 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
   const [linksStatus, setLinksStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [linksOpen, setLinksOpen]     = useState(false);
 
-  // Both loaders key on the owner pair, never on the `item` object: `onChanged` re-pulls the
-  // whole work payload, so a *new* `WorkItem` object for the same row arrives after every
-  // mutation. An effect keyed on identity would refetch on each of them.
+  // Loaders key on the owner pair, never on the `item` object: every refresh hands over a new
+  // `WorkItem` for the same row, and an identity-keyed effect would refetch on each.
   const ownerKind = item.source;
   const ownerId   = item.id;
 
   const loadSubtasks = useCallback(async (): Promise<boolean> => {
     setSubtaskStatus('loading');
     const query = `owner_kind=${encodeURIComponent(ownerKind)}&owner_id=${encodeURIComponent(String(ownerId))}`;
-    // `.catch(() => null)` rather than a `try` around the body: only `fetch` itself rejecting is
-    // a network failure. A 404 or a 500 is an answer, and gets the server's own words.
     const res = await fetch(`/api/workboard/subtasks?${query}`).catch(() => null);
     if (res === null || !res.ok) { setSubtaskStatus('error'); return false; }
     const parsed = parseSubtasks(await res.json().catch(() => null));
@@ -279,11 +248,9 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
 
   useEffect(() => { void loadSubtasks(); }, [loadSubtasks]);
 
-  /* The links list. The drawer shows it unprompted — unlike the Table, where it sits behind a
-   * trigger — so the fetch fires on open. A failure is reported inline with a retry rather than
-   * through `reportTableCellError`: an `alert` the instant a drawer opens would be an ambush,
-   * and this is a read the user can simply retry. Every *mutation* still alerts (ruling: every
-   * mutating action needs a visible failure path), which `LinksPopover` already does. */
+  /* Shown unprompted, so the fetch fires on open. A failed read is reported inline with a retry
+   * rather than toasted the instant the drawer opens; mutations report through `LinksPopover`'s
+   * error toast. */
   const loadLinks = useCallback(async () => {
     setLinksStatus('loading');
     const result = await loadOwnerLinks(ownerKind, ownerId, { force: true });
@@ -292,111 +259,69 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
 
   useEffect(() => { void loadLinks(); }, [loadLinks]);
 
-  /* ─── The dialog mechanics, from `WorkItemDialog` ────────────────────────────────────── */
-
-  useEffect(() => {
-    // Restore focus to whatever opened this drawer (a row's or a table cell's title button) once
-    // it closes — otherwise a keyboard user lands back on `document.body` and has to re-tab from
-    // the top of the page.
-    const opener = document.activeElement as HTMLElement | null;
-    firstFieldRef.current?.focus();
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      // The opener can be gone by the time this runs (e.g. the row it belonged to was filtered
-      // out by a search change while the drawer was open) — guard with `isConnected` rather than
-      // letting a stale-element `.focus()` throw.
-      if (opener?.isConnected) opener.focus();
-    };
-  }, []);
-
-  function handleBackdropMouseDown(e: React.MouseEvent<HTMLDivElement>) {
-    if (e.target === e.currentTarget) onClose();
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    if (e.key === 'Escape') {
-      e.stopPropagation();
-      onClose();
-      return;
-    }
-    if (e.key !== 'Tab') return;
-    const root = panelRef.current;
-    if (!root) return;
-    const focusables = Array.from(
-      root.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'),
-    ).filter(el => el.offsetParent !== null);
-    if (!focusables.length) return;
-    const first = focusables[0];
-    const last  = focusables[focusables.length - 1];
-    // `document.activeElement === root` alongside `=== first`: `refocusIfLost` (below) can
-    // land focus on the panel container itself — `querySelectorAll` above only matches
-    // root's *descendants*, so root can never be in `focusables` and is therefore never
-    // `first`, regardless of its `tabIndex={-1}` (that attribute only keeps it out of the
-    // natural tab order; it plays no part in the exclusion here). Without this second
-    // disjunct, a Shift+Tab pressed while focus sits on root would fall through to native
-    // browser handling instead of this wrap check, walking backward out of the drawer into
-    // whatever precedes it in the document (the panel's children come after it, so forward
-    // Tab is unaffected).
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === root)) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }
-
   /* ─── Writes ─────────────────────────────────────────────────────────────────────────── */
 
-  const handleStageChange = async (next: WorkStage) => {
-    // Belt-and-braces behind `disabled={statusPending}`: a fast double change must not produce
-    // two racing PATCHes whose responses land out of order.
+  const commitStage = async (next: WorkStage, reason?: string | null) => {
+    // Belt-and-braces behind `disabled={statusPending}`: no two racing PATCHes.
     if (statusPending || next === shownStage) return;
-    statusWasFocused.current = document.activeElement === firstFieldRef.current;
+    statusWasFocused.current = document.activeElement === statusRef.current;
     setOptimistic({ over: stage, value: next });
     setStatusPending(true);
     try {
-      const res = await setWorkStage(item, next).catch(() => null);
-      if (res === null) { setOptimistic(null); reportTableCellError(NETWORK_ERROR); return; }
-      if (!res.ok) {
-        // Revert AND say why. Both PATCH routes answer a rejected stage with a sentence naming
-        // the offending value, which is far more use than a generic failure.
+      const prev = stage;
+      const prevReason = item.blocked_reason;
+      const res = await setWorkStage(item, next, reason).catch(() => null);
+      if (res === null || !res.ok) {
+        // Revert AND say why. A 4xx gets the server's reason and no Retry (`reportStageFailure`).
         setOptimistic(null);
-        reportTableCellError(await messageFrom(res, STATUS_ERROR));
+        await reportStageFailure(res, {
+          fallback: STATUS_ERROR, network: NETWORK_ERROR,
+          retry: () => commitStage(next, reason), report: reportTableCellError,
+        });
         return;
       }
       await onChanged();
+      // The override is tagged with `prev`, so it would match again once Undo restores it.
+      offerStageUndo(item, prev, prevReason, next, onChanged, {
+        report: reportTableCellError, beforeUndo: () => setOptimistic(null),
+      });
     } finally {
       setStatusPending(false);
     }
   };
 
-  /** Every subtask write ends the same way: re-read the list (the server owns ids and positions,
-   *  neither of which can be guessed locally) and re-pull the work payload so the row underneath
-   *  the drawer shows the new `subtask_done`/`subtask_total`. */
-  const afterSubtaskWrite = async () => {
-    if (!(await loadSubtasks())) { reportTableCellError(SUBTASK_LIST_ERROR); return; }
+  const handleStageChange = (next: WorkStage) => {
+    if (statusPending || next === shownStage) return;
+    // Waiting stages ask for their reason first (spec 10.3); cancelling cancels the move.
+    if (isWaitingStage(next)) { setWaitingAsk({ mode: 'move', next }); return; }
+    void commitStage(next);
+  };
+
+  const saveReason = async (reason: string | null) => {
+    const res = await patchItem(item, { blocked_reason: reason }).catch(() => null);
+    if (!res || !res.ok) {
+      toastError(res ? await messageFrom(res, `Couldn't save the reason for "${item.title}"`) : NETWORK_ERROR);
+      return;
+    }
     await onChanged();
   };
 
-  /** A disabled checkbox or button blurs to `document.body` the instant it disables — the same
-   *  hole the Status select's `wasFocused` guard closes above, but here there is no single
-   *  control to remember: a toggle's checkbox survives the round trip, a delete's does not, and
-   *  either can fail before ever reaching `afterSubtaskWrite`. Checking where focus actually
-   *  landed, in every write's `finally`, covers every exit — the two failure returns included —
-   *  with one guard instead of one per call site. */
+  /** Re-read the list (the server owns ids and positions) and re-pull the work payload so the
+   *  row underneath shows the new counts. */
+  const afterSubtaskWrite = async () => {
+    if (!(await loadSubtasks())) { reportTableCellError(SUBTASK_LIST_ERROR, afterSubtaskWrite); return; }
+    await onChanged();
+  };
+
+  /** A disabled control blurs to `document.body`, which sits outside the overlay's trap; land
+   *  focus somewhere safe inside the drawer instead. */
   const refocusIfLost = () => {
-    if (document.activeElement === document.body) panelRef.current?.focus();
+    if (document.activeElement === document.body) closeRef.current?.focus();
   };
 
   const addSubtask = async () => {
     if (adding) return;
     const title = draftTitle.trim();
-    // Pre-flight only, and it mirrors the route's own rule. A validation message renders under
-    // the field because it is about the field the user is looking at; a *request* that fails
-    // goes to `reportTableCellError` like every other write in this module.
     if (title === '')       { setAddError('A title is required.'); return; }
     if (title.length > 255) { setAddError('Keep the subtask to 255 characters or fewer.'); return; }
     setAddError(null);
@@ -406,12 +331,10 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
       const res = await fetch('/api/workboard/subtasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // `source`/`id` *are* the owner pair — `LinkOwner['kind']` is exactly `WorkSource`, so an
-        // academic item resolves through the academic path with no translation on either side.
         body: JSON.stringify({ owner_kind: ownerKind, owner_id: ownerId, title }),
       }).catch(() => null);
-      if (res === null) { reportTableCellError(NETWORK_ERROR); return; }
-      if (!res.ok) { reportTableCellError(await messageFrom(res, SUBTASK_ADD_ERROR)); return; }
+      if (res === null) { reportTableCellError(NETWORK_ERROR, addSubtask); return; }
+      if (!res.ok) { reportTableCellError(await messageFrom(res, SUBTASK_ADD_ERROR), addSubtask); return; }
       setDraftTitle('');
       await afterSubtaskWrite();
     } finally {
@@ -429,8 +352,8 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_done: !subtask.is_done }),
       }).catch(() => null);
-      if (res === null) { reportTableCellError(NETWORK_ERROR); return; }
-      if (!res.ok) { reportTableCellError(await messageFrom(res, SUBTASK_TOGGLE_ERROR)); return; }
+      if (res === null) { reportTableCellError(NETWORK_ERROR, () => toggleSubtask(subtask)); return; }
+      if (!res.ok) { reportTableCellError(await messageFrom(res, SUBTASK_TOGGLE_ERROR), () => toggleSubtask(subtask)); return; }
       await afterSubtaskWrite();
     } finally {
       setBusyIds(current => {
@@ -448,8 +371,8 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
     try {
       const res = await fetch(`/api/workboard/subtasks/${subtask.id}`, { method: 'DELETE' })
         .catch(() => null);
-      if (res === null) { reportTableCellError(NETWORK_ERROR); return; }
-      if (!res.ok) { reportTableCellError(await messageFrom(res, SUBTASK_DELETE_ERROR)); return; }
+      if (res === null) { reportTableCellError(NETWORK_ERROR, () => removeSubtask(subtask)); return; }
+      if (!res.ok) { reportTableCellError(await messageFrom(res, SUBTASK_DELETE_ERROR), () => removeSubtask(subtask)); return; }
       await afterSubtaskWrite();
     } finally {
       setBusyIds(current => {
@@ -457,103 +380,102 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
         next.delete(subtask.id);
         return next;
       });
-      // The row that held focus is gone from the DOM the moment this succeeds — unlike the
-      // toggle/add cases, there is no control left to consider restoring focus to, only
-      // somewhere safe to land it. `refocusIfLost` covers that case and the two failure
-      // returns above uniformly, where the checkbox merely re-enables.
       refocusIfLost();
     }
   };
 
   /* ─── Derived display values ─────────────────────────────────────────────────────────── */
 
+  const chip       = contextChip(item);
+  const place      = placeRow(item);
   const dueState   = dueStateOf(item, todayStr);
-  const dateLabel  = formatDeadline(item) ?? DASH;
+  const dateLabel  = formatDeadline(item);
   const timeLabel  = formatDeadlineTime(item);
-  const estimate   = item.estimated_hours !== null ? `${item.estimated_hours}h` : DASH;
+  const deadline   = dateLabel === null ? null : timeLabel === DASH ? dateLabel : `${dateLabel} · ${timeLabel}`;
+  const estimate   = item.estimated_hours !== null ? `${Number(item.estimated_hours)}h` : null;
+  const waitingText = item.blocked_since === null
+    ? null
+    : `${waitingLabel(stage, item.blocked_reason)} · ${daysSince(item.blocked_since, todayStr)}d`;
   const showing    = subtasks ?? [];
   const doneCount  = showing.filter(s => s.is_done).length;
   const shownLinks: readonly WorkLink[] = links ?? [];
   const linkCount  = links?.length ?? item.link_count;
 
-  return (
-    <div
-      className="vb-detail-backdrop"
-      onMouseDown={handleBackdropMouseDown}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(20,24,38,0.45)', zIndex: 1000,
-        display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end',
-      }}
-    >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="workItemDetailHeading"
-        // Focusable so the panel can take focus back after a delete removes the row that had it.
-        // -1 keeps it out of the sequential Tab order.
-        tabIndex={-1}
-        onKeyDown={handleKeyDown}
-        className="vb-detail-panel"
-        // `width`, `height` and `border-left` are declared in the styled-jsx block below rather
-        // than here, because addendum §21's phone breakpoint overrides exactly those three and an
-        // inline declaration wins over a class selector in every media state. Everything else the
-        // panel needs is width-invariant and stays inline.
-        style={{
-          overflowY: 'auto', boxSizing: 'border-box',
-          background: '#fbfbfd',
-          boxShadow: '-20px 0 60px rgba(31,38,68,0.28)', padding: '22px',
-          display: 'flex', flexDirection: 'column', gap: '18px', fontFamily: FONT,
-        }}
-      >
-        {/* ── Header: title (read-only) and the hierarchy line ── */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
-          <div style={{ minWidth: 0 }}>
-            <h2
-              id="workItemDetailHeading"
-              style={{
-                margin: '0 0 4px', fontFamily: HEADER_FONT, fontSize: '1.05rem', fontWeight: 800,
-                color: '#2d3748', lineHeight: 1.3, overflowWrap: 'anywhere',
-              }}
-            >
-              {item.title}
-            </h2>
-            <p style={{ margin: 0, fontFamily: FONT, fontSize: '0.76rem', fontWeight: 600, color: '#5c6b80' }}>
-              {hierarchyLine(item)}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="vb-detail-icon-btn"
-            aria-label="Close details"
-            onClick={onClose}
-            style={{
-              flex: '0 0 32px', width: '32px', height: '32px', display: 'inline-flex',
-              alignItems: 'center', justifyContent: 'center', background: 'transparent',
-              border: 'none', borderRadius: '8px', color: '#5c6b80', cursor: 'pointer', padding: 0,
-            }}
-          >
-            <X size={18} aria-hidden />
-          </button>
-        </div>
+  const revisionAsk = waitingAsk !== null && (waitingAsk.mode === 'move' ? waitingAsk.next === 'submitted' : stage === 'submitted');
+  const waitingAnchor = waitingAsk?.mode === 'edit' ? reasonEditRef.current : statusRef.current;
 
-        {/* ── Status: the one always-live field control ── */}
+  return (
+    <WbOverlay
+      open={open}
+      instant={instant}
+      onClose={onClose}
+      variant="drawer"
+      labelledBy="vb-detail-title"
+      initialFocusRef={statusRef}
+      panelStyle={{ padding: 20 }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {/* ── Header: title, close, status ── */}
         <div>
-          <label htmlFor="vb-detail-status" style={{ ...SECTION_LABEL_STYLE, marginBottom: '6px' }}>
-            Status
-          </label>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
+            {isOwned ? (
+              <input
+                id="vb-detail-title"
+                aria-label="Title"
+                className="vb-detail-title"
+                value={titleDraft ?? shownTitle}
+                maxLength={255}
+                onFocus={() => setTitleDraft(current => current ?? shownTitle)}
+                onChange={e => setTitleDraft(e.target.value)}
+                onBlur={() => { void commitTitle(); }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    // Enter that confirms an IME composition is not a commit.
+                    if (e.nativeEvent.isComposing) return;
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  } else if (e.key === 'Escape' && titleDraft !== null && titleDraft !== shownTitle) {
+                    // First Esc reverts an edit; an unedited title lets Esc close the drawer.
+                    e.stopPropagation();
+                    setTitleDraft(shownTitle);
+                  }
+                }}
+              />
+            ) : (
+              <h2
+                id="vb-detail-title"
+                style={{
+                  flex: 1, minWidth: 0, margin: 0, padding: '2px 0',
+                  font: '800 var(--wb-fs-20) var(--wb-font-head)', color: 'var(--wb-text)',
+                  lineHeight: 1.3, overflowWrap: 'anywhere',
+                }}
+              >
+                {item.title}
+              </h2>
+            )}
+            <button
+              ref={closeRef}
+              type="button"
+              className="vb-detail-icon-btn wb-focus-ring"
+              aria-label="Close details"
+              onClick={onClose}
+              style={{ ...ICON_BUTTON_STYLE, flex: '0 0 32px', width: '32px', height: '32px', border: 'none', background: 'transparent' }}
+            >
+              <X size={18} aria-hidden />
+            </button>
+          </div>
+
           <select
-            id="vb-detail-status"
-            ref={firstFieldRef}
-            className="vb-detail-control"
+            ref={statusRef}
+            aria-label="Status"
+            className="vb-detail-status"
             value={shownStage}
             disabled={statusPending}
-            onChange={e => { void handleStageChange(e.target.value as WorkStage); }}
+            onChange={e => handleStageChange(e.target.value as WorkStage)}
             style={{
-              ...CONTROL_STYLE, width: '100%', fontWeight: 600,
+              marginTop: '6px',
               cursor: statusPending ? 'progress' : 'pointer',
-              // Opacity, not a colour swap: the UA's own disabled rendering greys the text below
-              // §8's contrast floor, and this is a transient in-flight state.
+              // Opacity, not a colour swap: the UA's disabled text falls below contrast.
               opacity: statusPending ? 0.65 : 1,
             }}
           >
@@ -564,84 +486,177 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
           </select>
         </div>
 
-        {/* ── Priority, deadline, time, estimate — read here, edited in the dialog ── */}
-        <dl
-          style={{
-            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 14px', margin: 0,
-          }}
-        >
-          <div>
-            <dt style={SECTION_LABEL_STYLE}>Priority</dt>
-            <dd style={{
-              margin: '4px 0 0', fontFamily: FONT, fontSize: '0.84rem', fontWeight: 700,
-              // §6's alert red for High, §1's meta colour otherwise — and the word still reads
-              // "High", so colour carries nothing on its own.
-              color: item.priority === 'high' ? '#922e48' : '#2d3748',
-            }}>
-              {PRIORITY_LABEL[item.priority] ?? item.priority}
-            </dd>
-          </div>
-          <div>
-            <dt style={SECTION_LABEL_STYLE}>Deadline</dt>
-            <dd style={{
-              margin: '4px 0 0', fontFamily: FONT, fontSize: '0.84rem', fontWeight: 700,
-              color: DUE_COLOR[dueState],
-            }}>
-              {dateLabel}
-              {/* Without this the lateness would be carried by the colour alone. */}
-              <span style={VISUALLY_HIDDEN}>
-                {dateLabel === DASH ? ' No deadline set.' : (DUE_SR_SUFFIX[dueState] ?? '')}
-              </span>
-            </dd>
-          </div>
-          <div>
-            <dt style={SECTION_LABEL_STYLE}>Deadline time</dt>
-            <dd style={{ margin: '4px 0 0', fontFamily: FONT, fontSize: '0.84rem', fontWeight: 700, color: '#2d3748' }}>
-              {timeLabel}
-              <span style={VISUALLY_HIDDEN}>{timeLabel === DASH ? ' No time set.' : ''}</span>
-            </dd>
-          </div>
-          <div>
-            <dt style={SECTION_LABEL_STYLE}>Estimate</dt>
-            <dd style={{ margin: '4px 0 0', fontFamily: FONT, fontSize: '0.84rem', fontWeight: 700, color: '#2d3748' }}>
-              {estimate}
-              <span style={VISUALLY_HIDDEN}>{estimate === DASH ? ' No estimate set.' : ''}</span>
-            </dd>
-          </div>
+        {/* ── Properties ── */}
+        <dl style={{ display: 'grid', gridTemplateColumns: '96px 1fr', rowGap: 10, columnGap: 12, margin: 0 }}>
+          <dt style={DT_STYLE}>Context</dt>
+          <dd style={{ ...DD_STYLE, display: 'flex', alignItems: 'center', gap: '7px' }}>
+            <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: chip.fill }} />
+            {CONTEXT_LABELS[item.context] ?? item.context}
+          </dd>
+
+          <dt style={DT_STYLE}>{place.label}</dt>
+          <dd style={DD_STYLE}>{place.value || DASH}</dd>
+
+          {item.context !== 'project' && item.project_name && (
+            <>
+              <dt style={DT_STYLE}>Project</dt>
+              <dd style={DD_STYLE}>{item.project_name}</dd>
+            </>
+          )}
+
+          <dt style={DT_STYLE}>Priority</dt>
+          <dd style={{
+            ...DD_STYLE,
+            // The word still reads "High", so colour carries nothing on its own.
+            color: item.priority === 'high' ? 'var(--wb-danger)' : 'var(--wb-text)',
+            fontWeight: item.priority === 'high' ? 700 : 500,
+          }}>
+            {PRIORITY_LABEL[item.priority] ?? item.priority}
+          </dd>
+
+          <dt style={DT_STYLE}>Deadline</dt>
+          <dd style={{ ...DD_STYLE, color: DUE_ACCENT[dueState] ?? 'var(--wb-text)' }}>
+            {deadline ?? DASH}
+            <span style={VISUALLY_HIDDEN}>
+              {deadline === null ? ' No deadline set.' : (DUE_SR_SUFFIX[dueState] ?? '')}
+            </span>
+          </dd>
+
+          <dt style={DT_STYLE}>Estimate</dt>
+          <dd style={DD_STYLE}>
+            {estimate ?? DASH}
+            <span style={VISUALLY_HIDDEN}>{estimate === null ? ' No estimate set.' : ''}</span>
+          </dd>
+
+          {waitingText !== null && (
+            <>
+              <dt style={DT_STYLE}>Waiting</dt>
+              <dd style={{ ...DD_STYLE, display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--wb-warn)' }}>
+                <span style={{ flex: 1, minWidth: 0 }}>{waitingText}</span>
+                <button
+                  ref={reasonEditRef}
+                  type="button"
+                  className="wb-add-trigger wb-focus-ring"
+                  onClick={() => setWaitingAsk({ mode: 'edit' })}
+                >
+                  Edit
+                  <span style={VISUALLY_HIDDEN}>{` waiting reason for "${item.title}"`}</span>
+                </button>
+              </dd>
+            </>
+          )}
         </dl>
 
+        {/* ── LINKS ── */}
+        <section aria-labelledby="vb-detail-links-heading" style={SECTION_STYLE}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
+            <h3 id="vb-detail-links-heading" style={{ ...SECTION_LABEL_STYLE, margin: 0 }}>Links</h3>
+            {/* The editor, not a second implementation of it: every add and delete goes through
+                the same popover `LinksCell` and the Table's phone card open. */}
+            <button
+              ref={linksTriggerRef}
+              type="button"
+              className="vb-detail-btn wb-focus-ring"
+              aria-haspopup="dialog"
+              aria-expanded={linksOpen}
+              onClick={() => setLinksOpen(current => !current)}
+              style={SECONDARY_BUTTON_STYLE}
+            >
+              <Link2 size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.75 }} />
+              Edit
+              <span style={VISUALLY_HIDDEN}>{` links for "${item.title}".`}</span>
+            </button>
+            {linksOpen && (
+              <LinksPopover
+                ownerKind={ownerKind}
+                ownerId={ownerId}
+                title={item.title}
+                linkCount={linkCount}
+                triggerRef={linksTriggerRef}
+                onClose={() => setLinksOpen(false)}
+                onChanged={onChanged}
+              />
+            )}
+          </div>
+
+          {linksStatus === 'loading' && shownLinks.length === 0 && <p style={NOTE_STYLE}>Loading links…</p>}
+
+          {linksStatus === 'error' && (
+            <div>
+              <p style={{ ...NOTE_STYLE, color: 'var(--wb-danger)' }}>Could not load the links.</p>
+              <button
+                type="button"
+                className="vb-detail-btn wb-focus-ring"
+                onClick={() => { void loadLinks(); }}
+                style={{ ...SECONDARY_BUTTON_STYLE, marginTop: '6px' }}
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {linksStatus === 'ready' && shownLinks.length === 0 && <p style={NOTE_STYLE}>No links yet.</p>}
+
+          {shownLinks.length > 0 && (
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              {shownLinks.map(link => {
+                const { label: typeLabel, Icon } = linkTypeMeta(link.link_type);
+                return (
+                  <li key={link.id} style={{ display: 'flex', alignItems: 'center' }}>
+                    <a
+                      className="vb-detail-link wb-focus-ring"
+                      href={link.url}
+                      // `noreferrer` too, so the destination is not handed the page URL.
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      // The full URL lives here and in `href`, never as the visible text.
+                      title={link.url}
+                      style={{
+                        flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '7px',
+                        minHeight: '32px', padding: '4px 6px', borderRadius: 'var(--wb-r-md)',
+                        textDecoration: 'none', color: 'var(--wb-text)',
+                      }}
+                    >
+                      <Icon size={14} aria-hidden style={{ flexShrink: 0, color: 'var(--wb-text-muted)' }} />
+                      <span style={{
+                        flex: 1, minWidth: 0, font: '600 var(--wb-fs-13) var(--wb-font-ui)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {link.label}
+                      </span>
+                      <span style={VISUALLY_HIDDEN}>{` ${typeLabel} link, opens in a new tab.`}</span>
+                      <ExternalLink size={12} aria-hidden style={{ flexShrink: 0, color: 'var(--wb-text-faint)' }} />
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
         {/* ── SUBTASKS ── */}
-        <section aria-labelledby="vb-detail-subtasks-heading" style={{ borderTop: '1px solid rgba(200,210,230,0.5)', paddingTop: '14px' }}>
+        <section aria-labelledby="vb-detail-subtasks-heading" style={SECTION_STYLE}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
             <h3 id="vb-detail-subtasks-heading" style={{ ...SECTION_LABEL_STYLE, margin: 0 }}>Subtasks</h3>
-            {/* The progress count reads off the *live* list rather than the payload's
-                `subtask_done`/`subtask_total`, which are a snapshot taken before this drawer's
-                own writes. The payload's pair is what the row underneath shows, and `onChanged`
-                is what keeps the two in step.
-                Gated on `showing.length` alone, not `subtaskStatus === 'ready'`: `loadSubtasks`
-                never clears `subtasks` when it flips to `'loading'` for a refetch, so `showing`
-                still holds the previous list — every checkbox toggle would otherwise blink the
-                count out and back for no reason, on data that never actually left. */}
+            {/* Off the live list, which survives a background refetch, so the count never
+                blinks out on a toggle. */}
             {showing.length > 0 && (
-              <span style={{ fontFamily: FONT, fontSize: '0.74rem', fontWeight: 600, color: '#5c6b80' }}>
+              <span style={{ font: '600 var(--wb-fs-12) var(--wb-font-ui)', color: 'var(--wb-text-muted)' }}>
                 {doneCount} of {showing.length} done
               </span>
             )}
           </div>
 
-          {/* Same reasoning as the count above: only the true first load has nothing to show
-              yet. A background refetch after a write already has `showing` to keep rendering,
-              so it does not need this line stealing the space above it. */}
           {subtaskStatus === 'loading' && showing.length === 0 && <p style={NOTE_STYLE}>Loading subtasks…</p>}
 
           {subtaskStatus === 'error' && (
             <div>
-              <p style={{ ...NOTE_STYLE, color: '#922e48' }}>Could not load the subtasks.</p>
+              <p style={{ ...NOTE_STYLE, color: 'var(--wb-danger)' }}>Could not load the subtasks.</p>
               <button
                 type="button"
-                className="vb-detail-btn"
+                className="vb-detail-btn wb-focus-ring"
                 onClick={() => { void loadSubtasks(); }}
-                style={SECONDARY_BUTTON_STYLE}
+                style={{ ...SECONDARY_BUTTON_STYLE, marginTop: '6px' }}
               >
                 Try again
               </button>
@@ -655,24 +670,20 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
               {showing.map(subtask => {
                 const busy = busyIds.has(subtask.id);
                 return (
-                  <li key={subtask.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', minHeight: '32px' }}>
-                    <input
-                      type="checkbox"
-                      className="vb-detail-checkbox"
+                  <li key={subtask.id} style={{ display: 'flex', alignItems: 'center', gap: '4px', minHeight: '32px' }}>
+                    <WbCheckbox
+                      shape="square"
                       checked={subtask.is_done}
                       disabled={busy}
-                      onChange={() => { void toggleSubtask(subtask); }}
-                      aria-label={subtask.is_done
+                      label={subtask.is_done
                         ? `Mark "${subtask.title}" as not done`
                         : `Mark "${subtask.title}" as done`}
-                      style={{
-                        flexShrink: 0, width: '17px', height: '17px', accentColor: '#256f92',
-                        cursor: busy ? 'progress' : 'pointer',
-                      }}
+                      onChange={() => { void toggleSubtask(subtask); }}
+                      className="vb-detail-check"
                     />
                     <span style={{
-                      flex: 1, minWidth: 0, fontFamily: FONT, fontSize: '0.82rem', fontWeight: 500,
-                      color: subtask.is_done ? '#9aa4b5' : '#2d3748',
+                      flex: 1, minWidth: 0, font: '500 var(--wb-fs-13) var(--wb-font-ui)',
+                      color: subtask.is_done ? 'var(--wb-text-faint)' : 'var(--wb-text)',
                       textDecoration: subtask.is_done ? 'line-through' : 'none',
                       overflowWrap: 'anywhere',
                     }}>
@@ -680,7 +691,7 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
                     </span>
                     <button
                       type="button"
-                      className="vb-detail-icon-btn"
+                      className="vb-detail-icon-btn wb-focus-ring"
                       aria-label={`Remove subtask "${subtask.title}"`}
                       disabled={busy}
                       onClick={() => { void removeSubtask(subtask); }}
@@ -704,7 +715,7 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
               </label>
               <input
                 id="vb-detail-subtask-input"
-                className="vb-detail-control"
+                className="vb-detail-control wb-focus-ring"
                 value={draftTitle}
                 maxLength={255}
                 placeholder="Add a subtask…"
@@ -715,13 +726,13 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
             </div>
             <button
               type="submit"
-              className="vb-detail-btn"
+              className="vb-detail-btn wb-focus-ring"
               disabled={adding}
               style={{
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
-                flexShrink: 0, minHeight: '32px', padding: '6px 12px', borderRadius: '10px',
-                background: '#2a7fa8', border: '1px solid #2a7fa8', fontFamily: FONT,
-                fontSize: '0.78rem', fontWeight: 700, color: '#fff',
+                flexShrink: 0, minHeight: '32px', padding: '6px 12px', borderRadius: 'var(--wb-r-md)',
+                background: 'var(--wb-blue-strong)', border: '1px solid var(--wb-blue-strong)',
+                font: '700 var(--wb-fs-13) var(--wb-font-ui)', color: 'var(--wb-inverse-text)',
                 cursor: adding ? 'progress' : 'pointer', opacity: adding ? 0.7 : 1,
               }}
             >
@@ -731,218 +742,184 @@ export default function WorkItemDetail({ item, todayStr, onClose, onChanged }: W
           </form>
 
           {addError !== null && (
-            // `role="alert"` so a screen-reader user hears the reason their submit did nothing.
-            <p id="vb-detail-subtask-error" role="alert" style={{ ...NOTE_STYLE, marginTop: '6px', color: '#922e48' }}>
+            <p id="vb-detail-subtask-error" role="alert" style={{ ...NOTE_STYLE, marginTop: '6px', color: 'var(--wb-danger)' }}>
               {addError}
             </p>
           )}
         </section>
 
-        {/* ── LINKS ── */}
-        <section aria-labelledby="vb-detail-links-heading" style={{ borderTop: '1px solid rgba(200,210,230,0.5)', paddingTop: '14px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
-            <h3 id="vb-detail-links-heading" style={{ ...SECTION_LABEL_STYLE, margin: 0 }}>Links</h3>
-            {/* The editor, not a second implementation of it. `LinksPopover` is a `position:
-                fixed` `role="dialog"` panel — it cannot be embedded inline — so the drawer shows
-                the list itself and opens the shipped popover for every add and delete, exactly
-                as `LinksCell` and the Table's phone card do. */}
-            <div style={{ position: 'relative', display: 'inline-flex' }}>
-              <button
-                ref={linksTriggerRef}
-                type="button"
-                className="vb-detail-btn"
-                aria-haspopup="dialog"
-                aria-expanded={linksOpen}
-                onClick={() => setLinksOpen(current => !current)}
-                style={SECONDARY_BUTTON_STYLE}
-              >
-                <Link2 size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.75 }} />
-                Edit
-                <span style={VISUALLY_HIDDEN}>{` links for "${item.title}".`}</span>
-              </button>
-              {linksOpen && (
-                <LinksPopover
-                  ownerKind={ownerKind}
-                  ownerId={ownerId}
-                  title={item.title}
-                  linkCount={linkCount}
-                  triggerRef={linksTriggerRef}
-                  onClose={() => setLinksOpen(false)}
-                  onChanged={onChanged}
-                />
-              )}
-            </div>
-          </div>
-
-          {linksStatus === 'loading' && shownLinks.length === 0 && <p style={NOTE_STYLE}>Loading links…</p>}
-
-          {linksStatus === 'error' && (
-            <div>
-              <p style={{ ...NOTE_STYLE, color: '#922e48' }}>Could not load the links.</p>
-              <button
-                type="button"
-                className="vb-detail-btn"
-                onClick={() => { void loadLinks(); }}
-                style={SECONDARY_BUTTON_STYLE}
-              >
-                Try again
-              </button>
-            </div>
-          )}
-
-          {linksStatus === 'ready' && shownLinks.length === 0 && <p style={NOTE_STYLE}>No links yet.</p>}
-
-          {shownLinks.length > 0 && (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              {shownLinks.map(link => {
-                const { label: typeLabel, Icon } = linkTypeMeta(link.link_type);
-                return (
-                  <li key={link.id} style={{ display: 'flex', alignItems: 'center' }}>
-                    <a
-                      className="vb-detail-link"
-                      href={link.url}
-                      // `noreferrer` as well as `noopener`: `noopener` alone stops the new tab
-                      // reaching `window.opener`, but the referrer header would still hand the
-                      // destination the URL of the page the student was on.
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      // The full URL lives here and in `href` — never as the link's visible
-                      // primary text (§10).
-                      title={link.url}
-                      style={{
-                        flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '7px',
-                        minHeight: '32px', padding: '4px 6px', borderRadius: '8px',
-                        textDecoration: 'none', color: '#2d3748',
-                      }}
-                    >
-                      <Icon size={14} aria-hidden style={{ flexShrink: 0, color: '#5c6b80' }} />
-                      <span style={{
-                        flex: 1, minWidth: 0, fontFamily: FONT, fontSize: '0.82rem', fontWeight: 600,
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}>
-                        {link.label}
-                      </span>
-                      {/* Part of the link's accessible name, not a stray string beside it: a
-                          screen-reader user hears "Canvas, Canvas link, opens in a new tab". */}
-                      <span style={VISUALLY_HIDDEN}>{` ${typeLabel} link, opens in a new tab.`}</span>
-                      <ExternalLink size={12} aria-hidden style={{ flexShrink: 0, color: '#9aa4b5' }} />
-                    </a>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-
         {/* ── NOTES ── */}
-        <section aria-labelledby="vb-detail-note-heading" style={{ borderTop: '1px solid rgba(200,210,230,0.5)', paddingTop: '14px' }}>
-          <h3 id="vb-detail-note-heading" style={{ ...SECTION_LABEL_STYLE, marginBottom: '6px' }}>Notes</h3>
+        <section aria-labelledby="vb-detail-note-heading" style={SECTION_STYLE}>
+          <h3 id="vb-detail-note-heading" style={{ ...SECTION_LABEL_STYLE, margin: '0 0 6px' }}>Notes</h3>
           {item.note === null || item.note.trim() === '' ? (
             <p style={NOTE_STYLE}>No notes yet.</p>
           ) : (
-            // `pre-wrap`: a note is typed into a `<textarea>`, so the line breaks the user put in
-            // are part of what they wrote and must survive the round trip to this panel.
-            <p style={{ ...NOTE_STYLE, whiteSpace: 'pre-wrap', color: '#2d3748', overflowWrap: 'anywhere' }}>
+            // `pre-wrap`: the line breaks typed into the textarea are part of the note.
+            <p style={{ ...NOTE_STYLE, whiteSpace: 'pre-wrap', color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
               {item.note}
             </p>
           )}
         </section>
 
-        {/* A dead-end marker for the eye, not for a screen reader: the drawer ends here and the
-            rest of the item is edited elsewhere. Named specifically as the Focus view's row
-            menu — "Focus" is the tab's actual on-screen label (`WorkboardShell.tsx`'s view
-            selector), even though the internal view key stays the literal "list" (Task 35
-            deliberately left the key alone to avoid a rename cascade) —
-            not generically as "the row's Edit action", since the Table view has no such action
-            to offer (it takes no `onEdit` prop at all, per `WorkTableView.tsx`'s own note), so a
-            user who opened this drawer from a Table row or a phone card would otherwise be
-            pointed at something they cannot reach without switching views. */}
-        <p style={{ ...NOTE_STYLE, display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem' }}>
-          <Check size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.7 }} />
-          Title, deadline and the rest are edited from the Focus view’s row menu.
-        </p>
+        {(onEdit || (isOwned && onDelete)) && (
+          <div style={{ ...SECTION_STYLE, display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+            {onEdit ? (
+              <button
+                type="button"
+                className="wb-add-trigger wb-focus-ring"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                onClick={() => { setTitleDraft(null); onClose(); onEdit({ ...item, title: shownTitle }); }}
+              >
+                <Pencil size={13} aria-hidden />
+                Edit
+                <span style={VISUALLY_HIDDEN}>{` all fields of "${item.title}"`}</span>
+              </button>
+            ) : <span />}
+            {isOwned && onDelete && (
+              <button
+                type="button"
+                className="wb-add-trigger wb-focus-ring"
+                style={{ color: 'var(--wb-danger)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                // A mouse press would blur the title field and commit its draft before the click.
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => {
+                  // Drop a pending rename so no PATCH reaches an item being deleted.
+                  setTitleDraft(null);
+                  onDelete(item);
+                  onClose();
+                }}
+              >
+                <Trash2 size={13} aria-hidden />
+                Delete
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* These rules MUST live in the component that renders their target elements. Each
-          component gets its own styled-jsx scope hash, so a `.vb-detail-control` rule written in
-          `WorkboardShell` would compile cleanly and match nothing — the trap several tasks in
-          this plan have hit. */}
+      <WaitingPopover
+        open={waitingAsk !== null}
+        anchor={waitingAnchor}
+        title={item.title}
+        prompt={revisionAsk ? waitingPrompt('submitted', item.title) : undefined}
+        initial={waitingAsk?.mode === 'edit' ? (item.blocked_reason ?? '') : ''}
+        confirmLabel="Save"
+        onCancel={() => {
+          const a = waitingAnchor;
+          setWaitingAsk(null);
+          if (a?.isConnected) a.focus({ preventScroll: true });
+        }}
+        onConfirm={reason => {
+          const ask = waitingAsk;
+          const a = waitingAnchor;
+          setWaitingAsk(null);
+          // Back into the drawer before the popover unmounts, so focus never drops to body.
+          if (a?.isConnected) a.focus({ preventScroll: true });
+          if (ask === null) return;
+          if (ask.mode === 'move') void commitStage(ask.next, reason);
+          else void saveReason(reason);
+        }}
+      />
+
+      {/* These rules MUST live in the component that renders their targets: styled-jsx scopes
+          each component separately. */}
       <style jsx>{`
-        /* §9's ring, on the darker blue. :focus-visible so a mouse click does not leave a ring
-           nobody asked for, while keyboard arrival always does. */
-        .vb-detail-control:focus-visible,
-        .vb-detail-btn:focus-visible,
-        .vb-detail-icon-btn:focus-visible,
-        .vb-detail-link:focus-visible,
-        .vb-detail-checkbox:focus-visible,
-        .vb-detail-panel:focus-visible {
-          outline: 2px solid #2a7fa8;
-          outline-offset: 2px;
-          border-radius: inherit;
+        .vb-detail-title {
+          flex: 1;
+          min-width: 0;
+          box-sizing: border-box;
+          margin: 0 0 0 -6px;
+          padding: 2px 6px;
+          border: 1px solid transparent;
+          border-radius: var(--wb-r-md);
+          background: transparent;
+          font: 800 var(--wb-fs-20) var(--wb-font-head);
+          line-height: 1.3;
+          color: var(--wb-text);
         }
-        .vb-detail-control:hover:not(:disabled),
-        .vb-detail-icon-btn:hover:not(:disabled) {
-          border-color: rgba(140,160,190,0.75);
+        .vb-detail-title:focus {
+          outline: none;
+          border-color: var(--wb-border);
+          background: var(--wb-surface);
         }
-        .vb-detail-btn:hover:not(:disabled) {
-          filter: brightness(0.97);
+        .vb-detail-title:focus-visible {
+          border-color: var(--wb-blue-strong);
         }
-        /* Underline on hover as well as the background shift: "it is a link" must not be carried
-           by colour or background alone. */
-        .vb-detail-link:hover {
-          background: rgba(116,188,217,0.14);
-          text-decoration: underline;
+        /* Task 20's quiet select: reads as text, border on hover or focus. The caret stays
+           visible here because the drawer has no row hover to reveal it. */
+        .vb-detail-status {
+          appearance: none;
+          -webkit-appearance: none;
+          box-sizing: border-box;
+          min-height: 28px;
+          max-width: 100%;
+          margin-left: -6px;
+          border: 1px solid transparent;
+          border-radius: var(--wb-r-sm);
+          padding: 3px 22px 3px 6px;
+          font: 600 var(--wb-fs-13) var(--wb-font-ui);
+          line-height: 1.2;
+          color: var(--wb-text-muted);
+          background-color: transparent;
+          background-image:
+            linear-gradient(45deg, transparent 50%, var(--wb-text-subtle) 50%),
+            linear-gradient(135deg, var(--wb-text-subtle) 50%, transparent 50%);
+          background-position: calc(100% - 13px) 55%, calc(100% - 8px) 55%;
+          background-repeat: no-repeat;
+          background-size: 5px 5px, 5px 5px;
         }
-        /* Addendum §21. Desktop and tablet are identical and unchanged: a full-height panel
-           anchored to the right edge at min(420px, 100%). */
-        .vb-detail-panel {
-          width: min(420px, 100%);
-          height: 100%;
-          border-left: 1px solid rgba(200,210,230,0.6);
+        .vb-detail-status:focus-visible {
+          border-color: var(--wb-blue-strong);
+          outline: 2px solid var(--wb-blue-strong);
+          outline-offset: 1px;
+          background-color: var(--wb-surface);
         }
-        /* Below 768px the side panel becomes a bottom sheet. align-self: flex-end is what docks
-           it to the bottom of the (full-height, align-items: stretch) backdrop instead of
-           stretching to fill it; it is settable from here precisely because it was never set
-           inline on the panel. The divider swaps edges with the geometry — the left edge is now
-           flush with the viewport and needs no rule, while the top edge is newly exposed against
-           the backdrop and takes one. */
-        @media (max-width: 767px) {
-          .vb-detail-panel {
-            width: 100%;
-            height: min(88vh, 100%);
-            align-self: flex-end;
-            border-radius: 18px 18px 0 0;
-            border-left: none;
-            border-top: 1px solid rgba(200,210,230,0.6);
+        @media (hover: none) {
+          .vb-detail-status { border-color: var(--wb-hairline); }
+        }
+        @media (hover: hover) and (pointer: fine) {
+          .vb-detail-title:hover {
+            border-color: var(--wb-border);
           }
-          /* The shared focus-visible rule above forces border-radius: inherit, which resolves
-             to the backdrop's 0 (border-radius isn't naturally inherited, so that rule only ever
-             worked because the panel itself had no radius to lose). Re-asserted here at the same
-             .vb-detail-panel:focus-visible specificity so this later rule wins on source order:
-             without it, the sheet's rounded top corners square off for as long as the panel holds
-             focus (reachable via the delete-then-refocus-the-panel path). */
-          .vb-detail-panel:focus-visible {
-            border-radius: 18px 18px 0 0;
+          .vb-detail-status:hover:not(:disabled) {
+            border-color: var(--wb-border);
+            background-color: var(--wb-surface);
           }
+          .vb-detail-control:hover:not(:disabled),
+          .vb-detail-icon-btn:hover:not(:disabled) {
+            border-color: var(--wb-text-faint);
+          }
+          .vb-detail-btn:hover:not(:disabled) {
+            filter: brightness(0.97);
+          }
+          /* Underline as well as the background: "it is a link" is not carried by colour alone. */
+          .vb-detail-link:hover {
+            background: var(--wb-selected);
+            text-decoration: underline;
+          }
+        }
+        :global(.vb-detail-check.wb-check) {
+          padding: 0 6px;
+          height: 32px;
         }
       `}</style>
-    </div>
+    </WbOverlay>
   );
 }
 
-/** 26×26 clears the WCAG 2.2 Target Size (Minimum) floor of 24px with a little margin — the same
- *  bar, and the same size, `LinksPopover`'s per-row controls use. */
+/** 26×26 clears the WCAG 2.2 Target Size (Minimum) floor of 24px, the size `LinksPopover`'s
+ *  per-row controls use. */
 const ICON_BUTTON_STYLE: React.CSSProperties = {
   flex: '0 0 26px', width: '26px', height: '26px', display: 'inline-flex',
-  alignItems: 'center', justifyContent: 'center', borderRadius: '8px',
-  background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(200,210,230,0.6)',
-  color: '#5c6b80', cursor: 'pointer', padding: 0,
+  alignItems: 'center', justifyContent: 'center', borderRadius: 'var(--wb-r-md)',
+  background: 'var(--wb-surface)', border: '1px solid var(--wb-border)',
+  color: 'var(--wb-text-muted)', cursor: 'pointer', padding: 0,
 };
 
 const SECONDARY_BUTTON_STYLE: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: '5px',
-  minHeight: '30px', padding: '6px 12px', borderRadius: '8px',
-  background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(200,210,230,0.6)',
-  fontFamily: FONT, fontSize: '0.76rem', fontWeight: 600, color: '#5c6b80',
+  minHeight: '30px', padding: '6px 12px', borderRadius: 'var(--wb-r-md)',
+  background: 'var(--wb-surface)', border: '1px solid var(--wb-border)',
+  font: '600 var(--wb-fs-12) var(--wb-font-ui)', color: 'var(--wb-text-muted)',
   cursor: 'pointer',
 };

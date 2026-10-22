@@ -20,15 +20,26 @@ export interface ClassOccurrence {
   course_code:      string;
   subject_name:     string | null;
   section:          string | null;
+  instructor:       string | null;
+  meeting_link:     string | null;
+  // Subject-level metadata (from `subjects`, joined the same way `subject_name` already is) —
+  // null whenever `user_subject_id` is, same as every other subject-derived field here. Carried
+  // onto the occurrence rather than looked up separately so `ClassOverridePopover` can show a
+  // class's full context (trimester, year, units) without a second fetch keyed by subject id.
+  trimester:        string | null;
+  year_level:       string | null;
+  units:            number | null;
   date:             string;   // "YYYY-MM-DD"
   start_time:       string;   // "HH:MM"
   end_time:         string;   // "HH:MM"
   venue:            string | null;
   is_online:        boolean;
+  modality:         'face_to_face' | 'online_sync' | 'online_async';
   override: {
     id:               number;
     modality:         OverrideModality;
     note:             string | null;
+    room:             string | null;
     moved_date:       string | null;   // "YYYY-MM-DD", set only when modality is 'rescheduled'
     moved_start_time: string | null;   // "HH:MM"
     moved_end_time:   string | null;   // "HH:MM"
@@ -229,9 +240,9 @@ export async function getWorkboardWeek(userId: number, weekStart: string): Promi
   const weekEnd = addDays(weekStart, 6);
 
   const [blockRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT sb.block_id, sb.user_subject_id, sb.course_code, sb.section,
-            sb.day_of_week, sb.start_time, sb.end_time, sb.venue, sb.is_online,
-            s.subject_name
+    `SELECT sb.block_id, sb.user_subject_id, sb.course_code, sb.section, sb.instructor, sb.meeting_link,
+            sb.day_of_week, sb.start_time, sb.end_time, sb.venue, sb.is_online, sb.modality,
+            s.subject_name, s.trimester, s.year_level, s.units
      FROM schedule_blocks sb
      LEFT JOIN user_subjects us ON sb.user_subject_id = us.user_subject_id
      LEFT JOIN subjects s ON us.subject_id = s.subject_id
@@ -240,7 +251,7 @@ export async function getWorkboardWeek(userId: number, weekStart: string): Promi
   );
 
   const [overrideRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT so.id, so.block_id, so.override_date, so.modality, so.note,
+    `SELECT so.id, so.block_id, so.override_date, so.modality, so.note, so.room,
             so.moved_date, so.moved_start_time, so.moved_end_time
      FROM schedule_overrides so
      JOIN schedule_blocks sb ON sb.block_id = so.block_id
@@ -252,7 +263,7 @@ export async function getWorkboardWeek(userId: number, weekStart: string): Promi
     overrideByKey.set(`${o.block_id}:${String(o.override_date).slice(0, 10)}`, o);
   }
   const toOverride = (o: RowDataPacket): ClassOccurrence['override'] => ({
-    id: o.id, modality: o.modality, note: o.note,
+    id: o.id, modality: o.modality, note: o.note, room: o.room,
     moved_date: o.moved_date ? String(o.moved_date).slice(0, 10) : null,
     moved_start_time: o.moved_start_time ? String(o.moved_start_time).slice(0, 5) : null,
     moved_end_time: o.moved_end_time ? String(o.moved_end_time).slice(0, 5) : null,
@@ -266,9 +277,10 @@ export async function getWorkboardWeek(userId: number, weekStart: string): Promi
     const override = overrideByKey.get(`${b.block_id}:${date}`);
     classOccurrences.push({
       block_id: b.block_id, user_subject_id: b.user_subject_id, course_code: b.course_code,
-      subject_name: b.subject_name, section: b.section, date,
+      subject_name: b.subject_name, section: b.section, instructor: b.instructor, meeting_link: b.meeting_link, date,
+      trimester: b.trimester, year_level: b.year_level, units: b.units,
       start_time: String(b.start_time).slice(0, 5), end_time: String(b.end_time).slice(0, 5),
-      venue: b.venue, is_online: Boolean(b.is_online),
+      venue: b.venue, is_online: Boolean(b.is_online), modality: b.modality,
       override: override ? toOverride(override) : null,
     });
   }
@@ -281,9 +293,10 @@ export async function getWorkboardWeek(userId: number, weekStart: string): Promi
   // in which case the block loop already pushed its ghost; this loop only ever adds the
   // make-up side, never touches the ghost.
   const [makeupRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT so.id, so.block_id, so.override_date, so.modality, so.note,
+    `SELECT so.id, so.block_id, so.override_date, so.modality, so.note, so.room,
             so.moved_date, so.moved_start_time, so.moved_end_time,
-            sb.user_subject_id, sb.course_code, sb.section, sb.venue, sb.is_online, s.subject_name
+            sb.user_subject_id, sb.course_code, sb.section, sb.instructor, sb.meeting_link,
+            sb.venue, sb.is_online, sb.modality, s.subject_name, s.trimester, s.year_level, s.units
      FROM schedule_overrides so
      JOIN schedule_blocks sb ON sb.block_id = so.block_id
      LEFT JOIN user_subjects us ON sb.user_subject_id = us.user_subject_id
@@ -294,10 +307,11 @@ export async function getWorkboardWeek(userId: number, weekStart: string): Promi
   for (const o of makeupRows) {
     classOccurrences.push({
       block_id: o.block_id, user_subject_id: o.user_subject_id, course_code: o.course_code,
-      subject_name: o.subject_name, section: o.section,
+      subject_name: o.subject_name, section: o.section, instructor: o.instructor, meeting_link: o.meeting_link,
+      trimester: o.trimester, year_level: o.year_level, units: o.units,
       date: String(o.moved_date).slice(0, 10),
       start_time: String(o.moved_start_time).slice(0, 5), end_time: String(o.moved_end_time).slice(0, 5),
-      venue: o.venue, is_online: Boolean(o.is_online),
+      venue: o.venue, is_online: Boolean(o.is_online), modality: o.modality,
       override: toOverride(o),
       moved_from: String(o.override_date).slice(0, 10),
     });

@@ -2,19 +2,27 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Trash2, Home, Download, Loader2, MapPin, Wifi, X } from 'lucide-react';
+import { Plus, Trash2, Home, Download, Loader2, MapPin, Wifi, Link2, X } from 'lucide-react';
+import type { ClassOccurrence } from '@/lib/workboard/aggregate';
+import { addDays } from '@/lib/workboard/dates';
+import { ClassOverridePopover, formatShortDate, type AnchorRect } from '@/components/schedule/ClassOverridePopover';
 
 export interface ScheduleBlock {
   block_id:        number;
   user_subject_id: number | null;
   course_code:     string;
   section:         string | null;
+  instructor:      string | null;
+  meeting_link:    string | null;
   subject_name:    string | null;
+  trimester:       string | null;
+  year_level:      string | null;
+  units:           number | null;
   day_of_week:     number; // 0=Mon .. 5=Sat
   start_time:      string; // "HH:MM"
   end_time:        string;
   venue:           string | null;
-  is_online:       boolean;
+  modality:        'face_to_face' | 'online_sync' | 'online_async';
 }
 
 export interface ScheduleSubject {
@@ -22,6 +30,8 @@ export interface ScheduleSubject {
   subject_name:    string;
   course_code:     string;
   units:           number;
+  trimester:       string | null;
+  year_level:      string | null;
 }
 
 /* ─── Grid constants — fixed 7 AM–9 PM so the whole week reads at a glance
@@ -32,6 +42,24 @@ const DAY_SHORT   = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const GRID_START  = 7 * 60;   // 07:00
 const GRID_END    = 21 * 60;  // 21:00
 const HOUR_HEIGHT = 38;
+
+const YEAR_LEVELS = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
+const TRIMESTERS  = ['1st Trimester', '2nd Trimester', '3rd Trimester'];
+
+const MODALITY_OPTIONS: [ScheduleBlock['modality'], string][] = [
+  ['face_to_face', 'Face to face'],
+  ['online_sync',  'Online (sync)'],
+  ['online_async', 'Online (async)'],
+];
+const MODALITY_LABEL: Record<ScheduleBlock['modality'], string> = {
+  face_to_face: 'Face to face', online_sync: 'Online (sync)', online_async: 'Online (async)',
+};
+/** Same three-value vocabulary a `schedule_overrides.modality` uses for a one-day exception —
+ *  `null`/'' there means "regular, unchanged," which for a block's own base schedule is spelled
+ *  'face_to_face' instead, since a block always has SOME modality, never "no exception." */
+const OVERRIDE_MODALITY_LABEL: Record<'online_sync' | 'online_async' | 'cancelled', string> = {
+  online_sync: 'online (sync)', online_async: 'online (async)', cancelled: 'cancelled',
+};
 
 /* Drawn from the locked pink/blue/purple family — every course gets a stable
    color from its code so recurring meetings read as one thread across days. */
@@ -122,16 +150,19 @@ interface MeetingRow {
   day:        string;
   start_time: string;
   end_time:   string;
-  venue:      string;
-  is_online:  boolean;
+  venue:      string; // room, only meaningful for face_to_face
+  modality:   ScheduleBlock['modality'];
 }
 
 let meetingKeySeq = 0;
-const blankMeeting = (): MeetingRow => ({ key: `m${meetingKeySeq++}`, day: '', start_time: '', end_time: '', venue: '', is_online: false });
+const blankMeeting = (): MeetingRow => ({ key: `m${meetingKeySeq++}`, day: '', start_time: '', end_time: '', venue: '', modality: 'face_to_face' });
 
-export default function ScheduleMaker({ initialBlocks, subjects }: { initialBlocks: ScheduleBlock[]; subjects: ScheduleSubject[] }) {
+export default function ScheduleMaker({ initialBlocks, subjects, classOccurrences, weekStart }: {
+  initialBlocks: ScheduleBlock[]; subjects: ScheduleSubject[]; classOccurrences: ClassOccurrence[]; weekStart: string;
+}) {
   const router = useRouter();
   const [blocks, setBlocks]     = useState(initialBlocks);
+  const [subjectsList, setSubjectsList] = useState(subjects);
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [exporting, setExporting]   = useState(false);
@@ -139,11 +170,19 @@ export default function ScheduleMaker({ initialBlocks, subjects }: { initialBloc
   const gridRef = useRef<HTMLDivElement>(null);
 
   const [subjectChoice, setSubjectChoice] = useState('');
-  const [customCode, setCustomCode]       = useState('');
   const [section, setSection]             = useState('');
+  const [instructor, setInstructor]       = useState('');
+  const [meetingLink, setMeetingLink]     = useState('');
   const [meetings, setMeetings]           = useState<MeetingRow[]>([blankMeeting()]);
 
-  const isCustom = subjectChoice === '__custom__';
+  // "Create new subject" replaces the old free-text "Custom course code" fallback — a schedule
+  // entry now always points at a real, complete subject (same required fields the Subjects page
+  // itself demands), never an unlinked placeholder string.
+  const isCreatingSubject = subjectChoice === '__new__';
+  const [newCode, setNewCode]           = useState('');
+  const [newName, setNewName]           = useState('');
+  const [newYearLevel, setNewYearLevel] = useState('');
+  const [newTrimester, setNewTrimester] = useState('');
 
   const updateMeeting = (key: string, patch: Partial<MeetingRow>) =>
     setMeetings(prev => prev.map(m => (m.key === key ? { ...m, ...patch } : m)));
@@ -163,8 +202,36 @@ export default function ScheduleMaker({ initialBlocks, subjects }: { initialBloc
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    const code = isCustom ? customCode.trim() : subjects.find(s => String(s.user_subject_id) === subjectChoice)?.course_code ?? '';
-    if (!code) { setMessage('Select a subject or enter a custom course code.'); return; }
+    setMessage('');
+
+    let userSubjectId: number | null = null;
+    let code = '';
+    let subjName: string | null = null;
+    let subjTrimester: string | null = null;
+    let subjYearLevel: string | null = null;
+    let subjUnits: number | null = null;
+
+    if (isCreatingSubject) {
+      if (!newCode.trim() || !newName.trim() || !newYearLevel || !newTrimester) {
+        setMessage('Fill in the new subject’s code, name, year level, and trimester.');
+        return;
+      }
+      code = newCode.trim();
+      subjName = newName.trim();
+      subjTrimester = newTrimester;
+      subjYearLevel = newYearLevel;
+      subjUnits = 3; // matches the hardcoded `units: 3` sent to /api/studypulse/subjects below
+    } else {
+      const subj = subjectsList.find(s => String(s.user_subject_id) === subjectChoice);
+      if (!subj) { setMessage('Select a subject.'); return; }
+      userSubjectId = subj.user_subject_id;
+      code = subj.course_code;
+      subjName = subj.subject_name;
+      subjTrimester = subj.trimester;
+      subjYearLevel = subj.year_level;
+      subjUnits = subj.units;
+    }
+
     const cleanMeetings = meetings.filter(m => m.day !== '' && m.start_time && m.end_time);
     if (cleanMeetings.length === 0) { setMessage('Add at least one complete meeting day.'); return; }
     for (const m of cleanMeetings) {
@@ -172,43 +239,69 @@ export default function ScheduleMaker({ initialBlocks, subjects }: { initialBloc
     }
 
     setSubmitting(true);
-    setMessage('');
     try {
-      const res  = await fetch('/api/studypulse/schedule', {
+      if (isCreatingSubject) {
+        const subRes = await fetch('/api/studypulse/subjects', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            course_code: newCode.trim(), subject_name: newName.trim(),
+            year_level: newYearLevel, trimester: newTrimester, section: section || null, units: 3,
+          }),
+        });
+        const subData = await subRes.json();
+        if (subData.status !== 'success') throw new Error(subData.error ?? 'Could not create the subject.');
+        userSubjectId = subData.user_subject_id as number;
+        const newSubj: ScheduleSubject = {
+          user_subject_id: userSubjectId, subject_name: subjName!, course_code: code, units: 3,
+          trimester: newTrimester, year_level: newYearLevel,
+        };
+        setSubjectsList(prev => [...prev, newSubj]);
+      }
+
+      const res = await fetch('/api/studypulse/schedule', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_subject_id: isCustom ? null : Number(subjectChoice),
+          user_subject_id: userSubjectId,
           course_code:      code,
           section:          section || null,
+          instructor:       instructor || null,
+          meeting_link:     meetingLink || null,
           meetings: cleanMeetings.map(m => ({
             day:        Number(m.day),
             start_time: m.start_time,
             end_time:   m.end_time,
             venue:      m.venue || null,
-            is_online:  m.is_online,
+            modality:   m.modality,
           })),
         }),
       });
       const data = await res.json();
       if (data.status !== 'success') throw new Error(data.error);
 
-      const subj = subjects.find(s => String(s.user_subject_id) === subjectChoice);
       const newBlocks: ScheduleBlock[] = (data.block_ids as number[]).map((id, i) => ({
         block_id:        id,
-        user_subject_id: isCustom ? null : Number(subjectChoice),
+        user_subject_id: userSubjectId,
         course_code:     code,
         section:         section || null,
-        subject_name:    subj?.subject_name ?? null,
+        instructor:      instructor || null,
+        meeting_link:    meetingLink || null,
+        subject_name:    subjName,
+        trimester:       subjTrimester,
+        year_level:      subjYearLevel,
+        units:           subjUnits,
         day_of_week:     Number(cleanMeetings[i].day),
         start_time:      cleanMeetings[i].start_time,
         end_time:        cleanMeetings[i].end_time,
         venue:           cleanMeetings[i].venue || null,
-        is_online:       cleanMeetings[i].is_online,
+        modality:        cleanMeetings[i].modality,
       }));
       setBlocks(prev => [...prev, ...newBlocks]);
-      setSubjectChoice(''); setCustomCode(''); setSection(''); setMeetings([blankMeeting()]);
+      setSubjectChoice(''); setSection(''); setInstructor(''); setMeetingLink('');
+      setNewCode(''); setNewName(''); setNewYearLevel(''); setNewTrimester('');
+      setMeetings([blankMeeting()]);
       setShowForm(false);
+      router.refresh(); // picks up this week's fresh occurrence data for the new blocks too
     } catch (err) {
       setMessage((err as Error).message || 'Something went wrong. Please try again.');
     } finally {
@@ -256,9 +349,37 @@ export default function ScheduleMaker({ initialBlocks, subjects }: { initialBloc
     return map;
   }, [blocks]);
 
+  // This week's own occurrence of each block — the regular (non-make-up) row `getWorkboardWeek`
+  // already computed server-side, keyed by block_id so a click can find its override (if any)
+  // without recomputing dates here too.
+  const occurrenceByBlock = useMemo(() => {
+    const map = new Map<number, ClassOccurrence>();
+    for (const occ of classOccurrences) {
+      if (occ.moved_from === undefined) map.set(occ.block_id, occ);
+    }
+    return map;
+  }, [classOccurrences]);
+
   const nowTop = now && now.day >= 0 && now.min >= GRID_START && now.min <= GRID_END
     ? ((now.min - GRID_START) / 60) * HOUR_HEIGHT
     : null;
+
+  // The single override editor's one open slot — mirrors WorkTimelineView's `openOverride`.
+  const [openOverride, setOpenOverride] = useState<{
+    occurrence: ClassOccurrence; anchor: AnchorRect; trigger: HTMLElement;
+  } | null>(null);
+
+  const openBlockOverride = (b: ScheduleBlock, target: HTMLDivElement) => {
+    const occurrence = occurrenceByBlock.get(b.block_id) ?? {
+      block_id: b.block_id, user_subject_id: b.user_subject_id, course_code: b.course_code,
+      subject_name: b.subject_name, section: b.section, instructor: b.instructor, meeting_link: b.meeting_link,
+      trimester: b.trimester, year_level: b.year_level, units: b.units,
+      date: addDays(weekStart, b.day_of_week), start_time: b.start_time, end_time: b.end_time,
+      venue: b.venue, is_online: b.modality !== 'face_to_face', modality: b.modality, override: null,
+    };
+    const rect = target.getBoundingClientRect();
+    setOpenOverride({ occurrence, anchor: rect, trigger: target });
+  };
 
   return (
     <div className="vb-bg" style={{ margin: 0, fontFamily: "'Inter', sans-serif", minHeight: '100vh', color: '#333' }}>
@@ -364,7 +485,7 @@ export default function ScheduleMaker({ initialBlocks, subjects }: { initialBloc
           </div>
         </div>
 
-        {/* ── Add Class form: one row per meeting, each with its own day/time/venue/modality ── */}
+        {/* ── Add Class form: one row per meeting, each with its own day/time/room/modality ── */}
         <div className={`add-form-shell${showForm ? ' open' : ''}`}>
           <div className="add-form-inner">
             <div className="add-form-content" style={{
@@ -373,34 +494,67 @@ export default function ScheduleMaker({ initialBlocks, subjects }: { initialBloc
               boxShadow: '0 8px 24px rgba(116,188,217,0.14)',
             }}>
               <form onSubmit={handleAdd}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '16px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '14px' }}>
                   <div>
                     {smallLabel('Subject')}
                     <select value={subjectChoice} onChange={e => setSubjectChoice(e.target.value)} required className="vb-input">
                       <option value="">Select subject</option>
-                      {subjects.map(s => (
+                      {subjectsList.map(s => (
                         <option key={s.user_subject_id} value={s.user_subject_id}>{s.course_code} — {s.subject_name}</option>
                       ))}
-                      <option value="__custom__">Custom (type below)</option>
+                      <option value="__new__">+ Create new subject</option>
                     </select>
                   </div>
-                  {isCustom && (
-                    <div>
-                      {smallLabel('Course Code')}
-                      <input placeholder="e.g. CS101" value={customCode} onChange={e => setCustomCode(e.target.value)} required={isCustom} className="vb-input" />
-                    </div>
-                  )}
                   <div>
                     {smallLabel('Section')}
                     <input placeholder="e.g. TN41" value={section} onChange={e => setSection(e.target.value)} className="vb-input" />
                   </div>
+                  <div>
+                    {smallLabel('Instructor')}
+                    <input placeholder="e.g. Dr. Santos" value={instructor} onChange={e => setInstructor(e.target.value)} className="vb-input" />
+                  </div>
+                  <div>
+                    {smallLabel('Meeting link')}
+                    <input placeholder="https://…" value={meetingLink} onChange={e => setMeetingLink(e.target.value)} className="vb-input" />
+                  </div>
                 </div>
 
-                {smallLabel('Meeting days — each can have its own time, venue, and mode')}
+                {isCreatingSubject && (
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px',
+                    background: 'rgba(255,255,255,0.6)', borderRadius: '12px', padding: '12px 14px', marginBottom: '14px',
+                    border: '1px solid rgba(200,210,230,0.4)',
+                  }}>
+                    <div>
+                      {smallLabel('Course Code')}
+                      <input placeholder="e.g. CS101" value={newCode} onChange={e => setNewCode(e.target.value)} required className="vb-input" />
+                    </div>
+                    <div>
+                      {smallLabel('Subject Name')}
+                      <input placeholder="e.g. Data Structures" value={newName} onChange={e => setNewName(e.target.value)} required className="vb-input" />
+                    </div>
+                    <div>
+                      {smallLabel('Year Level')}
+                      <select value={newYearLevel} onChange={e => setNewYearLevel(e.target.value)} required className="vb-input">
+                        <option value="">Select year level</option>
+                        {YEAR_LEVELS.map(y => <option key={y}>{y}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      {smallLabel('Trimester')}
+                      <select value={newTrimester} onChange={e => setNewTrimester(e.target.value)} required className="vb-input">
+                        <option value="">Select trimester</option>
+                        {TRIMESTERS.map(t => <option key={t}>{t}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {smallLabel('Meeting days — each can have its own time, room, and modality')}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px' }}>
                   {meetings.map(m => (
                     <div key={m.key} style={{
-                      display: 'grid', gridTemplateColumns: '108px 90px 90px 1fr auto auto', gap: '8px', alignItems: 'center',
+                      display: 'grid', gridTemplateColumns: '100px 88px 88px 140px 1fr auto', gap: '8px', alignItems: 'center',
                       background: 'rgba(255,255,255,0.6)', borderRadius: '12px', padding: '8px 10px', border: '1px solid rgba(200,210,230,0.4)',
                     }}>
                       <select value={m.day} onChange={e => updateMeeting(m.key, { day: e.target.value })} className="vb-input" style={{ height: '38px', padding: '0 8px' }}>
@@ -409,11 +563,16 @@ export default function ScheduleMaker({ initialBlocks, subjects }: { initialBloc
                       </select>
                       <input type="time" value={m.start_time} onChange={e => updateMeeting(m.key, { start_time: e.target.value })} min="07:00" max="21:00" className="vb-input" style={{ height: '38px', padding: '0 8px' }} />
                       <input type="time" value={m.end_time} onChange={e => updateMeeting(m.key, { end_time: e.target.value })} min="07:00" max="21:00" className="vb-input" style={{ height: '38px', padding: '0 8px' }} />
-                      <input placeholder="Venue (e.g. F612)" value={m.venue} onChange={e => updateMeeting(m.key, { venue: e.target.value })} className="vb-input" style={{ height: '38px', padding: '0 10px' }} />
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.76rem', fontWeight: 700, color: m.is_online ? '#2a7fa8' : '#9aa4b5', whiteSpace: 'nowrap', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={m.is_online} onChange={e => updateMeeting(m.key, { is_online: e.target.checked })} />
-                        Online
-                      </label>
+                      <select value={m.modality} onChange={e => updateMeeting(m.key, { modality: e.target.value as ScheduleBlock['modality'] })} className="vb-input" style={{ height: '38px', padding: '0 8px' }}>
+                        {MODALITY_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                      {m.modality === 'face_to_face' ? (
+                        <input placeholder="Room (e.g. F612)" value={m.venue} onChange={e => updateMeeting(m.key, { venue: e.target.value })} className="vb-input" style={{ height: '38px', padding: '0 10px' }} />
+                      ) : (
+                        <span style={{ fontSize: '0.72rem', color: '#9aa4b5', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <Wifi size={12} /> Uses the meeting link above
+                        </span>
+                      )}
                       <button
                         type="button"
                         className="meeting-row-remove"
@@ -498,28 +657,49 @@ export default function ScheduleMaker({ initialBlocks, subjects }: { initialBloc
                   const height = ((toMinutes(b.end_time) - toMinutes(b.start_time)) / 60) * HOUR_HEIGHT;
                   const color  = courseColor(b.course_code);
                   const widthPct = 100 / b.cols;
+                  const isOnline = b.modality !== 'face_to_face';
+
+                  // This week's exception, if any — same dimmed/struck-through language
+                  // Workboard's Timeline already uses for a cancelled or moved-away occurrence,
+                  // so a class you've flagged as an exception reads the same way everywhere.
+                  const occ = occurrenceByBlock.get(b.block_id);
+                  const override = occ?.override ?? null;
+                  const isGhost = override?.modality === 'rescheduled';
+                  const cancelled = override?.modality === 'cancelled';
+                  const dimmed = cancelled || isGhost;
+                  const overrideSuffix = override?.modality && override.modality !== 'rescheduled'
+                    ? OVERRIDE_MODALITY_LABEL[override.modality] : null;
+
                   return (
                     <div
                       key={b.block_id}
                       className="sched-block"
-                      title={`${b.subject_name ?? b.course_code} · ${b.is_online ? 'Online' : 'Face-to-face'}${b.venue ? ' · ' + b.venue : ''}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={e => openBlockOverride(b, e.currentTarget)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openBlockOverride(b, e.currentTarget); } }}
+                      title={[
+                        b.subject_name ?? b.course_code,
+                        isGhost && override?.moved_date ? `Moved to ${formatShortDate(override.moved_date)}` : (isOnline ? MODALITY_LABEL[b.modality] : 'Face-to-face'),
+                        b.venue, b.instructor,
+                      ].filter(Boolean).join(' · ')}
                       style={{
                         position: 'absolute', top: `${top + 1}px`, height: `${Math.max(height - 2, 24)}px`,
                         left: `calc(${b.col * widthPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`,
                         background: `${color}16`,
-                        border: b.is_online ? `1.5px dashed ${color}99` : `1.5px solid ${color}55`,
+                        border: isOnline ? `1.5px dashed ${color}99` : `1.5px solid ${color}55`,
                         borderLeft: `3px solid ${color}`,
                         borderRadius: '8px', padding: '3px 6px', overflow: 'hidden',
-                        cursor: 'default',
+                        cursor: 'pointer', opacity: dimmed ? 0.55 : 1,
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '3px' }}>
-                        <span style={{ fontSize: '0.68rem', fontWeight: 800, color, lineHeight: 1.1 }}>
+                        <span style={{ fontSize: '0.68rem', fontWeight: 800, color, lineHeight: 1.1, textDecoration: dimmed ? 'line-through' : 'none' }}>
                           {b.course_code}{b.section ? ` (${b.section})` : ''}
                         </span>
                         <button
                           className="block-delete"
-                          onClick={() => handleDelete(b.block_id)}
+                          onClick={e => { e.stopPropagation(); handleDelete(b.block_id); }}
                           aria-label={`Remove ${b.course_code}`}
                           style={{ width: '14px', height: '14px', flexShrink: 0, borderRadius: '4px', background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8a94a6', cursor: 'pointer', fontSize: '10px', lineHeight: 1 }}
                         >
@@ -528,11 +708,16 @@ export default function ScheduleMaker({ initialBlocks, subjects }: { initialBloc
                       </div>
                       {height >= 32 && (
                         <div style={{ fontSize: '0.6rem', color: '#5c6b80', fontWeight: 600, marginTop: '1px', display: 'flex', alignItems: 'center', gap: '3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {b.start_time}–{b.end_time}
-                          {b.venue && (
+                          {isGhost && override?.moved_date ? (
+                            <>→ {formatShortDate(override.moved_date)}</>
+                          ) : (
                             <>
-                              <span style={{ opacity: 0.5 }}>·</span>
-                              {b.is_online ? <Wifi size={9} /> : <MapPin size={9} />} {b.venue}
+                              {b.start_time}–{b.end_time}
+                              {overrideSuffix ? <> · {overrideSuffix}</> : b.venue ? (
+                                <><span style={{ opacity: 0.5 }}>·</span> {isOnline ? <Wifi size={9} /> : <MapPin size={9} />} {b.venue}</>
+                              ) : isOnline && b.meeting_link ? (
+                                <><span style={{ opacity: 0.5 }}>·</span> <Link2 size={9} /></>
+                              ) : null}
                             </>
                           )}
                         </div>
@@ -551,15 +736,26 @@ export default function ScheduleMaker({ initialBlocks, subjects }: { initialBloc
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: '14px', marginTop: '10px', fontSize: '0.72rem', color: '#9aa4b5', fontWeight: 600 }}>
+        <div style={{ display: 'flex', gap: '14px', marginTop: '10px', fontSize: '0.72rem', color: '#9aa4b5', fontWeight: 600, flexWrap: 'wrap' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
             <span style={{ width: '14px', height: '0', borderTop: '1.5px solid #9aa4b5' }} /> Face-to-face
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
             <span style={{ width: '14px', height: '0', borderTop: '1.5px dashed #9aa4b5' }} /> Online
           </span>
+          <span>Click a class to cancel, move, or mark this week&apos;s meeting online</span>
         </div>
       </div>
+
+      {openOverride && (
+        <ClassOverridePopover
+          occurrence={openOverride.occurrence}
+          anchor={openOverride.anchor}
+          trigger={openOverride.trigger}
+          onClose={() => setOpenOverride(null)}
+          onSaved={() => { setOpenOverride(null); router.refresh(); }}
+        />
+      )}
     </div>
   );
 }

@@ -1,9 +1,8 @@
 'use client';
 
 import {
-  useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore,
+  useCallback, useEffect, useId, useRef, useState, useSyncExternalStore,
 } from 'react';
-import { createPortal } from 'react-dom';
 import {
   ClipboardList, Code2, ExternalLink, FileText, Globe, GraduationCap, HardDrive, Link2,
   LogIn, PenTool, Plus, Trash2, X, type LucideIcon,
@@ -16,8 +15,9 @@ import type { WorkSource } from '@/lib/workboard/workItems';
 import type { LinkType, WorkLink } from '@/lib/workboard/links';
 // The module's one failure surface, shared with the three sibling Table cells.
 import { reportTableCellError } from './table/tableCellError';
+import WbPopover from './ui/WbPopover';
 
-const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
+const FONT = 'var(--wb-font-ui)';
 
 const NETWORK_ERROR = 'Could not reach the server. Check your connection and try again.';
 const LIST_ERROR    = 'Could not load the links. Please try again.';
@@ -222,20 +222,24 @@ export function useOwnerLinks(kind: LinkOwnerKind, id: number): WorkLink[] | und
 /* ─── The popover ──────────────────────────────────────────────────────────────────────── */
 
 const PANEL_WIDTH = 300;
-/** Gap between the trigger and the panel, and between the panel and the viewport edge. */
-const GAP = 6;
-const MARGIN = 8;
 
 const INPUT_STYLE: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box', minHeight: '30px', borderRadius: '8px',
-  padding: '4px 8px', background: 'rgba(255,255,255,0.6)',
-  border: '1px solid rgba(200,210,230,0.6)', fontFamily: FONT, fontSize: '0.78rem',
-  fontWeight: 500, color: '#2d3748',
+  width: '100%', boxSizing: 'border-box', minHeight: '30px', borderRadius: 'var(--wb-r-md)',
+  padding: '4px 8px', background: 'var(--wb-surface)',
+  border: '1px solid var(--wb-border)', font: '500 var(--wb-fs-13) var(--wb-font-ui)',
+  color: 'var(--wb-text)',
 };
 
 const LABEL_STYLE: React.CSSProperties = {
-  display: 'block', fontFamily: FONT, fontSize: '0.68rem', fontWeight: 700,
-  color: '#5c6b80', marginBottom: '3px',
+  display: 'block', font: '700 var(--wb-fs-12) var(--wb-font-ui)',
+  color: 'var(--wb-text-muted)', marginBottom: '3px',
+};
+
+/** The panel's own layout inside `WbPopover`. */
+const BODY_STYLE: React.CSSProperties = {
+  boxSizing: 'border-box', padding: '12px',
+  display: 'flex', flexDirection: 'column', gap: '10px',
+  textAlign: 'left', whiteSpace: 'normal', fontFamily: FONT, color: 'var(--wb-text)',
 };
 
 /** The host, shown under the label as a muted second line. §10 forbids the raw URL as a link's
@@ -276,24 +280,15 @@ export interface LinksPopoverProps {
   /** What the caller currently believes the count to be. Used only for the copy shown while
    *  the real list is still loading; once it arrives, the list is the truth. */
   linkCount:  number;
-  /** The control that opened this. Three jobs: the panel anchors to it, clicks on it are not
-   *  treated as outside-clicks (otherwise the trigger would close and instantly reopen), and
-   *  focus goes back to it on every dismissal the user chose. */
+  /** The control that opened this: `WbPopover` anchors to it and ignores clicks on it, and the
+   *  close button returns focus to it. */
   triggerRef: React.RefObject<HTMLElement | null>;
   onClose:    () => void;
   /** Re-pulls the work payload after a successful add or delete, so `link_count` everywhere —
    *  this cell's own summary included — agrees with what was just written. */
   onChanged:  () => void | Promise<void>;
-  /** Default `false`, preserving this component's original "no changes needed" behaviour for
-   *  `WorkItemDetail.tsx` (see the docblock below). The Table's `LinksCell` passes `true`: its
-   *  ancestor chain includes the shell's `backdrop-filter` view-content wrapper, which makes
-   *  this panel's `position: fixed` resolve against THAT wrapper's box instead of the viewport
-   *  — the portal escapes it. `WorkItemDetail`'s own panel is deliberately not glass (its own
-   *  docblock names the identical mechanism as the reason), so it never had this bug and must
-   *  not opt in: its Tab-trap (`handleKeyDown`) walks focusable elements via
-   *  `panelRef.current.querySelectorAll(...)`, a DOM-tree query that a portalled child would
-   *  fall outside of, which would let Tab escape the drawer while this popover holds focus. */
-  usePortal?: boolean;
+  /** Appear without animating (opened from the keyboard, spec 4.3). */
+  instant?:   boolean;
 }
 
 /**
@@ -304,23 +299,11 @@ export interface LinksPopoverProps {
  * the detail panel (Task 32) render the same component with no changes. Everything it needs
  * from a caller is in `LinksPopoverProps`.
  *
- * Dismissal follows `DeadlineCell`'s established shape: Escape, an outside click, and a scroll
- * or resize of anything other than the panel itself. Every dismissal the user chose returns
- * focus to the trigger; an outside click does not, because the user is going somewhere else —
- * the same distinction the deadline editor draws.
- *
- * `position: fixed`, not absolute: in the Table this renders inside a
- * `max-height: 68vh; overflow: auto` scroll container that would clip an absolutely-positioned
- * panel on any row near the bottom. Fixed positioning escapes that, at the cost of needing
- * viewport coordinates and of closing on scroll.
- *
- * Solid white rather than §11's glass recipe, matching every other overlay in this module
- * (`WorkItemRow`'s row menu, `WorkBoardView`'s "Move to" menu, `DeadlineCell`'s popover): a
- * translucent surface floating over dense table rows lets the row text bleed through the
- * controls.
+ * Always rendered through `WbPopover`, which owns the portal, placement, outside-click, scroll
+ * and Esc dismissal — for the Table cell, the phone card and the detail drawer alike.
  */
 export default function LinksPopover({
-  ownerKind, ownerId, title, linkCount, triggerRef, onClose, onChanged, usePortal = false,
+  ownerKind, ownerId, title, linkCount, triggerRef, onClose, onChanged, instant = false,
 }: LinksPopoverProps) {
   const ids     = useId();
   const labelId = `${ids}-label`;
@@ -335,7 +318,6 @@ export default function LinksPopover({
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>(
     () => (cachedOwnerLinks(ownerKind, ownerId) !== undefined ? 'ready' : 'loading'),
   );
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
   const [draftLabel, setDraftLabel] = useState('');
   const [draftUrl, setDraftUrl]     = useState('');
@@ -346,8 +328,7 @@ export default function LinksPopover({
    *  delete must not disable the delete button on every other row of the list. */
   const [deleting, setDeleting]     = useState<ReadonlySet<number>>(() => new Set());
 
-  /** Every dismissal the user chose. An outside click deliberately does not go through this —
-   *  see the component header. */
+  /** The close button: dismiss and hand focus back to the trigger. */
   const dismiss = useCallback(() => {
     onClose();
     triggerRef.current?.focus();
@@ -361,6 +342,7 @@ export default function LinksPopover({
     const result = await loadOwnerLinks(ownerKind, ownerId, { force });
     if (!result.ok) {
       setStatus('error');
+      // No toast Retry: the panel's inline "Try again" is the retry for a failed load.
       reportTableCellError(result.message);
       return false;
     }
@@ -374,72 +356,6 @@ export default function LinksPopover({
     // `load` is stable for a given owner, and the owner cannot change without this popover
     // being torn down and rebuilt by its caller, so this runs exactly once per opening.
   }, [ownerKind, ownerId, load]);
-
-  /* Position after every content change: the panel grows when the list arrives and shrinks
-   * when a link is deleted, and a panel that was flipped *above* its trigger has to be
-   * re-measured or it detaches from it. */
-  const contentSignature = `${status}:${links?.length ?? -1}:${formError ?? ''}`;
-  useLayoutEffect(() => {
-    const panel   = panelRef.current;
-    const trigger = triggerRef.current;
-    if (!panel || !trigger) return;
-
-    const anchor = trigger.getBoundingClientRect();
-    const { width, height } = panel.getBoundingClientRect();
-
-    let left = anchor.left;
-    if (left + width > window.innerWidth - MARGIN) left = window.innerWidth - MARGIN - width;
-    if (left < MARGIN) left = MARGIN;
-
-    // Below the trigger by default, flipped above when the viewport has no room — the case
-    // that matters for the last rows of a tall table.
-    let top = anchor.bottom + GAP;
-    if (top + height > window.innerHeight - MARGIN) {
-      const above = anchor.top - height - GAP;
-      top = above >= MARGIN ? above : Math.max(MARGIN, window.innerHeight - MARGIN - height);
-    }
-    setPos({ left, top });
-  }, [contentSignature, triggerRef]);
-
-  /* Focus moves into the panel on open, and the panel itself takes it rather than a control
-   * inside it. The list is async, so "focus the first link" would either fire before there are
-   * any or yank focus out from under a user who started typing; the container is there from
-   * the first frame, carries the dialog's accessible name, and leaves Tab order intact. */
-  useEffect(() => { panelRef.current?.focus(); }, []);
-
-  /* Outside-click and scroll dismissal, `DeadlineCell`'s shape with two differences this
-   * component's contents require. */
-  useEffect(() => {
-    const handlePointerDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (panelRef.current?.contains(target)) return;
-      // Clicks on the trigger belong to the trigger: without this the panel would close here
-      // and the trigger's own click handler would immediately reopen it.
-      if (triggerRef.current?.contains(target)) return;
-      // Not `dismiss`: the user is clicking on something else and focus should follow the
-      // click, not snap back to the trigger.
-      onClose();
-    };
-    const handleScroll = (e: Event) => {
-      // The difference from `DeadlineCell`: this panel has its own scrolling list, and a
-      // capture-phase listener sees that inner scroll too. Closing the popover because the
-      // user scrolled the list they were reading would be absurd.
-      const target = e.target;
-      if (target instanceof Node && panelRef.current?.contains(target)) return;
-      dismiss();
-    };
-    document.addEventListener('mousedown', handlePointerDown);
-    // Capture phase: the table's own scroll container is what usually moves, and its scroll
-    // events do not bubble to `window`. A fixed panel would otherwise stay put while the row
-    // it belongs to slid away underneath it.
-    window.addEventListener('scroll', handleScroll, true);
-    window.addEventListener('resize', dismiss);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      window.removeEventListener('scroll', handleScroll, true);
-      window.removeEventListener('resize', dismiss);
-    };
-  }, [dismiss, onClose, triggerRef]);
 
   const submitAdd = async () => {
     if (adding) return;
@@ -464,12 +380,12 @@ export default function LinksPopover({
         }),
       }).catch(() => null);
 
-      if (res === null) { reportTableCellError(NETWORK_ERROR); return; }
+      if (res === null) { reportTableCellError(NETWORK_ERROR, submitAdd); return; }
       if (!res.ok) {
         // The server's own words when it has any: "A valid http or https URL is required",
         // "Not found" for an owner that is not this user's. Far more use than a generic
         // failure, and the only place a client-side check can be wrong.
-        reportTableCellError(await messageFrom(res, ADD_ERROR));
+        reportTableCellError(await messageFrom(res, ADD_ERROR), submitAdd);
         return;
       }
 
@@ -491,8 +407,8 @@ export default function LinksPopover({
     setDeleting(current => new Set(current).add(link.id));
     try {
       const res = await fetch(`/api/workboard/links/${link.id}`, { method: 'DELETE' }).catch(() => null);
-      if (res === null) { reportTableCellError(NETWORK_ERROR); return; }
-      if (!res.ok) { reportTableCellError(await messageFrom(res, DELETE_ERROR)); return; }
+      if (res === null) { reportTableCellError(NETWORK_ERROR, () => removeLink(link)); return; }
+      if (!res.ok) { reportTableCellError(await messageFrom(res, DELETE_ERROR), () => removeLink(link)); return; }
 
       if (!(await load(true))) return;
       // The row that held focus has just been removed from the DOM, which would otherwise drop
@@ -511,265 +427,250 @@ export default function LinksPopover({
   const showing = links ?? [];
   const isEmpty = status === 'ready' && showing.length === 0;
 
-  // Portalled to `document.body` when `usePortal` (see the prop's own doc for which callers
-  // need this and why). Safe for either caller because the outside-click/scroll handlers above
-  // already test `panelRef`/`triggerRef` directly rather than relying on DOM containment through
-  // a shared parent, and because a portal only moves DOM placement — the React tree (event
-  // bubbling, context, styled-jsx's build-time scoping below) is unaffected either way.
-  const panel = (
-    <div
-      ref={panelRef}
-      role="dialog"
-      aria-label={`Links for "${title}"`}
-      // Focusable so the panel can take focus on open without stealing it from a control that
-      // may not exist yet; -1 keeps it out of the sequential Tab order.
-      tabIndex={-1}
-      className="vb-links-pop"
-      onKeyDown={e => {
-        // `stopPropagation` so the table's scroll region and the row beneath never see it.
-        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); dismiss(); }
-      }}
-      style={{
-        position: 'fixed',
-        left: pos?.left ?? 0,
-        top:  pos?.top  ?? 0,
-        // Hidden until measured, but `opacity` rather than `visibility` so the focus effect
-        // above can still run — a `visibility: hidden` element is not focusable.
-        opacity: pos === null ? 0 : 1,
-        pointerEvents: pos === null ? 'none' : 'auto',
-        zIndex: 40, width: `${PANEL_WIDTH}px`, boxSizing: 'border-box',
-        background: '#fff', borderRadius: '12px', border: '1px solid rgba(200,210,230,0.6)',
-        boxShadow: '0 8px 24px rgba(31,38,68,0.18)', padding: '12px',
-        display: 'flex', flexDirection: 'column', gap: '10px',
-        textAlign: 'left', whiteSpace: 'normal', fontFamily: FONT,
-      }}
+  // The dialog role, name, Esc and placement belong to `WbPopover`.
+  return (
+    <WbPopover
+      open
+      anchor={triggerRef.current}
+      onClose={onClose}
+      ariaLabel={`Links for "${title}"`}
+      width={PANEL_WIDTH}
+      instant={instant}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-        <span style={{
-          fontFamily: FONT, fontSize: '0.7rem', fontWeight: 800, letterSpacing: '0.04em',
-          textTransform: 'uppercase', color: '#5c6b80',
-        }}>
-          Links
-        </span>
-        <button
-          type="button"
-          className="vb-links-icon-btn"
-          aria-label="Close links"
-          onClick={dismiss}
-          style={ICON_BUTTON_STYLE}
-        >
-          <X size={13} aria-hidden />
-        </button>
-      </div>
-
-      {status === 'loading' && (
-        <p style={NOTE_STYLE}>
-          {linkCount === 1 ? 'Loading 1 link…' : `Loading ${linkCount} links…`}
-        </p>
-      )}
-
-      {status === 'error' && (
-        <div>
-          <p style={{ ...NOTE_STYLE, color: '#922e48' }}>Could not load the links.</p>
+      <div
+        ref={panelRef}
+        // Focusable so the panel can take focus back after a delete removes the focused row;
+        // -1 keeps it out of the sequential Tab order.
+        tabIndex={-1}
+        className="vb-links-pop"
+        style={BODY_STYLE}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+          <span style={{
+            font: '800 var(--wb-fs-11) var(--wb-font-ui)', letterSpacing: '0.04em',
+            textTransform: 'uppercase', color: 'var(--wb-text-muted)',
+          }}>
+            Links
+          </span>
           <button
             type="button"
-            className="vb-links-btn"
-            onClick={() => { void load(true); }}
-            style={SECONDARY_BUTTON_STYLE}
+            className="vb-links-icon-btn"
+            aria-label="Close links"
+            onClick={dismiss}
+            style={ICON_BUTTON_STYLE}
           >
-            Try again
+            <X size={13} aria-hidden />
           </button>
         </div>
-      )}
 
-      {isEmpty && <p style={NOTE_STYLE}>No links yet.</p>}
-
-      {showing.length > 0 && (
-        // `max-height` plus its own scrollbar: a dozen links must not grow a fixed-position
-        // panel past the viewport. The capture-phase scroll listener above explicitly ignores
-        // scrolls that start in here.
-        <ul style={{
-          listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column',
-          gap: '2px', maxHeight: '172px', overflowY: 'auto',
-        }}>
-          {showing.map(link => {
-            const { label: typeLabel, Icon } = linkTypeMeta(link.link_type);
-            const host = hostOf(link.url);
-            const busy = deleting.has(link.id);
-            return (
-              <li key={link.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <a
-                  className="vb-links-item"
-                  href={link.url}
-                  // `noreferrer` as well as `noopener`: `noopener` alone stops the new tab
-                  // reaching `window.opener`, but the referrer header would still hand the
-                  // destination the URL of the page the student was on.
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  // The full URL lives here and in `href` — never as the link's visible
-                  // primary text (§10).
-                  title={link.url}
-                  style={{
-                    flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '7px',
-                    minHeight: '30px', padding: '3px 6px', borderRadius: '8px',
-                    textDecoration: 'none', color: '#2d3748',
-                  }}
-                >
-                  <Icon size={14} aria-hidden style={{ flexShrink: 0, color: '#5c6b80' }} />
-                  <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                    <span style={{
-                      fontFamily: FONT, fontSize: '0.78rem', fontWeight: 600, color: '#2d3748',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
-                      {link.label}
-                    </span>
-                    {host !== null && (
-                      <span style={{
-                        fontFamily: FONT, fontSize: '0.66rem', fontWeight: 500, color: '#5c6b80',
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}>
-                        {host}
-                      </span>
-                    )}
-                  </span>
-                  {/* Part of the link's accessible name, not a stray string beside it: a
-                      screen-reader user hears "Canvas, Canvas link, opens in a new tab". */}
-                  <span style={VISUALLY_HIDDEN}>{` ${typeLabel} link, opens in a new tab.`}</span>
-                  <ExternalLink size={12} aria-hidden style={{ flexShrink: 0, color: '#9aa4b5' }} />
-                </a>
-                <button
-                  type="button"
-                  className="vb-links-icon-btn"
-                  aria-label={`Remove link "${link.label}"`}
-                  disabled={busy}
-                  onClick={() => { void removeLink(link); }}
-                  style={{
-                    ...ICON_BUTTON_STYLE,
-                    cursor: busy ? 'progress' : 'pointer',
-                    // Opacity, not a colour swap: the UA's own disabled rendering greys this
-                    // below §8's contrast floor, and it is a transient in-flight state.
-                    opacity: busy ? 0.55 : 1,
-                  }}
-                >
-                  <Trash2 size={13} aria-hidden />
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      <form
-        onSubmit={e => { e.preventDefault(); void submitAdd(); }}
-        style={{
-          display: 'flex', flexDirection: 'column', gap: '7px',
-          borderTop: '1px solid rgba(200,210,230,0.5)', paddingTop: '10px',
-        }}
-      >
-        <div>
-          <label htmlFor={labelId} style={LABEL_STYLE}>Label</label>
-          <input
-            id={labelId}
-            className="vb-links-input"
-            value={draftLabel}
-            maxLength={120}
-            placeholder="Submission page"
-            aria-describedby={formError === null ? undefined : errorId}
-            onChange={e => setDraftLabel(e.target.value)}
-            style={INPUT_STYLE}
-          />
-        </div>
-        <div>
-          <label htmlFor={urlId} style={LABEL_STYLE}>URL</label>
-          <input
-            id={urlId}
-            className="vb-links-input"
-            // `type="url"` for the mobile keyboard and the browser's own hint. The real gate is
-            // `isValidUrl` on the server; `looksLikeHttpUrl` above is the middle step, and this
-            // attribute is the least of the three — it accepts any scheme, `javascript:`
-            // included, which is exactly why it is not relied on.
-            type="url"
-            inputMode="url"
-            value={draftUrl}
-            placeholder="https://…"
-            aria-describedby={formError === null ? undefined : errorId}
-            onChange={e => setDraftUrl(e.target.value)}
-            style={INPUT_STYLE}
-          />
-        </div>
-        <div>
-          <label htmlFor={typeId} style={LABEL_STYLE}>Type</label>
-          <select
-            id={typeId}
-            className="vb-links-input"
-            value={draftType}
-            onChange={e => setDraftType(asLinkType(e.target.value))}
-            style={INPUT_STYLE}
-          >
-            {LINK_TYPE_ORDER.map(type => (
-              <option key={type} value={type}>{LINK_TYPE_META[type].label}</option>
-            ))}
-          </select>
-        </div>
-
-        {formError !== null && (
-          // `role="alert"` so a screen-reader user hears the reason their submit did nothing.
-          // §8's AA-passing alert red, not a lighter decorative shade.
-          <p id={errorId} role="alert" style={{ ...NOTE_STYLE, color: '#922e48' }}>
-            {formError}
+        {status === 'loading' && (
+          <p style={NOTE_STYLE}>
+            {linkCount === 1 ? 'Loading 1 link…' : `Loading ${linkCount} links…`}
           </p>
         )}
 
-        <button
-          type="submit"
-          className="vb-links-btn"
-          disabled={adding}
+        {status === 'error' && (
+          <div>
+            <p style={{ ...NOTE_STYLE, color: 'var(--wb-danger)' }}>Could not load the links.</p>
+            <button
+              type="button"
+              className="vb-links-btn"
+              onClick={() => { void load(true); }}
+              style={SECONDARY_BUTTON_STYLE}
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
+        {isEmpty && <p style={NOTE_STYLE}>No links yet.</p>}
+
+        {showing.length > 0 && (
+          // `max-height` plus its own scrollbar: a dozen links must not grow a fixed-position
+          // panel past the viewport.
+          <ul style={{
+            listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column',
+            gap: '2px', maxHeight: '172px', overflowY: 'auto',
+          }}>
+            {showing.map(link => {
+              const { label: typeLabel, Icon } = linkTypeMeta(link.link_type);
+              const host = hostOf(link.url);
+              const busy = deleting.has(link.id);
+              return (
+                <li key={link.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <a
+                    className="vb-links-item"
+                    href={link.url}
+                    // `noreferrer` as well as `noopener`: `noopener` alone stops the new tab
+                    // reaching `window.opener`, but the referrer header would still hand the
+                    // destination the URL of the page the student was on.
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    // The full URL lives here and in `href` — never as the link's visible
+                    // primary text (§10).
+                    title={link.url}
+                    style={{
+                      flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '7px',
+                      minHeight: '30px', padding: '3px 6px', borderRadius: 'var(--wb-r-md)',
+                      textDecoration: 'none', color: 'var(--wb-text)',
+                    }}
+                  >
+                    <Icon size={14} aria-hidden style={{ flexShrink: 0, color: 'var(--wb-text-muted)' }} />
+                    <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                      <span style={{
+                        font: '600 var(--wb-fs-13) var(--wb-font-ui)', color: 'var(--wb-text)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {link.label}
+                      </span>
+                      {host !== null && (
+                        <span style={{
+                          font: '500 var(--wb-fs-12) var(--wb-font-ui)', color: 'var(--wb-text-muted)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                          {host}
+                        </span>
+                      )}
+                    </span>
+                    {/* Part of the link's accessible name, not a stray string beside it: a
+                        screen-reader user hears "Canvas, Canvas link, opens in a new tab". */}
+                    <span style={VISUALLY_HIDDEN}>{` ${typeLabel} link, opens in a new tab.`}</span>
+                    <ExternalLink size={12} aria-hidden style={{ flexShrink: 0, color: 'var(--wb-text-faint)' }} />
+                  </a>
+                  <button
+                    type="button"
+                    className="vb-links-icon-btn"
+                    aria-label={`Remove link "${link.label}"`}
+                    disabled={busy}
+                    onClick={() => { void removeLink(link); }}
+                    style={{
+                      ...ICON_BUTTON_STYLE,
+                      cursor: busy ? 'progress' : 'pointer',
+                      // Opacity, not a colour swap: the UA's own disabled rendering greys this
+                      // below §8's contrast floor, and it is a transient in-flight state.
+                      opacity: busy ? 0.55 : 1,
+                    }}
+                  >
+                    <Trash2 size={13} aria-hidden />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <form
+          onSubmit={e => { e.preventDefault(); void submitAdd(); }}
           style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
-            minHeight: '30px', padding: '6px 14px', borderRadius: '8px',
-            background: '#2a7fa8', border: '1px solid #2a7fa8',
-            fontFamily: FONT, fontSize: '0.76rem', fontWeight: 700, color: '#fff',
-            cursor: adding ? 'progress' : 'pointer', opacity: adding ? 0.7 : 1,
+            display: 'flex', flexDirection: 'column', gap: '7px',
+            borderTop: '1px solid var(--wb-hairline)', paddingTop: '10px',
           }}
         >
-          <Plus size={13} aria-hidden />
-          {adding ? 'Adding…' : 'Add link'}
-        </button>
-      </form>
+          <div>
+            <label htmlFor={labelId} style={LABEL_STYLE}>Label</label>
+            <input
+              id={labelId}
+              className="vb-links-input"
+              value={draftLabel}
+              maxLength={120}
+              placeholder="Submission page"
+              aria-describedby={formError === null ? undefined : errorId}
+              onChange={e => setDraftLabel(e.target.value)}
+              style={INPUT_STYLE}
+            />
+          </div>
+          <div>
+            <label htmlFor={urlId} style={LABEL_STYLE}>URL</label>
+            <input
+              id={urlId}
+              className="vb-links-input"
+              // `type="url"` for the mobile keyboard and the browser's own hint. The real gate is
+              // `isValidUrl` on the server; `looksLikeHttpUrl` above is the middle step, and this
+              // attribute is the least of the three — it accepts any scheme, `javascript:`
+              // included, which is exactly why it is not relied on.
+              type="url"
+              inputMode="url"
+              value={draftUrl}
+              placeholder="https://…"
+              aria-describedby={formError === null ? undefined : errorId}
+              onChange={e => setDraftUrl(e.target.value)}
+              style={INPUT_STYLE}
+            />
+          </div>
+          <div>
+            <label htmlFor={typeId} style={LABEL_STYLE}>Type</label>
+            <select
+              id={typeId}
+              className="vb-links-input"
+              value={draftType}
+              onChange={e => setDraftType(asLinkType(e.target.value))}
+              style={INPUT_STYLE}
+            >
+              {LINK_TYPE_ORDER.map(type => (
+                <option key={type} value={type}>{LINK_TYPE_META[type].label}</option>
+              ))}
+            </select>
+          </div>
 
-      {/* These rules MUST live in the component that renders the elements they target. Each
-          component gets its own styled-jsx scope hash, so a `.vb-links-input` rule written in
-          `LinksCell` or in `WorkTableView` would compile cleanly and match nothing — the trap
-          several tasks in this plan have hit. */}
-      <style jsx>{`
-        /* §9's ring, on the darker blue. :focus-visible so a mouse click does not leave a ring
-           nobody asked for, while keyboard arrival always does. */
-        .vb-links-input:focus-visible,
-        .vb-links-icon-btn:focus-visible,
-        .vb-links-btn:focus-visible,
-        .vb-links-item:focus-visible,
-        .vb-links-pop:focus-visible {
-          outline: 2px solid #2a7fa8;
-          outline-offset: 2px;
-        }
-        .vb-links-input:hover:not(:disabled),
-        .vb-links-icon-btn:hover:not(:disabled) {
-          border-color: rgba(140,160,190,0.75);
-        }
-        .vb-links-btn:hover:not(:disabled) {
-          filter: brightness(0.97);
-        }
-        /* Underline on hover as well as the background shift: "it is a link" must not be
-           carried by colour or background alone. */
-        .vb-links-item:hover {
-          background: rgba(116,188,217,0.14);
-          text-decoration: underline;
-        }
-      `}</style>
-    </div>
+          {formError !== null && (
+            // `role="alert"` so a screen-reader user hears the reason their submit did nothing.
+            // §8's AA-passing alert red, not a lighter decorative shade.
+            <p id={errorId} role="alert" style={{ ...NOTE_STYLE, color: 'var(--wb-danger)' }}>
+              {formError}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            className="vb-links-btn"
+            disabled={adding}
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
+              minHeight: '30px', padding: '6px 14px', borderRadius: 'var(--wb-r-md)',
+              background: 'var(--wb-blue-strong)', border: '1px solid var(--wb-blue-strong)',
+              font: '700 var(--wb-fs-13) var(--wb-font-ui)', color: 'var(--wb-inverse-text)',
+              cursor: adding ? 'progress' : 'pointer', opacity: adding ? 0.7 : 1,
+            }}
+          >
+            <Plus size={13} aria-hidden />
+            {adding ? 'Adding…' : 'Add link'}
+          </button>
+        </form>
+
+        {/* These rules MUST live in the component that renders the elements they target. Each
+            component gets its own styled-jsx scope hash, so a `.vb-links-input` rule written in
+            `LinksCell` or in `WorkTableView` would compile cleanly and match nothing — the trap
+            several tasks in this plan have hit. */}
+        <style jsx>{`
+          /* §9's ring, on the darker blue. :focus-visible so a mouse click does not leave a ring
+             nobody asked for, while keyboard arrival always does. */
+          .vb-links-input:focus-visible,
+          .vb-links-icon-btn:focus-visible,
+          .vb-links-btn:focus-visible,
+          .vb-links-item:focus-visible,
+          .vb-links-pop:focus-visible {
+            outline: 2px solid var(--wb-blue-strong);
+            outline-offset: 2px;
+          }
+          @media (hover: hover) and (pointer: fine) {
+            .vb-links-input:hover:not(:disabled),
+            .vb-links-icon-btn:hover:not(:disabled) {
+              border-color: var(--wb-text-faint);
+            }
+            .vb-links-btn:hover:not(:disabled) {
+              filter: brightness(0.97);
+            }
+            /* Underline on hover as well as the background shift: "it is a link" must not be
+               carried by colour or background alone. */
+            .vb-links-item:hover {
+              background: var(--wb-selected);
+              text-decoration: underline;
+            }
+          }
+        `}</style>
+      </div>
+    </WbPopover>
   );
-
-  return usePortal ? createPortal(panel, document.body) : panel;
 }
 
 const VISUALLY_HIDDEN: React.CSSProperties = {
@@ -778,8 +679,8 @@ const VISUALLY_HIDDEN: React.CSSProperties = {
 };
 
 const NOTE_STYLE: React.CSSProperties = {
-  margin: 0, fontFamily: FONT, fontSize: '0.74rem', fontWeight: 500,
-  color: '#5c6b80', lineHeight: 1.4,
+  margin: 0, font: '500 var(--wb-fs-12) var(--wb-font-ui)',
+  color: 'var(--wb-text-muted)', lineHeight: 1.4,
 };
 
 /** 26×26 clears the WCAG 2.2 Target Size (Minimum) floor of 24px with a little margin — the
@@ -787,14 +688,14 @@ const NOTE_STYLE: React.CSSProperties = {
  *  `DeadlineCell`'s clear buttons use. */
 const ICON_BUTTON_STYLE: React.CSSProperties = {
   flex: '0 0 26px', width: '26px', height: '26px', display: 'inline-flex',
-  alignItems: 'center', justifyContent: 'center', borderRadius: '8px',
-  background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(200,210,230,0.6)',
-  color: '#5c6b80', cursor: 'pointer', padding: 0,
+  alignItems: 'center', justifyContent: 'center', borderRadius: 'var(--wb-r-md)',
+  background: 'var(--wb-surface)', border: '1px solid var(--wb-border)',
+  color: 'var(--wb-text-muted)', cursor: 'pointer', padding: 0,
 };
 
 const SECONDARY_BUTTON_STYLE: React.CSSProperties = {
-  minHeight: '30px', padding: '6px 12px', borderRadius: '8px', marginTop: '6px',
-  background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(200,210,230,0.6)',
-  fontFamily: FONT, fontSize: '0.76rem', fontWeight: 600, color: '#5c6b80',
+  minHeight: '30px', padding: '6px 12px', borderRadius: 'var(--wb-r-md)', marginTop: '6px',
+  background: 'var(--wb-surface)', border: '1px solid var(--wb-border)',
+  font: '600 var(--wb-fs-13) var(--wb-font-ui)', color: 'var(--wb-text-muted)',
   cursor: 'pointer',
 };

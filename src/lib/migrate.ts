@@ -14,6 +14,9 @@ let _ranHabitsV8 = false;
 let _ranWorkboard = false;
 let _ranWorkboardV2 = false;
 let _ranWorkboardV3 = false;
+let _ranWorkboardV4 = false;
+let _ranFinanceWishlist = false;
+let _ranProjectionPrefs = false;
 
 /** Add accomplished_at column to entry tables if not already present. */
 export async function ensureAccomplishedAt(): Promise<void> {
@@ -530,6 +533,33 @@ export async function ensureWorkboardSchema(): Promise<void> {
     }
   }
 
+  // A one-day room change (e.g. a temporary swap while the usual room is unavailable) — only
+  // meaningful while the occurrence is still face-to-face (`modality` null/unset) or a
+  // rescheduled make-up (which meets in person at its new slot unless told otherwise); the UI
+  // hides this field for 'online_sync'/'online_async'/'cancelled'. Independent of `moved_date`
+  // et al., which only apply to 'rescheduled'.
+  if (!(await columnExists('schedule_overrides', 'room'))) {
+    await pool.query(`ALTER TABLE schedule_overrides ADD COLUMN room VARCHAR(100) NULL AFTER note`);
+  }
+
+  // schedule_blocks predates this migration file (created directly in the DB, like several
+  // other pre-Next.js tables) — instructor/meeting_link/modality extend it the same idempotent
+  // way schedule_overrides itself was extended above. `modality` generalizes the old `is_online`
+  // boolean to the same three-way vocabulary schedule_overrides uses for an occurrence exception
+  // ('face_to_face' here where an override's absence already meant that), so a class's regular
+  // weekly meeting can itself be sync or async, not just "online" — `is_online` stays as a
+  // derived, write-only shadow column (never independently editable) for any older reader that
+  // hasn't moved onto `modality` yet.
+  for (const [col, clause] of [
+    ['instructor',    `ADD COLUMN instructor VARCHAR(150) NULL AFTER section`],
+    ['meeting_link',  `ADD COLUMN meeting_link VARCHAR(500) NULL AFTER venue`],
+    ['modality',      `ADD COLUMN modality ENUM('face_to_face','online_sync','online_async') NOT NULL DEFAULT 'face_to_face' AFTER is_online`],
+  ] as [string, string][]) {
+    if (!(await columnExists('schedule_blocks', col))) {
+      await pool.query(`ALTER TABLE schedule_blocks ${clause}`);
+    }
+  }
+
   if (!(await columnExists('canvas_announcement_links', 'workboard_item_id'))) {
     await pool.query(`
       ALTER TABLE canvas_announcement_links
@@ -779,6 +809,14 @@ export async function ensureWorkboardV3Schema(): Promise<void> {
     ['organization_id', `ADD COLUMN organization_id INT NULL`],
     ['deadline_time', `ADD COLUMN deadline_time TIME NULL`],
     ['work_stage', `ADD COLUMN work_stage VARCHAR(24) NULL`],
+    // §18: "blocked" already existed as a stage for Project/Organization items, but carried no
+    // reason and no since-date — Focus's own review named this directly ("Waiting on Ana" /
+    // "Since Sep 8" needs somewhere to live). They hold a value only while the item is in a
+    // waiting stage (`WAITING_STAGES`): `blocked` for Project/Organization items, `submitted`
+    // ("For Revision") for owned Academic items. Life has neither. Study Pulse academic rows
+    // keep the same pair on `workboard_entry_meta` (see `ensureWorkboardV4Schema`).
+    ['blocked_reason', `ADD COLUMN blocked_reason VARCHAR(255) NULL`],
+    ['blocked_since', `ADD COLUMN blocked_since DATETIME NULL`],
   ];
   for (const [col, clause] of itemCols) {
     if (!(await columnExists('workboard_work_items', col))) {
@@ -830,4 +868,61 @@ export async function ensureWorkboardV3Schema(): Promise<void> {
   `);
 
   _ranWorkboardV3 = true;
+}
+
+/** Workboard v4: the waiting reason/since pair on the academic overlay, so Academic's
+ *  "For Revision" (`submitted`) stage can carry a revision note the way an owned item's
+ *  `blocked` stage already carries its "waiting on" reason. Study Pulse's tables are
+ *  untouched. */
+export async function ensureWorkboardV4Schema(): Promise<void> {
+  if (_ranWorkboardV4) return;
+
+  // Chains v3 (which chains v2, the creator of workboard_entry_meta).
+  await ensureWorkboardV3Schema();
+
+  for (const [col, clause] of [
+    ['blocked_reason', `ADD COLUMN blocked_reason VARCHAR(255) NULL`],
+    ['blocked_since', `ADD COLUMN blocked_since DATETIME NULL`],
+  ] as [string, string][]) {
+    if (!(await columnExists('workboard_entry_meta', col))) {
+      await pool.query(`ALTER TABLE workboard_entry_meta ${clause}`);
+    }
+  }
+
+  _ranWorkboardV4 = true;
+}
+
+/** Finance revamp (spec §10.2): "Can I afford it?" wishlist. goal_id / expense_id are plain
+ *  references, not FKs, so deleting a goal or expense elsewhere never blocks. */
+export async function ensureFinanceWishlistSchema(): Promise<void> {
+  if (_ranFinanceWishlist) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS finance_wishlist (
+      wish_id     INT AUTO_INCREMENT PRIMARY KEY,
+      user_id     INT NOT NULL,
+      name        VARCHAR(120) NOT NULL,
+      amount      DECIMAL(12,2) NOT NULL,
+      category    VARCHAR(40) NOT NULL DEFAULT 'leisure',
+      status      ENUM('open','bought','goal') NOT NULL DEFAULT 'open',
+      goal_id     INT NULL,
+      expense_id  INT NULL,
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_wishlist_user_status (user_id, status)
+    )`);
+  _ranFinanceWishlist = true;
+}
+
+/** StudyPulse revamp (spec §3.3): saved planner extras and targets, keyed by subject (presets are shared). */
+export async function ensureProjectionPrefsSchema(): Promise<void> {
+  if (_ranProjectionPrefs) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS studypulse_projection_prefs (
+      user_subject_id INT NOT NULL,
+      pref_key        VARCHAR(48) NOT NULL,
+      value           DECIMAL(6,2) NOT NULL,
+      updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_subject_id, pref_key)
+    )`);
+  _ranProjectionPrefs = true;
 }

@@ -7,7 +7,7 @@ import { WORK_CATEGORIES } from '@/lib/workboard/workItems';
 import { manilaNowDatetime, normaliseDeadlineTime, TIME_PATTERN } from '@/lib/workboard/dates';
 import { checkReferences } from '@/lib/workboard/ownership';
 import {
-  LIFE_AREAS, isStageLegal, normaliseStage,
+  LIFE_AREAS, isStageLegal, isWaitingStage, normaliseStage,
   validateWorkItemCategoryParent, validateWorkItemProjectConsistency,
   type WorkContext,
 } from '@/lib/workboard/workContexts';
@@ -93,12 +93,14 @@ export async function POST(req: NextRequest) {
     `INSERT INTO workboard_work_items
        (user_id, category, project_id, user_subject_id, organization_id, life_area,
         title, note, priority, work_status, work_stage,
-        due_at, deadline_time, start_date, estimated_hours, completed_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        due_at, deadline_time, start_date, estimated_hours, completed_at, blocked_since)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [userId, category, project_id ?? null, user_subject_id ?? null, organization_id ?? null,
      life_area ?? null, title.trim(), note || null, priority ?? 'normal', status, stage,
      due_at || null, deadline_time ? normaliseDeadlineTime(deadline_time) : null,
-     start_date || null, estimated_hours ?? null, status === 'done' ? manilaNowDatetime() : null],
+     start_date || null, estimated_hours ?? null, status === 'done' ? manilaNowDatetime() : null,
+     // Created straight into a waiting stage: stamp the wait-start, as the PATCH route does.
+     isWaitingStage(stage) ? manilaNowDatetime() : null],
   );
 
   return Response.json({ status: 'success', item_id: res.insertId });

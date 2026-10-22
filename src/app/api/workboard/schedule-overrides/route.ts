@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   const userId = parseInt(session.user.id);
 
   const body = await req.json();
-  const { block_id, override_date, note } = body;
+  const { block_id, override_date, note, room } = body;
 
   if (!block_id || !override_date || !/^\d{4}-\d{2}-\d{2}$/.test(override_date)) {
     return Response.json({ error: 'block_id and override_date (YYYY-MM-DD) are required' }, { status: 400 });
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const { overrideId } = await insertScheduleOverride({
-      blockId: block_id, overrideDate: override_date, note: note || null,
+      blockId: block_id, overrideDate: override_date, note: note || null, room: room || null,
       modality: validated.modality, movedDate: validated.moved_date,
       movedStartTime: validated.moved_start_time, movedEndTime: validated.moved_end_time,
       sourceType: 'manual', sourceAnnouncementId: null,

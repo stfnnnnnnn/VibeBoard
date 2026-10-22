@@ -1,32 +1,47 @@
 import type { WorkItem, WorkCategory } from '@/lib/workboard/workItems';
 import { addDays, dueDateOf } from '@/lib/workboard/dates';
+import { isRevisionStage } from '@/lib/workboard/workContexts';
 
 export interface TimeframeGroups {
-  overdue:   WorkItem[];
-  today:     WorkItem[];
-  upcoming:  WorkItem[];
-  later:     WorkItem[];
+  overdue:      WorkItem[];
+  today:        WorkItem[];
+  tomorrow:     WorkItem[];
+  this_week:    WorkItem[];
+  later:        WorkItem[];
+  no_deadline:  WorkItem[];
 }
 
 /**
  * Overdue is its own section (spec §6). v2 folded overdue items into Today on the
  * reasoning that a past section "doesn't exist"; v3 gives it one, because burying a
  * late item among today's work hides exactly the thing that most needs attention.
- * Today = due today. Upcoming = due in the 7 days after today, inclusive of day 7.
- * Later = everything else, including every undated item. Done items appear in none.
+ *
+ * Today/Tomorrow/This Week are three points along the same rolling 7-day window the old
+ * single "Upcoming" bucket covered (today+1 through today+7) — splitting it out is a finer
+ * read of the same horizon, not a wider one: "This Week" is today+2 through today+7, not the
+ * calendar week, so it never produces a lopsided bucket right after a Saturday or Sunday.
+ * Later = anything past that 7-day horizon. No Deadline is its own group rather than folded
+ * into Later — an undated item isn't "far away," it has no temporal position to sort by at
+ * all, and conflating the two hid genuinely-undated work behind items that are merely distant.
+ * Done items appear in none of these. A past-due revision item (`isRevisionStage`) is never
+ * overdue; it goes in Today, the nearest live slot for work that still needs doing.
  */
 export function groupByTimeframe(items: WorkItem[], todayStr: string): TimeframeGroups {
+  const tomorrowStr = addDays(todayStr, 1);
   const horizon = addDays(todayStr, 7);
-  const groups: TimeframeGroups = { overdue: [], today: [], upcoming: [], later: [] };
+  const groups: TimeframeGroups = {
+    overdue: [], today: [], tomorrow: [], this_week: [], later: [], no_deadline: [],
+  };
 
   for (const item of items) {
     if (item.work_status === 'done') continue;
     const due = dueDateOf(item);
-    if (due === null)          groups.later.push(item);
-    else if (due < todayStr)   groups.overdue.push(item);
-    else if (due === todayStr) groups.today.push(item);
-    else if (due <= horizon)   groups.upcoming.push(item);
-    else                       groups.later.push(item);
+    if (due === null)             groups.no_deadline.push(item);
+    else if (due < todayStr)      (isRevisionStage(item.work_stage) ? groups.today : groups.overdue).push(item);
+    else if (due === todayStr)    groups.today.push(item);
+    else if (due === tomorrowStr) groups.tomorrow.push(item);
+    else if (due <= horizon)      groups.this_week.push(item);
+    else                          groups.later.push(item);
   }
   return groups;
 }
@@ -34,15 +49,15 @@ export function groupByTimeframe(items: WorkItem[], todayStr: string): Timeframe
 export interface WorkStats {
   active_count:              number;
   /** Not-done items whose normalised status is specifically `in_progress` — a subset of
-   *  `active_count` (which is todo + in_progress). Backs the Active card's v3 sub-line,
-   *  "N currently in progress" (spec §22). */
+   *  `active_count` (which is todo + in_progress). Only the Active tile's fallback subtitle,
+   *  "N in progress", shown when nothing is due this week. */
   in_progress_count:         number;
   /** Net change over the trailing 7 days: created minus completed. This is what the schema
    *  can honestly answer — a true "active count as of last week" isn't reconstructable
    *  without history we don't keep, so it is not claimed. */
   active_net_change_7d:      number;
   due_soon_count:            number;   // not done, due within the next 3 days, not overdue
-  overdue_count:             number;   // not done, due before today
+  overdue_count:             number;   // not done, not a revision stage, due before today
   estimated_hours_this_week: number;
   estimated_items_counted:   number;   // in-scope items that HAD an estimate
   estimated_items_missing:   number;   // in-scope items with no estimate (disclosed in the UI)
@@ -65,7 +80,8 @@ export function computeStats(items: WorkItem[], todayStr: string, weekStart: str
       active++;
       if (item.work_status === 'in_progress') inProgress++;
       if (due !== null) {
-        if (due < todayStr) overdue++;
+        // A past-due revision item counts as neither overdue nor due soon.
+        if (due < todayStr) { if (!isRevisionStage(item.work_stage)) overdue++; }
         else if (due <= soonHorizon) dueSoon++;
       }
       if (due !== null && due >= weekStart && due <= weekEnd) {

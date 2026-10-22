@@ -39,9 +39,21 @@ export const STAGE_LABELS: Record<WorkStage, string> = {
   todo:            'To Do',
   in_progress:     'In Progress',
   ready_to_submit: 'Ready to Submit',
-  submitted:       'Submitted',
+  // Still the same DB value ('submitted') and the same slot in Academic's stage sequence —
+  // only the label changed, at the user's request, to name the state that actually needs
+  // action (feedback came back asking for changes) rather than the transient "handed in,
+  // waiting" moment `STAGE_EMPTY_TEXT`'s "Nothing submitted" once described. It is an
+  // active state (normalises to `in_progress`), never done and never overdue.
+  submitted:       'For Revision',
   review:          'Review',
-  blocked:         'Blocked',
+  // "Blocked" is retired from every piece of copy this stage produces, at the user's explicit
+  // request — the column heading, `STAGE_EMPTY_TEXT.blocked` ("Nothing for revision"), and the
+  // card's own fallback badge text (`BoardCard`'s "For revision" when no reason is given) all
+  // say "for revision" now. The underlying mechanism (`blocked_reason`/`blocked_since`, the
+  // "what is this waiting on?" prompt, the card's "Waiting on X · Nd" badge when a reason IS
+  // given, Focus's Waiting section) is untouched — only the bare word "Blocked" was replaced,
+  // not the waiting-on/duration language built around it.
+  blocked:         'For Revision',
   done:            'Done',
 };
 
@@ -60,11 +72,41 @@ export function normaliseStage(stage: WorkStage): WorkStatus {
     case 'ready_to_submit':
     case 'review':
     case 'blocked':
-      return 'in_progress';
+    // "For Revision" is its own active state (user decision, 2026-10-07): pending work,
+    // never done — see `isRevisionStage` for its overdue exemption.
     case 'submitted':
+      return 'in_progress';
     case 'done':
       return 'done';
   }
+}
+
+/** Stages that carry a reason (`blocked_reason`) and a server-stamped `blocked_since`:
+ *  Project/Organization's `blocked` ("waiting on") and Academic's `submitted` ("For
+ *  Revision" — the revision note). The column names predate the second stage. */
+export const WAITING_STAGES: readonly WorkStage[] = ['blocked', 'submitted'];
+
+export function isWaitingStage(stage: string | null | undefined): boolean {
+  return stage != null && (WAITING_STAGES as readonly string[]).includes(stage);
+}
+
+/** Revision stages are active but never overdue, however far past the due date. Only
+ *  `submitted` ("For Revision"); `blocked` keeps normal overdue behaviour. */
+export function isRevisionStage(stage: string | null | undefined): boolean {
+  return stage === 'submitted';
+}
+
+/** The one normalisation of a client-sent `blocked_reason`: trimmed, empty → null, capped at
+ *  255 (the column width). Anything that is not a string is null. */
+export function normaliseWaitingReason(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.trim() ? raw.trim().slice(0, 255) : null;
+}
+
+/** The waiting badge's text, minus the " · Nd" suffix: "Waiting on X" for `blocked`,
+ *  "Revise: X" for `submitted`, "For revision" with no reason. */
+export function waitingLabel(stage: WorkStage, reason: string | null): string {
+  if (!reason) return 'For revision';
+  return stage === 'submitted' ? `Revise: ${reason}` : `Waiting on ${reason}`;
 }
 
 /** A stage must belong to its context's vocabulary. Callers reject with 400 rather than

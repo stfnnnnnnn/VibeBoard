@@ -7,15 +7,13 @@ import { useEffect, useRef, useState } from 'react';
 // `WorkTableView.tsx`.
 import type { WorkItem, WorkPriority } from '@/lib/workboard/workItems';
 // `setPriority` is the single place owned-vs-academic endpoint routing lives, alongside
-// `setWorkStatus`/`setWorkStage` (Tasks 11/16/20). Imported, never re-derived: a second copy
+// `setWorkStage` (Tasks 11/16/20). Imported, never re-derived: a second copy
 // of that URL decision is the drift this plan has already had to remove twice, so this cell
 // must not know that academic items patch a different route from owned ones.
 import { setPriority } from '../WorkItemRow';
 // The module's one failure surface, shared with `StatusCell` (Task 20's report asked for it
 // the moment a second cell became interactive — this is that second cell).
 import { reportTableCellError } from './tableCellError';
-
-const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
 
 /** Fixed and identical in every context. Unlike stages there is no `PRIORITIES_BY_CONTEXT`
  *  and no fallback list: high/normal/low is the whole vocabulary for an Academic row and a
@@ -28,18 +26,6 @@ const PRIORITY_LABEL: Record<WorkPriority, string> = {
   high:   'High',
   normal: 'Normal',
   low:    'Low',
-};
-
-/** Turning the Priority column into a control removes §4's High pill from it. The pill was
- *  the column's "this one is urgent" signal, so the colour moves onto the select's own text
- *  rather than being dropped: `#922e48` is §6's alert red, the same value the pill used for
- *  its text and the only AA-passing one in that family (§8). Colour is not carrying the
- *  meaning alone — the control's value literally reads "High", and §4's coloured left edge
- *  on the row's first cell is untouched — so this is a third cue, not a sole one. */
-const TEXT_COLOR: Record<WorkPriority, string> = {
-  high:   '#922e48',
-  normal: '#2d3748',
-  low:    '#2d3748',
 };
 
 const GENERIC_ERROR = 'Could not change the priority. Please try again.';
@@ -130,7 +116,7 @@ export default function PriorityCell({ item, style, onChanged }: PriorityCellPro
 
       if (res === null) {
         setOptimistic(null);
-        reportTableCellError(NETWORK_ERROR);
+        reportTableCellError(NETWORK_ERROR, () => handleChange(next));
         return;
       }
       if (!res.ok) {
@@ -145,7 +131,7 @@ export default function PriorityCell({ item, style, onChanged }: PriorityCellPro
             ? (body as { error: string }).error
             : GENERIC_ERROR;
         setOptimistic(null);
-        reportTableCellError(message);
+        reportTableCellError(message, () => handleChange(next));
         return;
       }
       // The reconcile half: the optimistic value made the control feel instant, this makes
@@ -170,7 +156,7 @@ export default function PriorityCell({ item, style, onChanged }: PriorityCellPro
     >
       <select
         ref={selectRef}
-        className="vb-priority-select"
+        className={`vb-priority-select${shown === 'high' ? ' is-high' : ''}`}
         value={shown}
         disabled={pending}
         // A table full of unlabelled "Priority" selects is unnavigable, so the name identifies
@@ -178,24 +164,9 @@ export default function PriorityCell({ item, style, onChanged }: PriorityCellPro
         aria-label={`Priority for "${item.title}"`}
         onChange={e => { void handleChange(e.target.value as WorkPriority); }}
         style={{
-          // `StatusCell`'s control language exactly — itself the dialog's `CONTROL_STYLE`
-          // compressed for a table cell — so the Table's two editable columns read as one
-          // control, not two. Deliberately NOT `appearance: none`: the native disclosure
-          // arrow is the affordance that says this cell is editable at all.
-          boxSizing: 'border-box', minHeight: '26px', borderRadius: '8px',
-          padding: '2px 4px 2px 7px',
-          // High gets the pill's own tint back, not just its text colour: the Deadline
-          // column sits immediately to the right and paints the same #922e48 for an
-          // overdue date, so a high-priority overdue row would otherwise show two
-          // identically-red words with nothing but a select border between them. The
-          // tint is what separated "priority" from "lateness" before this was a control.
-          background: shown === 'high' ? 'rgba(224,96,124,0.15)' : 'rgba(255,255,255,0.6)',
-          border: '1px solid rgba(200,210,230,0.6)', fontFamily: FONT, fontSize: '0.76rem',
-          fontWeight: shown === 'high' ? 700 : 600, color: TEXT_COLOR[shown], lineHeight: 1.2,
           cursor: pending ? 'progress' : 'pointer',
           // Opacity, not a colour swap: the UA's own disabled rendering greys the text below
-          // §8's contrast floor, and this is a transient in-flight state, not a permanently
-          // unavailable control.
+          // §8's contrast floor, and this is a transient in-flight state.
           opacity: pending ? 0.65 : 1,
         }}
       >
@@ -204,18 +175,58 @@ export default function PriorityCell({ item, style, onChanged }: PriorityCellPro
         ))}
       </select>
 
-      {/* These rules MUST live here and not in `WorkTableView`. Each component gets its own
-          styled-jsx scope hash, so a `.vb-priority-select` rule written in the view would
-          compile cleanly and match nothing — the trap three tasks in this plan have hit. */}
+      {/* These rules MUST live here and not in `WorkTableView` (styled-jsx scopes per
+          component). `StatusCell`'s quiet select exactly, plus High's pill: the one priority
+          that should catch the eye keeps a fill at rest; Normal and Low read as muted text. */}
       <style jsx>{`
-        /* §9's ring, on the darker blue — :focus-visible so a mouse click does not leave a
-           ring nobody asked for, while keyboard arrival through the column always does. */
-        .vb-priority-select:focus-visible {
-          outline: 2px solid #2a7fa8;
-          outline-offset: 2px;
+        .vb-priority-select {
+          appearance: none;
+          -webkit-appearance: none;
+          box-sizing: border-box;
+          min-height: 26px;
+          max-width: 100%;
+          border: 1px solid transparent;
+          border-radius: var(--wb-r-sm);
+          padding: 3px 22px 3px 6px;
+          font: 500 var(--wb-fs-13) var(--wb-font-ui);
+          line-height: 1.2;
+          color: var(--wb-text-muted);
+          background-color: transparent;
+          background-image:
+            linear-gradient(45deg, transparent 50%, var(--wb-text-subtle) 50%),
+            linear-gradient(135deg, var(--wb-text-subtle) 50%, transparent 50%);
+          background-position: calc(100% - 13px) 55%, calc(100% - 8px) 55%;
+          background-repeat: no-repeat;
+          background-size: 0 0, 0 0;
         }
-        .vb-priority-select:hover:not(:disabled) {
-          border-color: rgba(140,160,190,0.75);
+        .vb-priority-select.is-high {
+          background-color: var(--wb-danger-bg);
+          color: var(--wb-danger);
+          border-radius: var(--wb-r-pill);
+          font-weight: 700;
+        }
+        @media (hover: hover) and (pointer: fine) {
+          :global(.vb-table-row:hover) .vb-priority-select:not(:disabled) {
+            border-color: var(--wb-border);
+            background-color: var(--wb-surface);
+            background-size: 5px 5px, 5px 5px;
+          }
+          :global(.vb-table-row:hover) .vb-priority-select.is-high:not(:disabled) {
+            background-color: var(--wb-danger-bg);
+          }
+        }
+        .vb-priority-select:focus-visible {
+          border-color: var(--wb-blue-strong);
+          outline: 2px solid var(--wb-blue-strong);
+          outline-offset: 1px;
+          background-color: var(--wb-surface);
+          background-size: 5px 5px, 5px 5px;
+        }
+        @media (hover: none) {
+          .vb-priority-select {
+            border-color: var(--wb-hairline);
+            background-size: 5px 5px, 5px 5px;
+          }
         }
       `}</style>
     </td>

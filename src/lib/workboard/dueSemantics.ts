@@ -1,5 +1,6 @@
 import { addDays, dueDateOf } from '@/lib/workboard/dates';
 import type { WorkItem } from '@/lib/workboard/workItems';
+import { isRevisionStage } from '@/lib/workboard/workContexts';
 
 export type DueState = 'none' | 'upcoming' | 'due_today' | 'overdue' | 'completed' | 'completed_late';
 
@@ -10,6 +11,8 @@ export type DueState = 'none' | 'upcoming' | 'due_today' | 'overdue' | 'complete
  *   done     AND completed >  deadline -> completed late
  * A completed item with no recorded completion timestamp reads `completed`, never
  * `completed_late` — guessing lateness from missing data would be a lie, not a default.
+ * A revision stage (`isRevisionStage`) is never overdue: a past deadline reads `upcoming`,
+ * which `formatDueLabel` renders as the plain date.
  */
 export function dueStateOf(item: WorkItem, todayStr: string): DueState {
   const due = dueDateOf(item);
@@ -20,7 +23,7 @@ export function dueStateOf(item: WorkItem, todayStr: string): DueState {
     return item.completed_at.slice(0, 10) > due ? 'completed_late' : 'completed';
   }
   if (due === null) return 'none';
-  if (due < todayStr) return 'overdue';
+  if (due < todayStr) return isRevisionStage(item.work_stage) ? 'upcoming' : 'overdue';
   if (due === todayStr) return 'due_today';
   return 'upcoming';
 }
@@ -64,7 +67,10 @@ export function formatDueLabel(item: WorkItem, todayStr: string): string | null 
     // exactly like any other upcoming item, so it lives here rather than as a seventh
     // `DueState` member six consumers would have to handle.
     case 'upcoming': {
-      if (dueDateOf(item) === addDays(todayStr, 1)) return 'Due tomorrow';
+      const due = dueDateOf(item);
+      // A past-due revision item (see `dueStateOf`): the plain date, no "Due"/"Overdue".
+      if (due !== null && due < todayStr) return date;
+      if (due === addDays(todayStr, 1)) return 'Due tomorrow';
       return date ? 'Due ' + date : null;
     }
   }

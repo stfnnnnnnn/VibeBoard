@@ -1,17 +1,14 @@
 'use client';
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  CalendarRange, SearchX, ChevronLeft, ChevronRight, AlertTriangle, Bell, Clock, MapPin, Link2,
-  CalendarClock, X,
+  CalendarRange, SearchX, ChevronLeft, ChevronRight, AlertTriangle, Bell, Flag, CalendarClock,
 } from 'lucide-react';
 // Type-only import from `workItems.ts` — that module imports `pool` (mysql2) at module scope
 // for its DB-access exports, so a runtime import here would drag mysql2 into this client
 // bundle (see WorkboardShell.tsx's, WorkItemRow.tsx's, and WorkBoardView.tsx's comments on the
 // same hazard — it has broken `/workboard` twice already).
 import type { WorkItem } from '@/lib/workboard/workItems';
-import type { WorkCategory } from '@/lib/workboard/workCategories';
 // The canonical module. Pool-free by construction.
 import type { WorkContext } from '@/lib/workboard/workContexts';
 // Type-only, from the same module `getWorkboardWeek` and `WorkboardShell.tsx`'s own
@@ -19,50 +16,42 @@ import type { WorkContext } from '@/lib/workboard/workContexts';
 // *value* exports, but `import type` is erased entirely, so none of that reaches this client
 // bundle. The one canonical source for these four shapes, not a locally re-typed guess at them.
 import type { ClassOccurrence, WorkboardEventItem, ConflictWarning, DayLoad } from '@/lib/workboard/aggregate';
-import { addDays, dueDateOf, mondayOf, validateOverrideModality, type OverrideModality } from '@/lib/workboard/dates';
+import type { CourseOption } from '@/lib/workboard/ui/quickAdd';
+import { addDays, dueDateOf, mondayOf, type OverrideModality } from '@/lib/workboard/dates';
 import { dueStateOf, formatDeadlineTime } from '@/lib/workboard/dueSemantics';
-// Pool-free (see that module's own header) — the shared raw/darkened course-hue pair, already
-// used by `WorkboardWeekView.tsx` for the identical class-block rendering this file now folds
-// in. Reused rather than re-derived so a course's colour agrees everywhere it appears.
-import { courseColor, courseTextColor } from '@/lib/workboard/color';
-// The Table's one failure surface, reused here (LinksPopover does the same from outside the
-// `table/` folder) rather than a second copy of "how a popover reports a failed write".
-import { reportTableCellError } from '../table/tableCellError';
-
-const FONT    = "'Inter','DM Sans','Segoe UI',sans-serif";
-const DM_FONT = "'DM Sans','Segoe UI',sans-serif";
+// Pool-free (see that module's own header) — the shared course hue, reused rather than
+// re-derived so a course's colour agrees everywhere it appears.
+import { courseColor } from '@/lib/workboard/color';
+import { CONTEXT_FILL, CONTEXT_TEXT, DUR } from '@/lib/workboard/ui/tokens';
+import { itemKey } from '@/lib/workboard/ui/itemKey';
+import { DUE_ACCENT } from '@/lib/workboard/ui/dueColors';
+import { formatClock, useNowMinutes } from '@/lib/workboard/ui/nowMinutes';
+import { weekProgress } from '@/lib/workboard/ui/weekPicker';
+// The single-day schedule-exception editor — shared with StudyPulse's ScheduleMaker, which
+// reads/writes the exact same schedule_overrides rows. See that module's own doc comment.
+import { ClassOverridePopover, formatShortDate, type AnchorRect } from '@/components/schedule/ClassOverridePopover';
+import WbOverlay, { usePresence } from '../ui/WbOverlay';
+import WbSkeleton from '../ui/WbSkeleton';
+import TimelineDayPanel from './TimelineDayPanel';
+import { buildDayEntries, entryKey, eventStart, nowSlot, toMinutes, type DayEntry } from '@/lib/workboard/ui/dayEntries';
 
 const WINDOW_DAYS = 7;
 const DAY_LABELS  = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const EDGE_COLOR: Record<WorkItem['priority'], string> = {
-  high:   '#e0607c',
-  normal: '#b8c6da',
-  low:    '#d3dbe6',
+  high:   'var(--wb-priority-high)',
+  normal: 'var(--wb-priority-normal)',
+  low:    'var(--wb-priority-low)',
 };
 
-/** Raw context hues (§2a) — non-text decoration only (the dot on each card's context tag). */
-const CATEGORY_HUE: Record<WorkCategory, string> = {
-  academic:     '#4dabf5',
-  project:      '#8b7fd6',
-  organization: '#f0a35c',
-  life:         '#f2a7c0',
+const LEVEL_COLOR: Record<DayLoad['level'], string> = {
+  low: 'var(--wb-blue)', medium: 'var(--wb-ctx-life)', high: 'var(--wb-priority-high)',
 };
-/** Darkened, text-safe pair to each raw hue above (§2a/§16a) — the tag's actual text colour. */
-const CATEGORY_TEXT: Record<WorkCategory, string> = {
-  academic:     '#185a7d',
-  project:      '#4f3fa0',
-  organization: '#8a5010',
-  life:         '#8a4468',
-};
-
-const LEVEL_COLOR: Record<DayLoad['level'], string> = { low: '#74bcd9', medium: '#f2a7c0', high: '#e0607c' };
 
 /** Display text for a non-null, non-'rescheduled' `OverrideModality` — 'rescheduled' is excluded
  *  from the type on purpose (it never reaches `ClassCard`'s suffix line: a ghost replaces the
  *  whole line with the moved-to slot instead, and a make-up's own "From <date>" tag already
- *  says so). One shared map so the popover's `<select>` labels and the card's suffix can never
- *  read differently for the same value. */
+ *  says so). */
 const MODALITY_LABEL: Record<Exclude<OverrideModality, 'rescheduled' | null>, string> = {
   online_sync:  'online (sync)',
   online_async: 'online (async)',
@@ -73,23 +62,6 @@ const MODALITY_LABEL: Record<Exclude<OverrideModality, 'rescheduled' | null>, st
  *  `BoardContext` and `WorkTableView`'s `TableContext`, and takes the same value from the
  *  same shell state. */
 export type TimelineContext = WorkContext | 'all';
-
-function itemKey(item: Pick<WorkItem, 'source' | 'id'>): string {
-  return `${item.source}-${item.id}`;
-}
-
-function toMinutes(hhmm: string): number {
-  const [h, m] = hhmm.split(':').map(Number);
-  return h * 60 + m;
-}
-
-/** "Sat 9/19" — compact enough for a ghost/make-up card's one extra line. UTC-parsed to match
- *  this module's other date handling (`dayIndexOf`, the day-header labels). */
-function formatShortDate(dateStr: string): string {
-  return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('en-US', {
-    weekday: 'short', month: 'numeric', day: 'numeric', timeZone: 'UTC',
-  });
-}
 
 function formatTimeRange(start: string, end: string): string {
   const fmt = (hhmm: string) => {
@@ -102,11 +74,34 @@ function formatTimeRange(start: string, end: string): string {
   return `${fmt(start)}–${fmt(end)}`;
 }
 
+/** "Oct 12 – 18", or "Sep 29 – Oct 5" when the week crosses a month. */
+function formatWeekRange(start: string, end: string): string {
+  const s = new Date(`${start}T00:00:00Z`);
+  const e = new Date(`${end}T00:00:00Z`);
+  const mon = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+  return s.getUTCMonth() === e.getUTCMonth()
+    ? `${mon(s)} ${s.getUTCDate()} – ${e.getUTCDate()}`
+    : `${mon(s)} ${s.getUTCDate()} – ${mon(e)} ${e.getUTCDate()}`;
+}
+
+/** Desktop places the day panel beside the week; below 1024px it opens as a drawer instead.
+ *  Defaults to true so server markup matches the common desktop case. */
+function useMedia(query: string, ssrDefault: boolean): boolean {
+  const [matches, setMatches] = useState(ssrDefault);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const sync = () => setMatches(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, [query]);
+  return matches;
+}
+const useIsDesktop = () => useMedia('(min-width: 1024px)', true);
+
 type PlottedBar    = { kind: 'bar';    item: WorkItem; startIdx: number; endIdx: number };
 type PlottedMarker = { kind: 'marker'; item: WorkItem; dayIdx: number };
 type Plotted       = PlottedBar | PlottedMarker;
-
-interface AnchorRect { left: number; right: number; top: number; bottom: number }
 
 /**
  * The plotting rule, restated as code:
@@ -161,10 +156,6 @@ export interface WorkTimelineViewProps {
    *  filtered-to-nothing timeline reads as "no matches" rather than wrongly telling the user
    *  their dated items lack dates. */
   isFiltered?: boolean;
-  /** The same value `visibleItems` is filtered by — `'all'` under My Work, one context under a
-   *  tab. Deliberately REQUIRED, not optional — see `WorkBoardView`'s own history for why an
-   *  optional context prop is a hazard `tsc` cannot catch. */
-  context: TimelineContext;
   /** This week's class schedule, from `/api/workboard/week` (Calendar's merged data). */
   classOccurrences: ClassOccurrence[];
   /** Server-computed schedule conflicts and deadline clusters for this week. */
@@ -175,77 +166,114 @@ export interface WorkTimelineViewProps {
   events: WorkboardEventItem[];
   /** Requests a different week's Calendar data (class occurrences/conflicts/heatmap/events) —
    *  the parent owns the fetch, since it also owns `weekStart`. */
-  onWeekChange: (weekStart: string) => void;
+  onWeekChange: (weekStart: string) => void | Promise<void>;
   /** True while a requested week's Calendar data is in flight — disables the nav buttons so a
-   *  second click cannot race the first. */
+   *  second click cannot race the first, and swaps the day columns for skeletons. */
   weekLoading?: boolean;
   /** Opens `WorkboardEventDialog` in edit mode for an existing event/reminder — the shell owns
-   *  that dialog's state (it's reachable from the same "New Work Item" flow that creates one),
-   *  so this view only ever asks for it to open, the same relationship `onOpenDetail` has with
-   *  the work-item detail drawer elsewhere in Workboard. */
+   *  that dialog's state. */
   onEditEvent: (item: WorkboardEventItem) => void;
+  /** The same value `visibleItems` is filtered by — `'all'` under My Work, one context under a
+   *  tab; also the day panel's quick-add default. Deliberately REQUIRED, not optional — see
+   *  `WorkBoardView`'s own history for why an optional context prop is a hazard `tsc` cannot catch. */
+  filter: TimelineContext;
+  courses: CourseOption[];
+  /** Refreshes work items after the day panel's quick add creates one. */
+  onChanged: () => Promise<void>;
+  onOpenDetail: (item: WorkItem) => void;
 }
 
 export default function WorkTimelineView({
-  items, weekStart, today, isFiltered, context,
+  items, weekStart, today, isFiltered,
   classOccurrences, conflicts, heatmap, events, onWeekChange, weekLoading, onEditEvent,
+  filter, courses, onChanged, onOpenDetail,
 }: WorkTimelineViewProps) {
-  // The day currently expanded, or `null` when the week is showing evenly. Cleared whenever the
-  // visible week changes (a focused day from last week means nothing on this one).
-  const [focusedDay, setFocusedDay] = useState<string | null>(null);
+  // The day whose agenda panel is open, or `null`. The week grid itself never changes shape
+  // for it (spec 9): selection only rings the column and opens the panel.
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  // Keyboard-opened UI does not animate: remembered from the click that opened the panel.
+  const [panelInstant, setPanelInstant] = useState(false);
+  const selectDay = (date: string, viaKeyboard: boolean) => {
+    if (selectedDay === null) setPanelInstant(viaKeyboard);
+    setSelectedDay(current => (current === date ? null : date));
+  };
 
-  const toggleFocus = (date: string) => setFocusedDay(current => (current === date ? null : date));
-  const goToWeek = (nextStart: string) => { setFocusedDay(null); onWeekChange(nextStart); };
+  // Directional slide for the next week to land. `target` pins it to that week, so changing
+  // direction never re-triggers the animation on the week still on screen.
+  const [slide, setSlide] = useState<{ dir: 1 | -1; target: string } | null>(null);
+  // The week a navigation asked for. Skeletons show only while that differs from the week on
+  // screen, so a same-week refresh (an override save) keeps the current week visible instead.
+  const [pendingWeek, setPendingWeek] = useState<string | null>(null);
+  const navigate = (nextStart: string, dir: 1 | -1 | 0, viaKeyboard: boolean) => {
+    setSelectedDay(null);
+    setPendingWeek(nextStart);
+    const far = Math.abs((Date.parse(nextStart) - Date.parse(weekStart)) / 86_400_000) > 7;
+    setSlide(dir === 0 || far || viaKeyboard ? null : { dir, target: nextStart });
+    void onWeekChange(nextStart);
+  };
 
   // The single-day schedule override editor's one open slot — a class card anywhere in the
-  // grid can open it, and only one can be open at a time (clicking a second closes the first,
-  // the same "one open slot" shape `DeadlineCell`'s editor uses for the same reason: two
-  // popovers open at once would double the dismissal logic for no benefit). `trigger` is the
-  // clicked button itself, captured at open time rather than held in a ref map — unlike
-  // `WorkBoardView`'s cards, a `ClassCard` is never reparented while its popover is open (only
-  // a full week refetch recreates it, which this same popover's own save/delete triggers, and
-  // which closes the popover in the same breath), so there is no reparenting case a stable ref
-  // needs to survive.
+  // grid (or a class row in the day panel) can open it, and only one can be open at a time.
+  // `trigger` is the clicked button itself, captured at open time rather than held in a ref map.
   const [openOverride, setOpenOverride] = useState<{
     occurrence: ClassOccurrence; anchor: AnchorRect; trigger: HTMLElement;
   } | null>(null);
+  const editClass = (occurrence: ClassOccurrence, anchor: AnchorRect, trigger: HTMLElement) =>
+    setOpenOverride({ occurrence, anchor, trigger });
 
-  // Re-fetches THIS week's data without navigating — `onWeekChange` with the week already on
-  // screen still re-runs the shell's fetch (see `WorkboardShell.tsx`'s `goToWeek`), which is
-  // exactly "reload what a class override changed". Deliberately not the local `goToWeek`
-  // above: that one also clears `focusedDay`, and closing day-focus as a side effect of editing
-  // one class within it would be a surprising thing for a save button to do.
-  const refreshWeek = () => onWeekChange(weekStart);
+  // Re-fetches THIS week's data without navigating. Deliberately not `navigate`: that also
+  // clears `selectedDay`, and closing the day panel as a side effect of editing one class
+  // within it would be a surprising thing for a save button to do.
+  const refreshWeek = () => { void onWeekChange(weekStart); };
+
+  useEffect(() => { if (!weekLoading) setPendingWeek(null); }, [weekLoading]);
+  const showSkeleton = !!weekLoading && pendingWeek !== null && pendingWeek !== weekStart;
+
+  const isDesktop = useIsDesktop();
+  // Below 768px the week is a horizontal scroll-snap row (see workboard.css). On load and on
+  // every week change it starts at today's column, or the week's first day. No smooth scroll.
+  const isPhone = useMedia('(max-width: 767px)', false);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!isPhone || !scroller) return;
+    const col = scroller.querySelector<HTMLElement>(`[data-date="${today}"]`);
+    scroller.scrollLeft = col ? col.offsetLeft : 0;
+  }, [isPhone, weekStart, today]);
+  const now = useNowMinutes();
+  const drawer = usePresence(isDesktop ? null : selectedDay, DUR.slow);
+
+  // Esc closes the desktop panel. The drawer handles its own Esc; anything that already
+  // consumed the key (the override popover, a quick add) or sits in a dialog is left alone.
+  useEffect(() => {
+    if (!isDesktop || selectedDay === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.closest?.('[role="dialog"]')) return;
+      setSelectedDay(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isDesktop, selectedDay]);
 
   // Direction doc §5d's original rule, carried over: the *legitimately*-empty condition is "no
-  // item has a start_date or due_at" at all, not "nothing plots in this particular week" — a
-  // fully-dated backlog with nothing due this week is a different, unremarkable situation the
-  // grid can render as-is (an ordinary empty week, not this module's own empty state).
+  // item has a start_date or due_at" at all, not "nothing plots in this particular week".
   const hasAnyDate = items.some(item => item.start_date !== null || item.due_at !== null);
 
-  if (!hasAnyDate && isFiltered) {
-    return (
-      <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-        <SearchX size={48} color="#9aa4b5" style={{ marginBottom: '14px' }} />
-        <h2 style={{ fontFamily: DM_FONT, fontSize: '1.05rem', fontWeight: 700, color: '#2d3748', margin: '0 0 6px' }}>
-          No matching work items
-        </h2>
-        <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: '#5c6b80', margin: 0 }}>
-          Try a different category, search term, or filter.
-        </p>
-      </div>
-    );
-  }
-
   if (!hasAnyDate) {
+    const Icon = isFiltered ? SearchX : CalendarRange;
+    // On its own glass sheet: the shell no longer wraps Timeline in a panel.
     return (
-      <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-        <CalendarRange size={48} color="#9aa4b5" style={{ marginBottom: '14px' }} />
-        <h2 style={{ fontFamily: DM_FONT, fontSize: '1.05rem', fontWeight: 700, color: '#2d3748', margin: '0 0 6px' }}>
-          Nothing scheduled yet
+      <div className="wb-glass-panel" style={{ textAlign: 'center', padding: '60px 20px' }}>
+        <Icon size={48} style={{ color: 'var(--wb-text-faint)', marginBottom: '14px' }} />
+        <h2 style={{ fontFamily: 'var(--wb-font-head)', fontSize: 'var(--wb-fs-16)', fontWeight: 700, color: 'var(--wb-text)', margin: '0 0 6px' }}>
+          {isFiltered ? 'No matching work items' : 'Nothing scheduled yet'}
         </h2>
-        <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: '#5c6b80', margin: 0 }}>
-          Timeline needs a due date or start date to plot something — add one from the Focus view.
+        <p style={{ fontFamily: 'var(--wb-font-ui)', fontSize: 'var(--wb-fs-14)', fontWeight: 500, color: 'var(--wb-text-muted)', margin: 0 }}>
+          {isFiltered
+            ? 'Try a different category, search term, or filter.'
+            : 'Timeline needs a due date or start date to plot something — add one from the Focus view.'}
         </p>
       </div>
     );
@@ -256,253 +284,262 @@ export default function WorkTimelineView({
   // Compared against `weekStart` to grey out "Today" once it's already the visible week — a
   // week can be reached going forward OR back, so this can't just be "disable Next".
   const isCurrentWeek = weekStart === mondayOf(today);
+  const todayMonday = mondayOf(today);
 
   const plotted = items.map(item => plot(item, weekStart)).filter((p): p is Plotted => p !== null);
   const bars    = plotted.filter((p): p is PlottedBar => p.kind === 'bar');
-  const markersByDay = new Map<string, PlottedMarker[]>();
+  const markersByDay = new Map<string, WorkItem[]>();
   for (const p of plotted) {
     if (p.kind !== 'marker') continue;
     const date = dayDates[p.dayIdx];
     const list = markersByDay.get(date);
-    if (list) list.push(p); else markersByDay.set(date, [p]);
+    if (list) list.push(p.item); else markersByDay.set(date, [p.item]);
   }
 
   const classesByDay = (date: string) => classOccurrences.filter(c => c.date === date)
     .sort((a, b) => toMinutes(a.start_time) - toMinutes(b.start_time));
-  const eventsByDay = (date: string) => events.filter(e =>
-    (e.starts_at !== null && e.starts_at.slice(0, 10) === date) ||
-    (e.item_type === 'reminder' && e.remind_at !== null && e.remind_at.slice(0, 10) === date));
+  const eventsByDay = (date: string) => events.filter(e => eventStart(e, date) !== null);
   const conflictsByDay = (date: string) => conflicts.filter(c => c.date === date);
   const heatmapFor = (date: string) => heatmap.find(h => h.date === date) ?? null;
 
+  const longDateOf = (date: string) => new Date(`${date}T00:00:00Z`)
+    .toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
+
+  // `today` may carry a time suffix; only its date orders days.
+  const todayDate = today.slice(0, 10);
+  const progressPct = Math.round(weekProgress(weekStart, today, now ?? 0) * 100);
+
+  const panelFor = (date: string) => (
+    <TimelineDayPanel
+      date={date}
+      today={today}
+      classes={classesByDay(date)}
+      // Everything due that day, including a multi-day bar ending there.
+      items={items.filter(item => dueDateOf(item) === date)}
+      events={eventsByDay(date)}
+      filter={filter}
+      courses={courses}
+      onClose={() => setSelectedDay(null)}
+      onChanged={onChanged}
+      onOpenDetail={onOpenDetail}
+      onEditClass={editClass}
+      onEditEvent={onEditEvent}
+      switchKey={date}
+    />
+  );
+
   return (
-    <div role="region" aria-label="Timeline">
-      {/* Week navigation — the same shape `WorkboardWeekView.tsx`'s Calendar page already used,
-          now driving Timeline's own week window instead of a separate page's. */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
-        <span style={{ fontFamily: DM_FONT, fontSize: '0.95rem', fontWeight: 800, color: '#2d3748' }}>
-          {weekStart} – {weekEnd}
-        </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button
-            type="button"
-            onClick={() => goToWeek(addDays(weekStart, -7))}
-            disabled={weekLoading}
-            aria-label="Previous week"
-            className="vb-tl-nav"
-            style={{
-              width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              borderRadius: '8px', border: '1px solid rgba(200,210,230,0.6)', background: 'rgba(255,255,255,0.6)',
-              cursor: weekLoading ? 'default' : 'pointer', opacity: weekLoading ? 0.6 : 1,
-            }}
-          >
-            <ChevronLeft size={16} />
-          </button>
-          <button
-            type="button"
-            onClick={() => goToWeek(mondayOf(today))}
-            disabled={weekLoading || isCurrentWeek}
-            className="vb-tl-nav"
-            style={{
-              height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              borderRadius: '8px', border: '1px solid rgba(200,210,230,0.6)', background: 'rgba(255,255,255,0.6)',
-              padding: '0 12px', fontFamily: FONT, fontSize: '0.76rem', fontWeight: 700, color: '#5c6b80',
-              cursor: weekLoading || isCurrentWeek ? 'default' : 'pointer', opacity: weekLoading || isCurrentWeek ? 0.5 : 1,
-            }}
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            onClick={() => goToWeek(addDays(weekStart, 7))}
-            disabled={weekLoading}
-            aria-label="Next week"
-            className="vb-tl-nav"
-            style={{
-              width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              borderRadius: '8px', border: '1px solid rgba(200,210,230,0.6)', background: 'rgba(255,255,255,0.6)',
-              cursor: weekLoading ? 'default' : 'pointer', opacity: weekLoading ? 0.6 : 1,
-            }}
-          >
-            <ChevronRight size={16} />
-          </button>
-        </div>
-      </div>
-
-      {/* Schedule conflicts and deadline clusters for the visible week, carried over unchanged
-          from Calendar's own treatment — server-computed, so this view never re-derives them. */}
-      {conflicts.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
-          {conflicts.map((c, i) => (
-            <div key={i} style={{
-              display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px',
-              borderRadius: '10px', background: 'rgba(224,96,124,0.12)', border: '1px solid rgba(224,96,124,0.3)',
-            }}>
-              <AlertTriangle size={14} color="#c0607c" style={{ flexShrink: 0 }} />
-              <span style={{ fontFamily: FONT, fontSize: '0.78rem', fontWeight: 700, color: '#a0405a' }}>
-                {c.type === 'overlap' ? 'Schedule conflict' : 'Deadline cluster'} — {c.message} ({c.date})
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Multi-day bars — a thin Gantt-style overview spanning the day columns below. Hidden
-          while a day is focused: the bars' left/width are computed as percentages assuming
-          seven EQUAL-width columns (true only in the unfocused state — an enlarged focused
-          column would misalign them), and a whole-week overview adds little once the user has
-          zoomed into one day's detail anyway. */}
-      {bars.length > 0 && focusedDay === null && (
-        <div style={{ position: 'relative', height: `${Math.max(bars.length, 1) * 26}px`, marginBottom: '10px' }}>
-          {stackBars(bars).map(({ bar, row }) => {
-            const color = EDGE_COLOR[bar.item.priority];
-            const leftPct  = (bar.startIdx / WINDOW_DAYS) * 100;
-            const widthPct = ((bar.endIdx - bar.startIdx + 1) / WINDOW_DAYS) * 100;
-            return (
-              <div
-                key={itemKey(bar.item)}
-                title={bar.item.title}
-                style={{
-                  position: 'absolute', left: `${leftPct}%`, width: `calc(${widthPct}% - 4px)`,
-                  top: `${row * 26}px`, height: '22px', borderRadius: '6px',
-                  background: color, border: `1px solid ${color}`, boxSizing: 'border-box',
-                  display: 'flex', alignItems: 'center', padding: '0 8px', overflow: 'hidden',
-                }}
-              >
-                <span style={{
-                  fontFamily: FONT, fontSize: '0.68rem', fontWeight: 700, color: '#fff',
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }}>
-                  {bar.item.title}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Day columns — the primary layout. Each column stacks that day's class blocks, work
-          items, and events/reminders as cards, in that order. Clicking a day's header expands
-          it (more room, unaffected by the others shrinking) and shrinks the rest to a slim
-          strip; a second click returns the week to even columns.
-          `alignItems: 'stretch'` (the flex default, set explicitly here) is what makes every
-          column the SAME height regardless of how much that day holds: each is a flex item in
-          one row, so all of them stretch to match whichever one needs the most room — a quiet
-          Tuesday no longer reads as a visually "smaller" day than a packed Monday next to it.
-          Focusing a day grows this same effect: its cards render `expanded` (more fields per
-          card, taller), which grows the whole row's height, and every column — focused or
-          not — stretches to match; the width swing is deliberately mild (1.7:0.85:1, not the
-          earlier 3:0.6:1) since the row's new height already does most of the "this day is now
-          the center of attention" work. */}
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
-        {dayDates.map((date, i) => {
-          const isToday    = date === today;
-          const isFocused  = focusedDay === date;
-          const isDimmed   = focusedDay !== null && !isFocused;
-          const load       = heatmapFor(date);
-          const dayConflicts = conflictsByDay(date);
-          const d = new Date(`${date}T00:00:00Z`);
-          const dayItems   = markersByDay.get(date) ?? [];
-          const doneCount  = dayItems.filter(p => p.item.work_status === 'done').length;
-
-          return (
+    <div role="region" aria-label="Timeline" className="vb-tl-root">
+      <div className="vb-tl-week">
+        <div className="vb-tl-sheet wb-glass-panel">
+          <div className="vb-tl-head">
+            <span className="vb-tl-range">{formatWeekRange(weekStart, weekEnd)}</span>
+            {/* Elapsed share of the visible week: full for past weeks, empty for future ones. */}
             <div
-              key={date}
-              style={{
-                flex: isFocused ? '1.7 1 0' : isDimmed ? '0.85 1 0' : '1 1 0',
-                minWidth: 0, minHeight: '220px', transition: 'flex-grow 180ms ease',
-                display: 'flex', flexDirection: 'column',
-                background: 'rgba(255,255,255,0.4)', borderRadius: '14px',
-                border: isToday ? '1.5px solid #74bcd9' : '1px solid rgba(200,210,230,0.4)',
-                padding: '8px', boxSizing: 'border-box',
-              }}
+              className="vb-tl-weekbar"
+              role="progressbar"
+              aria-label="Week progress"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={progressPct}
             >
+              <div className="vb-tl-weekbar__fill" style={{ width: `${progressPct}%` }} />
+            </div>
+            <div className="vb-tl-navs">
               <button
                 type="button"
-                onClick={() => toggleFocus(date)}
-                aria-pressed={isFocused}
-                aria-label={`${isFocused ? 'Collapse' : 'Expand'} ${d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' })}`}
-                className="vb-tl-day-toggle"
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
-                  background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 2px 8px',
-                  borderBottom: '1px solid rgba(200,210,230,0.35)', marginBottom: '6px',
-                }}
+                onClick={e => navigate(addDays(weekStart, -7), -1, e.detail === 0)}
+                disabled={weekLoading}
+                aria-label="Previous week"
+                className="wb-gpill vb-tl-nav vb-tl-nav--icon"
               >
-                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                  <span style={{
-                    fontFamily: DM_FONT, fontSize: '0.66rem', fontWeight: 800, textTransform: 'uppercase',
-                    letterSpacing: '0.04em', color: isToday ? '#256f92' : '#8a94a6',
-                  }}>
-                    {DAY_LABELS[i]}
-                  </span>
-                  <span style={{ fontFamily: FONT, fontSize: '0.82rem', fontWeight: 700, color: '#2d3748' }}>
-                    {d.getUTCDate()}
-                  </span>
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  {dayConflicts.length > 0 && <AlertTriangle size={12} color="#c0607c" aria-label="Schedule conflict" />}
-                  {load && load.score > 0 && (
-                    <span
-                      aria-label={`Workload: ${load.level}`}
-                      style={{ width: '8px', height: '8px', borderRadius: '50%', background: LEVEL_COLOR[load.level], flexShrink: 0 }}
-                    />
-                  )}
-                </span>
+                <ChevronLeft size={16} aria-hidden />
               </button>
+              <button
+                type="button"
+                onClick={e => navigate(todayMonday, todayMonday > weekStart ? 1 : -1, e.detail === 0)}
+                disabled={weekLoading || isCurrentWeek}
+                className="wb-gpill vb-tl-nav"
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={e => navigate(addDays(weekStart, 7), 1, e.detail === 0)}
+                disabled={weekLoading}
+                aria-label="Next week"
+                className="wb-gpill vb-tl-nav vb-tl-nav--icon"
+              >
+                <ChevronRight size={16} aria-hidden />
+              </button>
+            </div>
+          </div>
 
-              {/* This day's work-item completion, at a glance — the same signal Focus and
-                  Board's per-column meta already give per-item, rolled up per-day here since a
-                  focused-out, narrow column has no room left for per-card text. Red rather than
-                  the done-teal the instant one of today's items is overdue: a day that's "60%
-                  done but the other 40% is late" is not the same shade of fine as "60% done, on
-                  track", and the bar is the only thing still visible on a dimmed column. */}
-              {dayItems.length > 0 && (
-                <div
-                  role="progressbar"
-                  aria-valuenow={doneCount}
-                  aria-valuemin={0}
-                  aria-valuemax={dayItems.length}
-                  aria-label={`${doneCount} of ${dayItems.length} work item${dayItems.length === 1 ? '' : 's'} done`}
-                  style={{ height: '3px', borderRadius: '999px', background: 'rgba(200,210,230,0.35)', marginBottom: '7px', overflow: 'hidden', flexShrink: 0 }}
-                >
-                  <div style={{
-                    height: '100%', width: `${(doneCount / dayItems.length) * 100}%`, borderRadius: '999px',
-                    background: dayItems.some(p => dueStateOf(p.item, today) === 'overdue') ? '#e0607c' : '#74bcd9',
-                    transition: 'width 200ms ease',
-                  }} />
-                </div>
-              )}
+          {/* Schedule conflicts and deadline clusters for the visible week — server-computed. */}
+          {/* Prefixed: the week-slide sibling below is keyed by the bare weekStart. */}
+          <ConflictSummary key={`conflicts-${weekStart}`} conflicts={conflicts} />
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                {classesByDay(date).map(c => (
-                  <ClassCard
-                    // A make-up occurrence carries the same `block_id` as its own original
-                    // slot; if a class is ever rescheduled onto a date its own weekly template
-                    // would already occupy, both entries can appear in the same day's list —
-                    // `moved_from` is what tells the two apart when `block_id` alone can't.
-                    key={`c${c.block_id}-${c.moved_from ?? 'orig'}`}
-                    c={c}
-                    expanded={isFocused}
-                    onEdit={(occurrence, anchor, trigger) => setOpenOverride({ occurrence, anchor, trigger })}
-                  />
-                ))}
-                {dayItems.map(p => (
-                  <WorkCard key={itemKey(p.item)} item={p.item} today={today} expanded={isFocused} />
-                ))}
-                {eventsByDay(date).map(e => (
-                  <EventCard key={`e${e.id}`} e={e} expanded={isFocused} onEdit={() => onEditEvent(e)} />
-                ))}
-                {classesByDay(date).length === 0 && dayItems.length === 0 && eventsByDay(date).length === 0 && (
-                  <span style={{ fontFamily: FONT, fontSize: '0.7rem', color: '#9aa4b5', padding: '4px 2px' }}>
-                    {isDimmed ? '' : 'Nothing scheduled'}
-                  </span>
+          {/* Keyed by week, so the row remounts when the new week's data lands and the slide plays
+              on the new content rather than before the fetch. */}
+          <div key={weekStart} className="vb-week-slide" data-dir={slide && slide.target === weekStart ? slide.dir : undefined}>
+            {/* One scroller holds the bars and the columns, so on phones they scroll together. */}
+            <div ref={scrollerRef} className="vb-tl-scroll">
+              <div className="vb-tl-track">
+                {/* Multi-day bars sit on the same column template as the days (weekends are
+                    narrower on desktop), so a bar spans exactly the columns it covers. */}
+                {bars.length > 0 && (
+                  <div className="vb-tl-cols vb-tl-bars">
+                    {stackBars(bars).map(({ bar, row }) => {
+                      const color = EDGE_COLOR[bar.item.priority];
+                      return (
+                        <div
+                          key={itemKey(bar.item)}
+                          role="img"
+                          aria-label={bar.item.title}
+                          style={{
+                            gridColumn: `${bar.startIdx + 1} / ${bar.endIdx + 2}`, gridRow: row + 1, minWidth: 0,
+                            height: '22px', borderRadius: 'var(--wb-r-sm)',
+                            background: color, border: `1px solid ${color}`, boxSizing: 'border-box',
+                            display: 'flex', alignItems: 'center', padding: '0 8px', overflow: 'hidden',
+                          }}
+                        >
+                          <span aria-hidden style={{
+                            fontFamily: 'var(--wb-font-ui)', fontSize: 'var(--wb-fs-12)', fontWeight: 700, color: 'var(--wb-inverse-text)',
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          }}>
+                            {bar.item.title}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
+
+                {/* Day columns. Grid rows stretch, so every column is the same height regardless
+                    of how much that day holds. Full detail for a day lives in the day panel, so
+                    cards here are always compact. */}
+                <div className="vb-tl-cols">
+                  {dayDates.map((date, i) => {
+                    const isToday    = date === todayDate;
+                    const isPast     = date < todayDate;
+                    const isWeekend  = i >= 5;
+                    const isSelected = selectedDay === date;
+                    const load       = heatmapFor(date);
+                    const dayConflicts = conflictsByDay(date);
+                    const d = new Date(`${date}T00:00:00Z`);
+                    const dayItems   = markersByDay.get(date) ?? [];
+                    const doneCount  = dayItems.filter(item => item.work_status === 'done').length;
+                    const entries    = buildDayEntries(date, classesByDay(date), eventsByDay(date), dayItems);
+                    const slot       = isToday && now !== null ? nowSlot(entries, now) : -1;
+
+                    return (
+                      <div
+                        key={date}
+                        data-date={date}
+                        className="vb-tl-day wb-glass-item"
+                        data-today={isToday ? 'true' : undefined}
+                        data-past={isPast ? 'true' : undefined}
+                        data-weekend={isWeekend ? 'true' : undefined}
+                        data-selected={isSelected ? 'true' : undefined}
+                      >
+                        <button
+                          type="button"
+                          onClick={e => selectDay(date, e.detail === 0)}
+                          aria-pressed={isSelected}
+                          aria-label={`Show ${longDateOf(date)} agenda`}
+                          className="vb-tl-day-toggle"
+                        >
+                          <span className="vb-tl-day-head">
+                            <span className="vb-tl-dn">
+                              {isToday ? `${DAY_LABELS[i]} · Today` : DAY_LABELS[i]}
+                            </span>
+                            <span className="vb-tl-dd">{d.getUTCDate()}</span>
+                          </span>
+                          <span className="vb-tl-day-flags">
+                            {dayConflicts.length > 0 && <AlertTriangle size={12} style={{ color: 'var(--wb-danger)' }} aria-label="Schedule conflict" />}
+                            {load && load.score > 0 && (
+                              <span
+                                aria-label={`Workload: ${load.level}`}
+                                style={{ width: '8px', height: '8px', borderRadius: '50%', background: LEVEL_COLOR[load.level], flexShrink: 0 }}
+                              />
+                            )}
+                          </span>
+                        </button>
+
+                        {showSkeleton ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                            <WbSkeleton height={28} radius="var(--wb-r-md)" />
+                            <WbSkeleton height={28} radius="var(--wb-r-md)" />
+                            <WbSkeleton height={20} radius="var(--wb-r-md)" />
+                          </div>
+                        ) : (
+                          <div className="vb-tl-day-body">
+                            {/* This day's work-item completion, at a glance. Red rather than the
+                                done-blue the instant one of the day's items is overdue. */}
+                            {dayItems.length > 0 && (
+                              <div
+                                role="progressbar"
+                                className="vb-tl-day-progress"
+                                aria-valuenow={doneCount}
+                                aria-valuemin={0}
+                                aria-valuemax={dayItems.length}
+                                aria-label={`${doneCount} of ${dayItems.length} work item${dayItems.length === 1 ? '' : 's'} done`}
+                                style={{ height: '3px', borderRadius: 'var(--wb-r-pill)', background: 'rgba(200,210,230,0.35)', marginBottom: '7px', overflow: 'hidden', flexShrink: 0 }}
+                              >
+                                <div className="vb-tl-progress" style={{
+                                  height: '100%', width: '100%', transformOrigin: 'left center',
+                                  transform: `scaleX(${doneCount / dayItems.length})`,
+                                  background: dayItems.some(item => dueStateOf(item, today) === 'overdue') ? 'var(--wb-priority-high)' : 'var(--wb-blue)',
+                                }} />
+                              </div>
+                            )}
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', minWidth: 0 }}>
+                              {entries.map((en, idx) => (
+                                <DayCell key={entryKey(en)} en={en} today={today} faded={isPast} onEditClass={editClass} onEditEvent={onEditEvent}
+                                  nowBefore={idx === slot ? now : null} />
+                              ))}
+                              {now !== null && slot !== -1 && slot === entries.length && <NowLine now={now} />}
+                              {/* Empty days stay clean; only today says so. */}
+                              {entries.length === 0 && isToday && (
+                                <span className="vb-tl-free">
+                                  <span className="vb-tl-free__orb" aria-hidden />
+                                  Free day
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          );
-        })}
+          </div>
+        </div>
       </div>
+
+      {isDesktop && selectedDay !== null && (
+        // Mounted once while any day is selected; only the panel's `switchKey` changes, so the
+        // slide plays once and switching days only crossfades the agenda.
+        <aside className="vb-day-panel" aria-labelledby="vb-day-panel-title" data-instant={panelInstant ? 'true' : undefined}>
+          {panelFor(selectedDay)}
+        </aside>
+      )}
+
+      {!isDesktop && drawer.value !== null && (
+        <WbOverlay
+          open={drawer.open}
+          variant="drawer"
+          labelledBy="vb-day-panel-title"
+          instant={panelInstant}
+          onClose={() => setSelectedDay(null)}
+          panelStyle={{ padding: '16px' }}
+        >
+          {panelFor(drawer.value)}
+        </WbOverlay>
+      )}
 
       {openOverride && (
         <ClassOverridePopover
@@ -515,18 +552,135 @@ export default function WorkTimelineView({
       )}
 
       <style jsx>{`
+        .vb-tl-root { display: flex; align-items: flex-start; gap: 14px; }
+        .vb-tl-week { flex: 1; min-width: 0; }
+        .vb-tl-sheet { padding: 18px; box-sizing: border-box; }
+
+        .vb-tl-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+        .vb-tl-range {
+          flex-shrink: 0; font: 700 var(--wb-fs-16) var(--wb-font-head); color: var(--wb-text); white-space: nowrap;
+        }
+        /* No transition: the bar only ever jumps (spec §9). */
+        .vb-tl-weekbar {
+          flex: 1; min-width: 40px; height: 6px; border-radius: 3px; overflow: hidden;
+          background: rgba(255, 255, 255, 0.5);
+        }
+        .vb-tl-weekbar__fill {
+          height: 100%; border-radius: 3px;
+          background: linear-gradient(90deg, var(--wb-blue), var(--wb-pink-strong));
+        }
+        .vb-tl-navs { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+        .vb-tl-nav { min-height: 32px; justify-content: center; cursor: pointer; padding: 0 12px; }
+        .vb-tl-nav--icon { width: 32px; padding: 0; color: var(--wb-text-muted); }
+        .vb-tl-nav:disabled { cursor: default; opacity: 0.5; }
+
+        /* Desktop and tablet: weekends recessed and narrower. Phones override to seven equal
+           columns inside the scroll-snap track (below). */
+        .vb-tl-cols {
+          display: grid; gap: 10px;
+          grid-template-columns: repeat(5, minmax(0, 1fr)) repeat(2, minmax(0, 0.7fr));
+        }
+        .vb-tl-bars { grid-auto-rows: 22px; row-gap: 4px; margin-bottom: 10px; }
+
+        .vb-tl-day {
+          min-width: 0; min-height: 250px; display: flex; flex-direction: column;
+          border-radius: 18px; padding: 12px 10px; box-sizing: border-box;
+        }
+        .vb-tl-day[data-past='true'] {
+          background: linear-gradient(160deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.3));
+          box-shadow: none;
+        }
+        .vb-tl-day[data-weekend='true'] {
+          background: rgba(255, 255, 255, 0.18); border: 1px solid rgba(255, 255, 255, 0.35); box-shadow: none;
+        }
+        .vb-tl-day[data-today='true'] {
+          background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 236, 245, 0.7));
+          box-shadow: inset 0 1px 0 var(--wb-surface), 0 0 0 1.5px rgba(232, 85, 143, 0.45), 0 26px 50px -20px rgba(232, 85, 143, 0.55);
+        }
+        /* Selection keeps the app's blue selection ring, layered onto the tile's glass depth. */
+        .vb-tl-day[data-selected='true'] {
+          box-shadow: inset 0 1px 0 var(--wb-surface), 0 0 0 2px var(--wb-blue-strong), 0 16px 30px -16px rgba(60, 40, 110, 0.5);
+        }
+        .vb-tl-day[data-selected='true'][data-today='true'] {
+          box-shadow: inset 0 1px 0 var(--wb-surface), 0 0 0 2px var(--wb-blue-strong), 0 26px 50px -20px rgba(232, 85, 143, 0.55);
+        }
+        .vb-tl-day-body { display: flex; flex-direction: column; min-width: 0; }
+        /* Past days fade surfaces only (chip fills via the cards' faded prop, the progress bar and
+           the now line); text stays at full opacity so it keeps 4.5:1. */
+        .vb-tl-day[data-past='true'] .vb-tl-day-progress,
+        .vb-tl-day[data-past='true'] :global(.vb-tl-now) { opacity: 0.6; }
+
+        .vb-tl-day-toggle {
+          display: flex; align-items: flex-start; justify-content: space-between; gap: 4px; width: 100%;
+          background: transparent; border: none; cursor: pointer; padding: 0 2px; margin-bottom: 10px; text-align: left;
+        }
+        .vb-tl-day-head { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+        .vb-tl-dn {
+          font: 800 var(--wb-fs-11) var(--wb-font-head); text-transform: uppercase; letter-spacing: 0.07em;
+          color: var(--wb-text-muted);
+        }
+        .vb-tl-dd {
+          margin-top: 2px; font: 750 22px/1.1 var(--wb-font-ui); letter-spacing: -0.02em; color: var(--wb-text);
+        }
+        .vb-tl-day[data-past='true'] .vb-tl-dd { color: var(--wb-text-muted); }
+        .vb-tl-day[data-today='true'] .vb-tl-dn,
+        .vb-tl-day[data-today='true'] .vb-tl-dd { color: var(--wb-pink-ink); }
+        .vb-tl-day-flags { display: flex; align-items: center; gap: 4px; padding-top: 2px; flex-shrink: 0; }
+
+        .vb-tl-free {
+          display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 30px;
+          font: 600 var(--wb-fs-12) var(--wb-font-ui); color: var(--wb-text-muted);
+        }
+        .vb-tl-free__orb {
+          width: 34px; height: 34px; border-radius: 50%; box-sizing: border-box;
+          background: radial-gradient(circle at 35% 30%, var(--wb-surface), rgba(255, 255, 255, 0.2));
+          border: 1px solid rgba(255, 255, 255, 0.9);
+        }
+
+        /* NowLine renders in a child component, outside this tree's scope class. */
+        .vb-tl-sheet :global(.vb-tl-now) {
+          position: relative; height: 2px; border: 0; border-radius: 1px; margin: 4px 0 4px 4px;
+          background: var(--wb-pink-strong); box-shadow: 0 0 10px rgba(232, 85, 143, 0.8);
+        }
+        .vb-tl-sheet :global(.vb-tl-now)::before {
+          content: ''; position: absolute; left: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%;
+          background: var(--wb-pink-strong);
+        }
+
+        @media (max-width: 767px) {
+          .vb-tl-cols { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+          /* The bar takes its own row so the range and the controls keep their width. */
+          .vb-tl-head { flex-wrap: wrap; row-gap: 10px; }
+          .vb-tl-navs { margin-left: auto; }
+          .vb-tl-weekbar { order: 3; flex-basis: 100%; }
+        }
+
         .vb-tl-nav:focus-visible,
-        .vb-tl-day-toggle:focus-visible,
-        .vb-tl-class-card:focus-visible {
-          outline: 2px solid #2a7fa8;
+        .vb-tl-day-toggle:focus-visible {
+          outline: 2px solid var(--wb-blue-strong);
           outline-offset: 2px;
-          border-radius: 8px;
         }
-        .vb-tl-nav:hover:not(:disabled) {
-          border-color: rgba(140,160,190,0.75);
+        .vb-tl-day-toggle:focus-visible { border-radius: var(--wb-r-md); }
+        @media (hover: hover) and (pointer: fine) {
+          .vb-tl-nav:hover:not(:disabled) { background: var(--wb-surface); }
         }
-        .vb-tl-class-card:hover {
-          filter: brightness(0.97);
+        .vb-tl-progress { transition: transform var(--wb-dur) var(--wb-ease); }
+        .vb-day-panel {
+          width: 300px; flex-shrink: 0; align-self: flex-start; box-sizing: border-box; padding: 14px;
+          position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto;
+          background: var(--wb-surface); border-radius: var(--wb-r-xl); box-shadow: var(--wb-shadow-pop);
+          animation: vb-panel-in var(--wb-dur-slow) var(--wb-ease);
+        }
+        .vb-day-panel[data-instant='true'] { animation: none; }
+        @keyframes vb-panel-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+        .vb-week-slide[data-dir='1'] { animation: vb-week-next 160ms var(--wb-ease); }
+        .vb-week-slide[data-dir='-1'] { animation: vb-week-prev 160ms var(--wb-ease); }
+        @keyframes vb-week-next { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+        @keyframes vb-week-prev { from { opacity: 0; transform: translateX(-24px); } to { opacity: 1; transform: none; } }
+        @media (prefers-reduced-motion: reduce) {
+          .vb-day-panel { animation: none; }
+          .vb-week-slide[data-dir] { animation: none; }
+          .vb-tl-progress { transition: none; }
         }
       `}</style>
     </div>
@@ -548,43 +702,165 @@ function stackBars(bars: PlottedBar[]): { bar: PlottedBar; row: number }[] {
   return placed;
 }
 
+function NowLine({ now }: { now: number }) {
+  return <div role="separator" aria-label={`Now, ${formatClock(now)}`} className="vb-tl-now" />;
+}
+
+/** One time-ordered entry in a day column, with the now marker before it when it is the first
+ *  entry at or after the current time. */
+function DayCell({
+  en, today, faded, onEditClass, onEditEvent, nowBefore,
+}: {
+  en: DayEntry; today: string; nowBefore: number | null;
+  /** A past day: chip surfaces fade, text does not. */
+  faded: boolean;
+  onEditClass: (occurrence: ClassOccurrence, anchor: AnchorRect, trigger: HTMLElement) => void;
+  onEditEvent: (item: WorkboardEventItem) => void;
+}) {
+  return (
+    <>
+      {nowBefore !== null && <NowLine now={nowBefore} />}
+      {en.kind === 'class' && <ClassCard c={en.c} faded={faded} onEdit={onEditClass} />}
+      {en.kind === 'item' && <WorkCard item={en.item} today={today} faded={faded} />}
+      {en.kind === 'event' && <EventCard e={en.e} faded={faded} onEdit={() => onEditEvent(en.e)} />}
+    </>
+  );
+}
+
 const CARD_STYLE: React.CSSProperties = {
-  borderRadius: '8px', padding: '5px 8px', boxSizing: 'border-box',
-  display: 'flex', flexDirection: 'column', gap: '2px',
+  borderRadius: '12px', padding: '8px 9px', boxSizing: 'border-box',
+  display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, maxWidth: '100%', overflow: 'hidden',
 };
 
-function CardTag({ color, background, children }: { color: string; background: string; children: React.ReactNode }) {
+/** Past-day fade: every chip surface alpha scaled by .6, matching an opacity of .6 on the
+ *  surface alone. Text keeps full opacity, so it stays at or above 4.5:1. */
+const FADE = 0.6;
+const alpha = (a: number, faded: boolean) => +(faded ? a * FADE : a).toFixed(3);
+
+/** Tinted glass chip in a hue: classes take their course colour, life events the Life hue. */
+function tintedGlass(color: string, faded: boolean): React.CSSProperties {
+  return {
+    background: `linear-gradient(160deg, color-mix(in srgb, ${color} ${alpha(45, faded)}%, transparent), rgba(255,255,255,${alpha(0.45, faded)}))`,
+    border: `1px solid rgba(255,255,255,${alpha(0.75, faded)})`,
+  };
+}
+
+// Text wraps (or, in tags, truncates) inside its column; never spills into the next one.
+const CARD_TEXT: React.CSSProperties = { fontFamily: 'var(--wb-font-ui)', fontSize: 'var(--wb-fs-12)', overflowWrap: 'anywhere', minWidth: 0 };
+
+// Grid card titles stop at 3 lines; the day panel shows them in full.
+const CARD_TITLE_CLAMP: React.CSSProperties = {
+  display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+};
+
+/** `text-overflow` only works on a block container, never on the anonymous flex item that loose
+ *  text becomes inside an inline-flex, so the label gets its own ellipsizing span. */
+function CardTag({ color, background, dot, label }: {
+  color: string; background: string; dot?: React.ReactNode; label: string;
+}) {
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: '3px', borderRadius: '999px',
-      padding: '1px 6px', background, color, fontFamily: FONT, fontSize: '0.6rem', fontWeight: 700,
+    <span title={label} style={{
+      display: 'inline-flex', alignItems: 'center', gap: '3px', borderRadius: 'var(--wb-r-pill)',
+      padding: '1px 6px', background, color, ...CARD_TEXT, fontWeight: 700,
+      maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', overflow: 'hidden',
     }}>
-      {children}
+      {dot}
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
     </span>
   );
 }
 
+function conflictText(c: ConflictWarning): string {
+  return `${c.type === 'overlap' ? 'Schedule conflict' : 'Deadline cluster'} — ${c.message} (${c.date})`;
+}
+
+/** One line however many conflicts the week has, so the grid stays near the top; the list
+ *  opens on demand (one line per conflict, full text in `title`). A single conflict shows inline. */
+function ConflictSummary({ conflicts }: { conflicts: ConflictWarning[] }) {
+  const [open, setOpen] = useState(false);
+  if (conflicts.length === 0) return null;
+  const single = conflicts.length === 1;
+  return (
+    <div className="vb-cf">
+      <div className="vb-cf__bar">
+        <AlertTriangle size={14} aria-hidden style={{ color: 'var(--wb-danger)', flexShrink: 0 }} />
+        {single ? (
+          <span role="status" className="vb-cf__text vb-cf__text--single" title={conflictText(conflicts[0])}>{conflictText(conflicts[0])}</span>
+        ) : (
+          <>
+            <span role="status" className="vb-cf__text">
+              {conflicts.length} {conflicts.every(c => c.type === 'overlap') ? 'schedule conflicts' : 'conflicts'} this week
+            </span>
+            <button
+              type="button"
+              className="vb-cf__toggle wb-focus-ring"
+              aria-expanded={open}
+              aria-controls="vb-cf-list"
+              onClick={() => setOpen(o => !o)}
+            >
+              {open ? 'Hide' : 'Show'}
+            </button>
+          </>
+        )}
+      </div>
+      {!single && open && (
+        <ul id="vb-cf-list" className="vb-cf__list">
+          {conflicts.map((c, i) => (
+            <li key={`${c.type}|${c.date}|${c.message}|${i}`} className="vb-cf__item" title={conflictText(c)}>{conflictText(c)}</li>
+          ))}
+        </ul>
+      )}
+      <style jsx>{`
+        .vb-cf {
+          margin-bottom: 14px; border-radius: var(--wb-r-lg); background: var(--wb-danger-bg);
+          border: 1px solid rgba(224, 96, 124, 0.3); font-family: var(--wb-font-ui); color: var(--wb-danger);
+        }
+        .vb-cf__bar { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 8px 4px 14px; }
+        .vb-cf__text { flex: 1; min-width: 0; font: 700 var(--wb-fs-13) var(--wb-font-ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .vb-cf__text--single {
+          white-space: normal; overflow-wrap: anywhere;
+          display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        }
+        .vb-cf__toggle {
+          flex-shrink: 0; min-height: 28px; padding: 0 10px; border: 0; border-radius: var(--wb-r-md);
+          background: transparent; color: var(--wb-danger); font: 700 var(--wb-fs-12) var(--wb-font-ui); cursor: pointer;
+        }
+        /* The container already carries the danger tint, so hover underlines rather than tints. */
+        @media (hover: hover) and (pointer: fine) { .vb-cf__toggle:hover { text-decoration: underline; } }
+        @media (max-width: 767px) { .vb-cf__toggle { min-height: 44px; } }
+        .vb-cf__list {
+          list-style: none; margin: 0; padding: 0 14px 8px; max-height: 180px; overflow-y: auto;
+          display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px;
+        }
+        .vb-cf__item {
+          min-width: 0; font: 600 var(--wb-fs-12)/1.6 var(--wb-font-ui);
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+      `}</style>
+    </div>
+  );
+}
+
 /**
- * A recurring class meeting, now also the entry point for the single-day override editor: the
- * whole card is a button, and clicking it — a ghost, a make-up, or a plain unannotated
- * occurrence alike — opens `ClassOverridePopover` over this exact occurrence (see
- * `WorkTimelineView`'s `openOverride` state for why one card's click is enough to identify
- * which occurrence, ghost-or-not, is being edited).
+ * A recurring class meeting, and the entry point for the single-day override editor: the whole
+ * card is a button that opens `ClassOverridePopover` over this exact occurrence.
  *
- * Three renderings share this one component rather than three components, because they are the
- * same fact (an occurrence, annotated or not) at three points along it:
+ * Three renderings share this one component, because they are the same fact (an occurrence,
+ * annotated or not) at three points along it:
  *  - a GHOST (`override.modality === 'rescheduled'` and no `moved_from`) — the class does NOT
  *    meet here; the time range is replaced with where it moved to instead of shown alongside it,
  *    since showing both would read as "meets twice."
  *  - a MAKE-UP (`moved_from` set) — the class DOES meet here, at a slot its own weekly template
  *    never claimed, tagged with where it came from so it doesn't look like a schedule error.
- *  - anything else — today's unchanged rendering: cancelled/online suffix, venue when expanded.
+ *  - anything else — the cancelled/online suffix, if any.
  */
 function ClassCard({
-  c, expanded, onEdit,
+  c, faded, onEdit,
 }: {
   c: ClassOccurrence;
-  expanded: boolean;
+  faded: boolean;
   onEdit: (occurrence: ClassOccurrence, anchor: AnchorRect, trigger: HTMLElement) => void;
 }) {
   const isGhost   = c.moved_from === undefined && c.override?.modality === 'rescheduled';
@@ -592,7 +868,6 @@ function ClassCard({
   const cancelled = c.override?.modality === 'cancelled';
   const dimmed    = cancelled || isGhost;
   const color = courseColor(c.course_code);
-  const textColor = courseTextColor(c.course_code);
 
   const title = isGhost && c.override?.moved_date
     ? `Moved to ${formatShortDate(c.override.moved_date)}${c.override.note ? ` — ${c.override.note}` : ''}`
@@ -605,77 +880,84 @@ function ClassCard({
       onClick={e => onEdit(c, e.currentTarget.getBoundingClientRect(), e.currentTarget)}
       className="vb-tl-class-card"
       style={{
-        ...CARD_STYLE, background: `${color}16`, borderLeft: `3px solid ${color}`,
-        opacity: dimmed ? 0.55 : 1, border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer',
+        ...CARD_STYLE, ...tintedGlass(color, faded),
+        opacity: dimmed ? 0.55 : 1, width: '100%', textAlign: 'left', cursor: 'pointer',
       }}
     >
-      <span style={{
-        fontFamily: FONT, fontSize: '0.72rem', fontWeight: 800, color: textColor,
-        textDecoration: dimmed ? 'line-through' : 'none',
-      }}>
+      <span
+        title={c.course_code}
+        style={{
+          ...CARD_TEXT, fontSize: '12.5px', fontWeight: 700, color: 'var(--wb-text)', textDecoration: dimmed ? 'line-through' : 'none',
+          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', flexShrink: 0,
+        }}
+      >
         {c.course_code}
       </span>
-      <span style={{ fontFamily: FONT, fontSize: '0.64rem', color: '#5c6b80' }}>
+      {/* --wb-text, not muted: muted drops below 4.5:1 on the saturated course tints. */}
+      <span style={{ ...CARD_TEXT, fontWeight: 600, color: 'var(--wb-text)' }}>
         {isGhost && c.override?.moved_date && c.override.moved_start_time && c.override.moved_end_time
           ? `→ ${formatShortDate(c.override.moved_date)}, ${formatTimeRange(c.override.moved_start_time, c.override.moved_end_time)}`
           : <>
               {formatTimeRange(c.start_time, c.end_time)}
-              {/* Not for 'rescheduled': a make-up card is the only occurrence that reaches this
-                  branch with that modality, and its own "From <date>" tag just below already
-                  says so more usefully than repeating the word here. */}
               {c.override?.modality && c.override.modality !== 'rescheduled' ? ` · ${MODALITY_LABEL[c.override.modality]}` : ''}
             </>}
       </span>
       {isMakeup && c.moved_from && (
-        <span style={{ display: 'flex', alignItems: 'center', gap: '3px', fontFamily: FONT, fontSize: '0.62rem', color: '#8a5010', fontWeight: 700 }}>
-          <CalendarClock size={10} aria-hidden /> From {formatShortDate(c.moved_from)}
+        // Warn hue on the icon only: as text it falls below 4.5:1 on the course tints.
+        <span style={{ display: 'flex', alignItems: 'center', gap: '3px', ...CARD_TEXT, color: 'var(--wb-text)', fontWeight: 700 }}>
+          <CalendarClock size={12} aria-hidden style={{ color: 'var(--wb-warn)', flexShrink: 0 }} /> From {formatShortDate(c.moved_from)}
         </span>
       )}
-      {expanded && c.venue && !isGhost && (
-        <span style={{ display: 'flex', alignItems: 'center', gap: '3px', fontFamily: FONT, fontSize: '0.64rem', color: '#8a94a6' }}>
-          <MapPin size={10} aria-hidden /> {c.venue}
-        </span>
-      )}
+      {/* `title` alone never reaches keyboard, touch or screen-reader users. */}
+      {c.override?.note && <span className="wb-sr-only">. Note: {c.override.note}</span>}
+      <style jsx>{`
+        .vb-tl-class-card:focus-visible {
+          outline: 2px solid var(--wb-blue-strong);
+          outline-offset: 2px;
+        }
+        @media (hover: hover) and (pointer: fine) {
+          .vb-tl-class-card:hover { filter: brightness(0.97); }
+        }
+      `}</style>
     </button>
   );
 }
 
-function WorkCard({ item, today, expanded }: { item: WorkItem; today: string; expanded: boolean }) {
+function WorkCard({ item, today, faded }: { item: WorkItem; today: string; faded: boolean }) {
   const state = dueStateOf(item, today);
-  const edgeColor = EDGE_COLOR[item.priority];
-  const textColor = state === 'overdue' ? '#922e48' : state === 'completed_late' ? '#8a5010' : '#2d3748';
+  const textColor = DUE_ACCENT[state] ?? 'var(--wb-text)';
   const isDone = item.work_status === 'done';
   const time = formatDeadlineTime(item);
   return (
+    // Bright white so deadlines stand apart from the tinted class chips.
     <div
       title={item.title}
-      style={{ ...CARD_STYLE, background: 'rgba(255,255,255,0.55)', borderLeft: `3px solid ${edgeColor}` }}
+      style={{
+        ...CARD_STYLE, background: `rgba(255,255,255,${alpha(0.75, faded)})`,
+        border: `1px solid rgba(255,255,255,${alpha(1, faded)})`,
+        boxShadow: `0 8px 18px -12px rgba(60,40,110,${alpha(0.45, faded)})`,
+      }}
     >
-      <span style={{
-        fontFamily: FONT, fontSize: '0.72rem', fontWeight: 700, color: isDone ? '#9aa4b5' : textColor,
-        textDecoration: isDone ? 'line-through' : 'none', overflowWrap: 'break-word',
-      }}>
-        {item.title}
+      <span style={{ display: 'flex', alignItems: 'flex-start', gap: '4px', minWidth: 0, color: isDone ? 'var(--wb-text-faint)' : textColor }}>
+        <Flag size={12} aria-hidden style={{ flexShrink: 0, marginTop: '2px' }} />
+        <span style={{
+          ...CARD_TEXT, fontWeight: 700, textDecoration: isDone ? 'line-through' : 'none', ...CARD_TITLE_CLAMP,
+        }}>
+          {item.title}
+        </span>
       </span>
-      {(expanded || item.chip_label || time !== '—') && (
-        <span style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px', marginTop: '1px' }}>
+      {(item.chip_label || time !== '—') && (
+        <span style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px', marginTop: '1px', minWidth: 0 }}>
           {item.chip_label && (
-            <CardTag color={CATEGORY_TEXT[item.category]} background={`${CATEGORY_HUE[item.category]}1f`}>
-              <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: CATEGORY_HUE[item.category], flexShrink: 0 }} />
-              {item.chip_label}
-            </CardTag>
+            <CardTag
+              color={CONTEXT_TEXT[item.category]} background={`${CONTEXT_FILL[item.category]}1f`}
+              label={item.chip_label}
+              dot={<span style={{ width: '5px', height: '5px', borderRadius: '50%', background: CONTEXT_FILL[item.category], flexShrink: 0 }} />}
+            />
           )}
           {time !== '—' && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: '2px', fontFamily: FONT, fontSize: '0.62rem', color: '#8a94a6' }}>
-              <Clock size={9} aria-hidden /> {time}
-            </span>
-          )}
-          {expanded && item.link_count > 0 && (
-            <span
-              aria-label={`${item.link_count} link${item.link_count === 1 ? '' : 's'}`}
-              style={{ display: 'flex', alignItems: 'center', gap: '2px', fontFamily: FONT, fontSize: '0.62rem', color: '#8a94a6' }}
-            >
-              <Link2 size={9} aria-hidden /> <span aria-hidden>{item.link_count}</span>
+            <span style={{ ...CARD_TEXT, fontWeight: 600, color: 'var(--wb-text-muted)' }}>
+              Due {time}
             </span>
           )}
         </span>
@@ -684,362 +966,34 @@ function WorkCard({ item, today, expanded }: { item: WorkItem; today: string; ex
   );
 }
 
-function EventCard({ e, expanded, onEdit }: { e: WorkboardEventItem; expanded: boolean; onEdit: () => void }) {
+function EventCard({ e, faded, onEdit }: { e: WorkboardEventItem; faded: boolean; onEdit: () => void }) {
   const isReminder = e.item_type === 'reminder';
   return (
     <button
       type="button"
       onClick={onEdit}
+      title={e.title}
       className="vb-tl-class-card"
       style={{
-        ...CARD_STYLE, background: 'rgba(242,167,192,0.14)', borderLeft: '3px solid #f2a7c0',
-        border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer',
+        ...CARD_STYLE, ...tintedGlass('var(--wb-ctx-life)', faded),
+        width: '100%', textAlign: 'left', cursor: 'pointer',
       }}
     >
-      <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-        {isReminder && <Bell size={10} color="#8a4468" aria-hidden style={{ flexShrink: 0 }} />}
-        <span style={{ fontFamily: FONT, fontSize: '0.72rem', fontWeight: 700, color: '#8a4468', overflowWrap: 'break-word' }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--wb-ctx-life-text)' }}>
+        {isReminder && <Bell size={12} aria-hidden style={{ flexShrink: 0 }} />}
+        <span style={{ ...CARD_TEXT, fontWeight: 700, ...CARD_TITLE_CLAMP }}>
           {e.title}
         </span>
       </span>
-      {expanded && e.location && (
-        <span style={{ display: 'flex', alignItems: 'center', gap: '3px', fontFamily: FONT, fontSize: '0.64rem', color: '#8a94a6' }}>
-          <MapPin size={10} aria-hidden /> {e.location}
-        </span>
-      )}
-    </button>
-  );
-}
-
-/* ─── The single-day schedule override editor ──────────────────────────────────────────── */
-
-const OVERRIDE_NETWORK_ERROR = 'Could not reach the server. Check your connection and try again.';
-const OVERRIDE_SAVE_ERROR    = 'Could not save this schedule change. Please try again.';
-const OVERRIDE_REMOVE_ERROR  = 'Could not remove this schedule change. Please try again.';
-
-const POP_WIDTH  = 260;
-const POP_GAP    = 6;
-const POP_MARGIN = 8;
-
-const POP_INPUT_STYLE: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box', minHeight: '30px', borderRadius: '8px',
-  padding: '4px 8px', background: 'rgba(255,255,255,0.6)',
-  border: '1px solid rgba(200,210,230,0.6)', fontFamily: FONT, fontSize: '0.78rem',
-  fontWeight: 500, color: '#2d3748',
-};
-const POP_LABEL_STYLE: React.CSSProperties = {
-  display: 'block', fontFamily: FONT, fontSize: '0.68rem', fontWeight: 700,
-  color: '#5c6b80', marginBottom: '3px',
-};
-
-/** The sibling popovers' message extraction, verbatim (`DeadlineCell`, `LinksPopover`): the
- *  server's own words when it has any, a generic sentence when the body is an HTML error page
- *  or an empty 500. */
-async function messageFrom(res: Response, fallback: string): Promise<string> {
-  const body: unknown = await res.json().catch(() => null);
-  return typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string'
-    ? (body as { error: string }).error
-    : fallback;
-}
-
-type ModalityChoice = 'online_sync' | 'online_async' | 'cancelled' | 'rescheduled' | '';
-
-/**
- * The single-day schedule-exception editor: cancel a meeting, mark it online, or move it to a
- * make-up slot on another day and time — the one thing `schedule_overrides` could never express
- * before this task (see `ScheduleOverrideInput`'s own doc for the schema side of this).
- *
- * One occurrence in, one override out, regardless of which of `ClassCard`'s three renderings
- * was clicked to get here: a plain occurrence has no `override` yet, so Save issues a `POST`
- * (creating one, keyed to `occurrence.block_id`/`occurrence.date`); a ghost or a make-up already
- * has one (`occurrence.override.id`), so Save issues a `PATCH` to that same row — editing either
- * the ghost's card or the make-up's card changes the identical override, because they ARE the
- * same override, just rendered on the two dates it now spans.
- *
- * Portalled for the reason `DeadlinePopover`/`LinksPopover` both are: Timeline sits inside the
- * shell's `backdrop-filter` view-content wrapper, which traps a `position: fixed` child's
- * viewport-relative coordinates against THAT wrapper's box instead of the real viewport.
- * Dismissal (Escape, outside click, scroll/resize) follows their exact shape, with one
- * simplification their table-row setting doesn't allow: `trigger` is the clicked `<button>`
- * element itself rather than a ref object, because a `ClassCard` is never reparented while this
- * popover is open (see `WorkTimelineView`'s `openOverride` state for why).
- */
-function ClassOverridePopover({
-  occurrence, anchor, trigger, onClose, onSaved,
-}: {
-  occurrence: ClassOccurrence;
-  anchor:     AnchorRect;
-  trigger:    HTMLElement;
-  onClose:    () => void;
-  onSaved:    () => void;
-}) {
-  const ids = useId();
-  const modalityId = `${ids}-modality`;
-  const dateId     = `${ids}-date`;
-  const startId    = `${ids}-start`;
-  const endId      = `${ids}-end`;
-  const noteId     = `${ids}-note`;
-
-  const panelRef = useRef<HTMLDivElement>(null);
-  const existing = occurrence.override;
-
-  const [modality, setModality]   = useState<ModalityChoice>((existing?.modality ?? '') as ModalityChoice);
-  const [movedDate, setMovedDate] = useState(existing?.moved_date ?? '');
-  // Defaults to the occurrence's OWN time when there is no override yet — moving a class to a
-  // different day almost always keeps its usual time, so the common case needs only the date
-  // field touched rather than all three.
-  const [movedStart, setMovedStart] = useState(existing?.moved_start_time ?? occurrence.start_time);
-  const [movedEnd, setMovedEnd]     = useState(existing?.moved_end_time ?? occurrence.end_time);
-  const [note, setNote] = useState(existing?.note ?? '');
-
-  const [formError, setFormError]   = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [removing, setRemoving]     = useState(false);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-
-  const dismiss = () => { onClose(); trigger.focus(); };
-
-  useLayoutEffect(() => {
-    const panel = panelRef.current;
-    if (!panel) return;
-    const { width, height } = panel.getBoundingClientRect();
-    let left = anchor.left;
-    if (left + width > window.innerWidth - POP_MARGIN) left = window.innerWidth - POP_MARGIN - width;
-    if (left < POP_MARGIN) left = POP_MARGIN;
-    let top = anchor.bottom + POP_GAP;
-    if (top + height > window.innerHeight - POP_MARGIN) {
-      const above = anchor.top - height - POP_GAP;
-      top = above >= POP_MARGIN ? above : Math.max(POP_MARGIN, window.innerHeight - POP_MARGIN - height);
-    }
-    setPos({ left, top });
-    // Re-measures when `modality` changes: choosing "Rescheduled" adds three more fields, which
-    // changes the panel's height and can require flipping it above the trigger instead.
-  }, [anchor, modality]);
-
-  useEffect(() => { panelRef.current?.focus(); }, []);
-
-  useEffect(() => {
-    const handlePointerDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (panelRef.current?.contains(target)) return;
-      // A click on the trigger belongs to the trigger — without this the popover would close
-      // here and `ClassCard`'s own click handler would immediately reopen it.
-      if (trigger.contains(target)) return;
-      onClose();
-    };
-    const handleScroll = (e: Event) => {
-      const target = e.target;
-      if (target instanceof Node && panelRef.current?.contains(target)) return;
-      dismiss();
-    };
-    document.addEventListener('mousedown', handlePointerDown);
-    window.addEventListener('scroll', handleScroll, true);
-    window.addEventListener('resize', dismiss);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      window.removeEventListener('scroll', handleScroll, true);
-      window.removeEventListener('resize', dismiss);
-    };
-    // `trigger` and `onClose` are stable for this popover's whole lifetime — it is unmounted and
-    // a fresh instance created the moment either would change (a different card is clicked).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const submit = async () => {
-    if (submitting || removing) return;
-    const validated = validateOverrideModality({
-      modality: modality === '' ? null : modality,
-      moved_date: movedDate, moved_start_time: movedStart, moved_end_time: movedEnd,
-    });
-    if ('error' in validated) { setFormError(validated.error); return; }
-    setFormError(null);
-    setSubmitting(true);
-    try {
-      const body = { ...validated, note: note.trim() || null };
-      const res = existing
-        ? await fetch(`/api/workboard/schedule-overrides/${existing.id}`, {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-          }).catch(() => null)
-        : await fetch('/api/workboard/schedule-overrides', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...body, block_id: occurrence.block_id, override_date: occurrence.date }),
-          }).catch(() => null);
-
-      if (res === null) { reportTableCellError(OVERRIDE_NETWORK_ERROR); return; }
-      if (!res.ok) { setFormError(await messageFrom(res, OVERRIDE_SAVE_ERROR)); return; }
-      onSaved();
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const remove = async () => {
-    if (!existing || submitting || removing) return;
-    setRemoving(true);
-    try {
-      const res = await fetch(`/api/workboard/schedule-overrides/${existing.id}`, { method: 'DELETE' }).catch(() => null);
-      if (res === null) { reportTableCellError(OVERRIDE_NETWORK_ERROR); return; }
-      if (!res.ok) { setFormError(await messageFrom(res, OVERRIDE_REMOVE_ERROR)); return; }
-      onSaved();
-    } finally {
-      setRemoving(false);
-    }
-  };
-
-  const busy = submitting || removing;
-
-  return createPortal(
-    <div
-      ref={panelRef}
-      role="dialog"
-      aria-label={`Edit ${occurrence.course_code} on ${formatShortDate(occurrence.date)}`}
-      tabIndex={-1}
-      className="vb-tl-override-pop"
-      onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); dismiss(); } }}
-      style={{
-        position: 'fixed',
-        left: pos?.left ?? 0, top: pos?.top ?? 0,
-        opacity: pos === null ? 0 : 1, pointerEvents: pos === null ? 'none' : 'auto',
-        zIndex: 40, width: `${POP_WIDTH}px`, boxSizing: 'border-box',
-        background: '#fff', borderRadius: '12px', border: '1px solid rgba(200,210,230,0.6)',
-        boxShadow: '0 8px 24px rgba(31,38,68,0.18)', padding: '12px',
-        display: 'flex', flexDirection: 'column', gap: '10px', fontFamily: FONT,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-        <span style={{
-          fontFamily: FONT, fontSize: '0.7rem', fontWeight: 800, letterSpacing: '0.04em',
-          textTransform: 'uppercase', color: '#5c6b80',
-        }}>
-          {occurrence.course_code} · {formatShortDate(occurrence.date)}
-        </span>
-        <button
-          type="button" aria-label="Close" onClick={dismiss} className="vb-tl-override-icon-btn"
-          style={{
-            flex: '0 0 26px', width: '26px', height: '26px', display: 'inline-flex',
-            alignItems: 'center', justifyContent: 'center', borderRadius: '8px',
-            background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(200,210,230,0.6)',
-            color: '#5c6b80', cursor: 'pointer', padding: 0,
-          }}
-        >
-          <X size={13} aria-hidden />
-        </button>
-      </div>
-
-      <div>
-        <label htmlFor={modalityId} style={POP_LABEL_STYLE}>This occurrence</label>
-        <select
-          id={modalityId} className="vb-tl-override-input" value={modality}
-          onChange={e => setModality(e.target.value as ModalityChoice)}
-          style={POP_INPUT_STYLE}
-        >
-          <option value="">Face to face class</option>
-          <option value="online_sync">Online (synchronous)</option>
-          <option value="online_async">Online (asynchronous)</option>
-          <option value="cancelled">Cancelled</option>
-          <option value="rescheduled">Rescheduled (make-up class)</option>
-        </select>
-      </div>
-
-      {modality === 'rescheduled' && (
-        <>
-          <div>
-            <label htmlFor={dateId} style={POP_LABEL_STYLE}>Moved to</label>
-            <input
-              id={dateId} type="date" className="vb-tl-override-input"
-              value={movedDate} onChange={e => setMovedDate(e.target.value)} style={POP_INPUT_STYLE}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <div style={{ flex: 1 }}>
-              <label htmlFor={startId} style={POP_LABEL_STYLE}>Start</label>
-              <input
-                id={startId} type="time" className="vb-tl-override-input"
-                value={movedStart} onChange={e => setMovedStart(e.target.value)} style={POP_INPUT_STYLE}
-              />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label htmlFor={endId} style={POP_LABEL_STYLE}>End</label>
-              <input
-                id={endId} type="time" className="vb-tl-override-input"
-                value={movedEnd} onChange={e => setMovedEnd(e.target.value)} style={POP_INPUT_STYLE}
-              />
-            </div>
-          </div>
-        </>
-      )}
-
-      <div>
-        <label htmlFor={noteId} style={POP_LABEL_STYLE}>Note (optional)</label>
-        <textarea
-          id={noteId} className="vb-tl-override-input" value={note} onChange={e => setNote(e.target.value)}
-          rows={2} style={{ ...POP_INPUT_STYLE, minHeight: '48px', resize: 'vertical' }}
-        />
-      </div>
-
-      {formError && (
-        // `role="alert"` so a screen-reader user hears why Save did nothing, the same as every
-        // other write-failure surface in this module.
-        <p role="alert" style={{ margin: 0, fontFamily: FONT, fontSize: '0.72rem', fontWeight: 600, color: '#922e48' }}>
-          {formError}
-        </p>
-      )}
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
-        {existing ? (
-          <button
-            type="button" onClick={() => void remove()} disabled={busy} className="vb-tl-override-btn"
-            style={{
-              minHeight: '30px', padding: '6px 10px', borderRadius: '8px',
-              background: 'rgba(224,96,124,0.12)', border: '1px solid rgba(224,96,124,0.4)',
-              fontFamily: FONT, fontSize: '0.74rem', fontWeight: 700, color: '#922e48',
-              cursor: busy ? 'progress' : 'pointer', opacity: busy ? 0.6 : 1,
-            }}
-          >
-            {removing ? 'Removing…' : 'Remove'}
-          </button>
-        ) : <span />}
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <button
-            type="button" onClick={dismiss} disabled={busy} className="vb-tl-override-btn"
-            style={{
-              minHeight: '30px', padding: '6px 12px', borderRadius: '8px',
-              background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(200,210,230,0.6)',
-              fontFamily: FONT, fontSize: '0.76rem', fontWeight: 600, color: '#5c6b80', cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button" onClick={() => void submit()} disabled={busy} className="vb-tl-override-btn"
-            style={{
-              minHeight: '30px', padding: '6px 14px', borderRadius: '8px',
-              background: '#2a7fa8', border: '1px solid #2a7fa8',
-              fontFamily: FONT, fontSize: '0.76rem', fontWeight: 700, color: '#fff',
-              cursor: busy ? 'progress' : 'pointer', opacity: busy ? 0.7 : 1,
-            }}
-          >
-            {submitting ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      </div>
-
       <style jsx>{`
-        .vb-tl-override-input:focus-visible,
-        .vb-tl-override-icon-btn:focus-visible,
-        .vb-tl-override-btn:focus-visible {
-          outline: 2px solid #2a7fa8;
+        .vb-tl-class-card:focus-visible {
+          outline: 2px solid var(--wb-blue-strong);
           outline-offset: 2px;
         }
-        .vb-tl-override-input:hover:not(:disabled),
-        .vb-tl-override-icon-btn:hover:not(:disabled) {
-          border-color: rgba(140,160,190,0.75);
-        }
-        .vb-tl-override-btn:hover:not(:disabled) {
-          filter: brightness(0.97);
+        @media (hover: hover) and (pointer: fine) {
+          .vb-tl-class-card:hover { filter: brightness(0.97); }
         }
       `}</style>
-    </div>,
-    document.body,
+    </button>
   );
 }

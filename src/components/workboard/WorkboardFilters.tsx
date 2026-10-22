@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { SlidersHorizontal, Check } from 'lucide-react';
 // Type-only import from `workItems.ts` — that module imports `pool` (mysql2) at module scope,
 // so a *value* import here would drag the driver into this client bundle and 500 the page.
@@ -10,8 +10,8 @@ import type { ProjectSummary, WorkItem, WorkPriority } from '@/lib/workboard/wor
 // `workContexts.ts` is pool-free by design (see its module header), so the stage vocabularies,
 // their labels and the context labels are all safe to import into a client component.
 import {
-  CONTEXT_LABELS, STAGES_BY_CONTEXT, STAGE_LABELS,
-  type WorkContext, type WorkStatus,
+  CONTEXT_LABELS, STAGES_BY_CONTEXT, STAGE_LABELS, LIFE_AREAS, LIFE_AREA_LABELS,
+  type WorkContext, type WorkStatus, type LifeArea,
 } from '@/lib/workboard/workContexts';
 // The single source of truth for "overdue" on every Workboard surface. Hand-rolling a
 // `due < today` comparison here would give the popover its own private definition of lateness,
@@ -20,8 +20,10 @@ import { dueStateOf } from '@/lib/workboard/dueSemantics';
 // Pool-free (see the module header in `dates.ts`). The only approved way to read an item's
 // calendar date — `due_at` is a DATETIME for owned rows and a DATE for academic ones.
 import { dueDateOf } from '@/lib/workboard/dates';
+import WbPopover from './ui/WbPopover';
+import WbOverlay, { usePresence } from './ui/WbOverlay';
 
-const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
+const FONT = 'var(--wb-font-ui)';
 
 /* ─── State ────────────────────────────────────────────────────────────────────────────── */
 
@@ -43,6 +45,9 @@ export interface FilterState {
   priority:     WorkPriority | '';
   /** '' = All projects. */
   projectId:    number | '';
+  /** '' = All areas. Life-only — see `matchesFilters`' own comment for why this and `projectId`
+   *  are mutually exclusive rather than both always present. */
+  lifeArea:     LifeArea | '';
   /** "YYYY-MM-DD", or null for an open-ended bound. */
   deadlineFrom: string | null;
   deadlineTo:   string | null;
@@ -50,7 +55,7 @@ export interface FilterState {
 }
 
 export const EMPTY_FILTERS: FilterState = {
-  status: '', priority: '', projectId: '', deadlineFrom: null, deadlineTo: null, overdueOnly: false,
+  status: '', priority: '', projectId: '', lifeArea: '', deadlineFrom: null, deadlineTo: null, overdueOnly: false,
 };
 
 /**
@@ -62,6 +67,7 @@ export function countActiveFilters(filters: FilterState): number {
   if (filters.status !== '') n += 1;
   if (filters.priority !== '') n += 1;
   if (filters.projectId !== '') n += 1;
+  if (filters.lifeArea !== '') n += 1;
   if (filters.deadlineFrom !== null || filters.deadlineTo !== null) n += 1;
   if (filters.overdueOnly) n += 1;
   return n;
@@ -84,6 +90,14 @@ export function countActiveFilters(filters: FilterState): number {
  *    to that question — including it would put items with no date inside a date window. The
  *    range is inclusive on both ends (`>= from`, `<= to`), matching how a user reads two date
  *    fields labelled From and To.
+ * 3. **`lifeArea` and `projectId` are never both meaningful at once.** Life is the one context
+ *    with no project hierarchy (`PROJECT_CONTEXTS` excludes it), so a Life item's `project_id`
+ *    is always null and a Life item's `life_area` is the only one of the two that can ever
+ *    narrow anything — §13's review named this directly: showing an eternally-empty "Project"
+ *    section under Life read as the app not understanding its own domain. The two checks below
+ *    are independent rather than a single "matches the active scope's own grouping field"
+ *    branch because nothing stops both from being set in stale state (a context switch that
+ *    hasn't cleared one yet); each simply matches only the items it can ever be true for.
  */
 export function matchesFilters(
   item: WorkItem,
@@ -99,6 +113,8 @@ export function matchesFilters(
   if (filters.priority !== '' && item.priority !== filters.priority) return false;
 
   if (filters.projectId !== '' && item.project_id !== filters.projectId) return false;
+
+  if (filters.lifeArea !== '' && item.life_area !== filters.lifeArea) return false;
 
   if (filters.deadlineFrom !== null || filters.deadlineTo !== null) {
     const due = dueDateOf(item);
@@ -119,10 +135,9 @@ export function matchesFilters(
 
 /** My Work's status vocabulary — the normalised three, the same set the Board's My Work columns
  *  and the Table's Status cell under All use. Labels match `WorkItemDialog.tsx`'s private
- *  `STATUS_LABEL` verbatim; duplicated rather than exported from there for the same reason the
- *  `GLASS` recipe is duplicated across three files in this module (see `WorkboardShell.tsx`'s
- *  note): small presentational constants stay local so no file acquires an import path it does
- *  not otherwise need. */
+ *  `STATUS_LABEL` verbatim; duplicated rather than exported from there because small
+ *  presentational constants stay local, so no file acquires an import path it does not
+ *  otherwise need. */
 const STATUS_OPTIONS: WorkStatus[] = ['todo', 'in_progress', 'done'];
 const STATUS_LABEL: Record<WorkStatus, string> = {
   todo:        'To Do',
@@ -140,19 +155,13 @@ const PRIORITY_LABEL: Record<WorkPriority, string> = {
 /**
  * Direction-addendum §16a's four context hues and their darkened text pairs, for §16b's **form
  * 3** — the compact label — which §16c scopes to the Filters popover's context rows and nowhere
- * else in the app.
- *
- * Values duplicated locally rather than imported from `WorkBoardView`'s `CATEGORY_META` or
- * `WorkTimelineView`'s `CATEGORY_HUE`: this module's convention (documented on `GLASS` in
- * `WorkboardShell.tsx` and repeated in `WorkboardWeekView.tsx`/`WorkboardRail.tsx`) is that a
- * small presentational constant is copied into each file that needs it, so no file acquires a
- * runtime import edge for four hex strings. §16a is the authority both copies answer to.
+ * else in the app. Read from the `--wb-ctx-*` tokens.
  */
 const CONTEXT_ACCENT: Record<WorkContext, { raw: string; darkened: string }> = {
-  academic:     { raw: '#4dabf5', darkened: '#185a7d' },
-  project:      { raw: '#8b7fd6', darkened: '#4f3fa0' },
-  organization: { raw: '#f0a35c', darkened: '#8a5010' },
-  life:         { raw: '#f2a7c0', darkened: '#8a4468' },
+  academic:     { raw: 'var(--wb-ctx-academic)',     darkened: 'var(--wb-ctx-academic-text)' },
+  project:      { raw: 'var(--wb-ctx-project)',      darkened: 'var(--wb-ctx-project-text)' },
+  organization: { raw: 'var(--wb-ctx-organization)', darkened: 'var(--wb-ctx-organization-text)' },
+  life:         { raw: 'var(--wb-ctx-life)',         darkened: 'var(--wb-ctx-life-text)' },
 };
 
 /** The order context sections appear in under My Work — the same order the shell's context tabs
@@ -162,21 +171,21 @@ const CONTEXT_ORDER: WorkContext[] = ['academic', 'project', 'organization', 'li
 /** `DeadlineCell.tsx`'s control language, unchanged: the module's popovers already share one
  *  input/label/button vocabulary and a filters panel is not the place to invent a second. */
 const CONTROL_STYLE: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box', minHeight: '32px', borderRadius: '8px',
-  padding: '4px 8px', background: 'rgba(255,255,255,0.6)',
+  width: '100%', boxSizing: 'border-box', minHeight: '32px', borderRadius: 'var(--wb-r-md)',
+  padding: '4px 8px', background: 'var(--wb-hover)',
   // Longhands rather than the `border` shorthand: P2-1's dead-hover bug. A shorthand set here
   // would reset `border-color` back to this resting value on every render, beating the
   // `.vb-filters-control:hover` class rule below regardless of the class's own specificity —
   // inline always wins a shorthand-vs-longhand collision on the same box. Splitting frees the
   // class rule to override just `border-color` on hover while width/style stay put.
-  borderWidth: '1px', borderStyle: 'solid', borderColor: 'rgba(200,210,230,0.6)',
-  fontFamily: FONT, fontSize: '0.82rem',
-  fontWeight: 500, color: '#2d3748',
+  borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--wb-border)',
+  fontFamily: FONT, fontSize: 'var(--wb-fs-13)',
+  fontWeight: 500, color: 'var(--wb-text)',
 };
 
 const SECTION_LABEL: React.CSSProperties = {
-  display: 'block', fontFamily: FONT, fontSize: '0.7rem', fontWeight: 700,
-  color: '#5c6b80', marginBottom: '4px',
+  display: 'block', fontFamily: FONT, fontSize: 'var(--wb-fs-12)', fontWeight: 700,
+  color: 'var(--wb-text-muted)', marginBottom: '4px',
 };
 
 const VISUALLY_HIDDEN: React.CSSProperties = {
@@ -184,51 +193,18 @@ const VISUALLY_HIDDEN: React.CSSProperties = {
   overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
 };
 
-const PANEL_WIDTH = 292;
-/** Gap between the trigger and the panel, and the panel and the viewport edge — `DeadlineCell`'s
- *  two constants, same values. */
-const GAP = 6;
-const MARGIN = 8;
-
 /* ─── Phone breakpoint ─────────────────────────────────────────────────────────────────────
- * Addendum §21 gives this popover two treatments, not three: anchored at `≥1024px`, "unchanged"
- * at `768–1023px`, and a bottom sheet below `768px`. One boundary, so one boolean.
- *
- * **This has to be decided in JavaScript, unlike the context row and the detail drawer**, which
- * §21 places at the same breakpoint and which this task moves into `@media` rules. Those two are
- * laid out by normal flow, so a class rule can restyle them. This panel's position is pixel math:
- * a layout effect measures the panel and the trigger and writes `left`/`top` as inline values. No
- * media query can turn "anchored 6px under a button at x=871" into "pinned to the viewport
- * bottom", because there is no CSS property holding the anchoring — the anchoring *is* the
- * computed number. So the branch is on the render, and the measurement is skipped outright when
- * there is nothing to anchor to.
- *
- * The query is `(max-width: 767px)` rather than the negation of a `(min-width: 768px)` query so
- * that it is the exact complement of the `@media (max-width: 767px)` rules this task adds to
- * `WorkboardShell` and `WorkItemDetail`: at a fractional viewport width between the two values
- * (a zoomed desktop browser can produce one), negating a min-width query would put this panel in
- * its phone form while the context row beside it was still in its tablet form.
- *
- * Shape otherwise copied from `WorkTableView`'s `useWidthTier`: state seeded with the desktop
- * value so the server render and the first client paint agree — the effect only ever corrects it
- * after mount — `update()` called once immediately, and the listener removed on unmount. Copied
- * rather than imported for this module's usual reason (see `CONTEXT_ACCENT` above): a small
- * private helper is duplicated into each file that needs it instead of creating an import edge
- * between sibling view components. `useWidthTier` is not exported in any case.
+ * Below 768px the panel is a bottom sheet (`WbOverlay variant="drawer"`), at or above it an
+ * anchored `WbPopover`. Decided in JavaScript because the two are different components, not
+ * two styles of one box. `(max-width: 767px)` so it is the exact complement of the CSS
+ * `@media (max-width: 767px)` rules elsewhere in the module, including at fractional widths.
+ * Seeded false (the trigger server-renders); the effect corrects it after mount, long before
+ * any click can open the panel.
  */
 const PHONE_MAX_WIDTH = 767;
 
 function useIsPhone(): boolean {
-  // Lazy-seeded from the real viewport at construction time, unlike `WorkTableView`'s
-  // `useWidthTier` (desktop-seeded, corrected only after mount) — that file's seeding exists
-  // because it renders on the server, where `window` doesn't exist, and a mismatched first
-  // client paint would fight React's hydration. This panel never server-renders (it mounts
-  // only when a click opens it), so there is no SSR value to agree with and no reason to accept
-  // a guaranteed-wrong first guess: seeding eagerly removes a real flash of the desktop-anchored
-  // card before the phone sheet swaps in, which a passive effect's one-frame lag cannot avoid.
-  const [isPhone, setIsPhone] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia(`(max-width: ${PHONE_MAX_WIDTH}px)`).matches,
-  );
+  const [isPhone, setIsPhone] = useState(false);
   useEffect(() => {
     const phone = window.matchMedia(`(max-width: ${PHONE_MAX_WIDTH}px)`);
     const update = () => setIsPhone(phone.matches);
@@ -238,17 +214,6 @@ function useIsPhone(): boolean {
   }, []);
   return isPhone;
 }
-
-/** Everything the panel looks like at *every* width, factored out so the two position shapes
- *  below differ only by the properties that actually differ. `position: fixed` is in here rather
- *  than in either branch because both shapes are fixed — one to a measured point, one to the
- *  viewport's bottom edge. */
-const PANEL_SURFACE: React.CSSProperties = {
-  position: 'fixed', zIndex: 40, boxSizing: 'border-box',
-  background: '#fff', boxShadow: '0 8px 24px rgba(31,38,68,0.18)', padding: '12px',
-  display: 'flex', flexDirection: 'column', gap: '12px',
-  textAlign: 'left', fontFamily: FONT,
-};
 
 /* ─── The project listbox ──────────────────────────────────────────────────────────────── */
 
@@ -261,7 +226,7 @@ interface ProjectGroup {
 
 /**
  * §16b form 3, rendered exactly as specified: a `6px` dot in the context's raw hue, then the
- * context's name at `0.68rem`/700/uppercase in its darkened text colour, `gap: 5px`, and **no
+ * context's name at 12px/700/uppercase in its darkened text colour, `gap: 5px`, and **no
  * background fill, no padding, no border**. `aria-hidden` because the section's accessible
  * grouping is carried by the `role="group"`'s `aria-label` — announcing the name twice would
  * make every option in the section read its context header first.
@@ -273,9 +238,9 @@ function ContextCompactLabel({ context }: { context: WorkContext }) {
       aria-hidden
       style={{
         display: 'flex', alignItems: 'center', gap: '5px',
-        fontFamily: FONT, fontSize: '0.68rem', fontWeight: 700,
+        fontFamily: FONT, fontSize: 'var(--wb-fs-12)', fontWeight: 700,
         // §16b form 3 is "the chip with its pill removed", and the shipped chip
-        // (`WorkItemRow.tsx`'s `CategoryChip`, `WorkBoardView.tsx:300-304`) declares **no**
+        // (`FocusRow.tsx`'s `contextChip` and the Board card's chip) declares **no**
         // tracking — so neither does this. `normal` rather than simply omitting the property:
         // §1's 0.04em uppercase tracking is on several nearby micro-labels in this module, and an
         // explicit value means a future container edit cannot inherit tracking onto a form that
@@ -319,7 +284,7 @@ interface ProjectOptionRowProps {
  * emitted `className: "vb-filters-option"` with no `jsx-<hash>` alongside it while every sibling
  * control got one — and the panel's `.vb-filters-option:hover` / `:focus-visible` rules compiled
  * to `.vb-filters-option.jsx-<hash>{…}`, a selector that could never match. The rows silently lost
- * this module's `2px #2a7fa8` focus ring and their hover affordance.
+ * this module's 2px blue-strong focus ring and their hover affordance.
  *
  * This is the same trap `WorkItemDetail.tsx`'s `WorkTitleButton` was extracted to escape, fixed
  * the same way: the button now lives in a component that owns its own `<style jsx>` block, so the
@@ -343,7 +308,7 @@ function ProjectOptionRow({
         style={{
           display: 'flex', alignItems: 'center', gap: '6px', width: '100%',
           boxSizing: 'border-box', minHeight: '28px', padding: '4px 8px',
-          borderRadius: '8px', border: 'none', textAlign: 'left',
+          borderRadius: 'var(--wb-r-md)', border: 'none', textAlign: 'left',
           // Selected keeps its persistent highlight inline (a real, deliberate state that must
           // survive a hover). Unselected omits the property entirely rather than spelling out
           // `'transparent'` inline — P2-1's dead-hover bug: an inline `background` on this same
@@ -358,10 +323,10 @@ function ProjectOptionRow({
           // because of any layer priority. On a future Tailwind 4 upgrade, `@layer` becomes a
           // real native CSS cascade layer that always loses to any unlayered rule regardless of
           // specificity — the conclusion here would still hold, but for that reason instead.
-          background: selected ? 'rgba(37,111,146,0.12)' : undefined,
-          fontFamily: FONT, fontSize: '0.8rem',
+          background: selected ? 'var(--wb-selected)' : undefined,
+          fontFamily: FONT, fontSize: 'var(--wb-fs-13)',
           fontWeight: selected ? 700 : 500,
-          color: selected ? '#1f5c7a' : '#2d3748',
+          color: selected ? 'var(--wb-blue-ink)' : 'var(--wb-text)',
           cursor: 'pointer',
         }}
       >
@@ -380,94 +345,49 @@ function ProjectOptionRow({
         /* §9's ring, on the darker blue — :focus-visible so a mouse click does not leave a ring
            nobody asked for, while keyboard arrival through the listbox always does. */
         .vb-filters-option:focus-visible {
-          outline: 2px solid #2a7fa8;
+          outline: 2px solid var(--wb-blue-strong);
           outline-offset: 2px;
         }
-        .vb-filters-option:hover {
-          background: rgba(37,111,146,0.08);
+        @media (hover: hover) and (pointer: fine) {
+          .vb-filters-option:hover {
+            background: var(--wb-surface-sunken);
+          }
         }
       `}</style>
     </>
   );
 }
 
-/* ─── The popover panel ────────────────────────────────────────────────────────────────── */
-
-interface AnchorRect { left: number; right: number; top: number; bottom: number }
+/* ─── The panel ────────────────────────────────────────────────────────────────────────── */
 
 interface PanelProps {
   filters:  FilterState;
   onChange: (next: FilterState) => void;
   context:  WorkContext | 'all';
   projects: ProjectSummary[];
-  anchor:   AnchorRect;
+  /** The phone bottom sheet gets roomier padding than the 320px popover. */
+  isPhone:  boolean;
   onClose:  () => void;
 }
 
 /**
- * Solid white rather than §11's glass recipe, `position: fixed` rather than absolute, measured
- * once in a layout effect and flipped above the trigger when the viewport has no room below —
- * `DeadlineCell`'s `DeadlinePopover` shape, deliberately unchanged, so the module has one
- * floating-panel mechanism rather than two.
- *
- * The one deviation: the panel is aligned to the trigger's **right** edge rather than its left,
- * because this trigger sits at the right end of the toolbar where a left-aligned 292px panel
- * would immediately hit the clamp and detach from its own trigger. The clamp is still applied
- * afterwards, so a narrow viewport behaves exactly as it does for the deadline popover.
- *
- * All of the above describes the panel at `≥768px`. Below that, addendum §21 makes it a bottom
- * sheet: the anchoring is skipped rather than clamped, and the panel takes the detail drawer's
- * phone metrics. See `useIsPhone` for why that branch is in JavaScript while the drawer's and the
- * context row's are `@media` rules, and `panelStyle` for the two shapes. Open/close mechanics —
- * Escape, outside click, scroll and resize dismissal, focus in and focus back — are untouched by
- * the branch and identical in both, with one addition: at `isPhone` this becomes a true modal
- * (backdrop, `aria-modal`, a Tab trap — see `handleBackdropMouseDown` and `handlePanelKeyDown`
- * below), because an 88vh sheet visually covers the page the way a 292px anchored card never did.
- * The non-phone popover keeps none of that — Tab can still leave it, exactly as before.
+ * The panel's contents only. Where it sits is the trigger's choice: `WbPopover` (bottom-end,
+ * 320px) at or above 768px, `WbOverlay variant="drawer"` (a bottom sheet) below. Both primitives
+ * own Escape, outside click, scroll dismissal and focus; the status select carries
+ * `data-autofocus` so the popover moves focus to it once positioned (the overlay focuses the
+ * first focusable, which is the same select).
  */
-function FiltersPanel({ filters, onChange, context, projects, anchor, onClose }: PanelProps) {
+function FiltersPanel({ filters, onChange, context, projects, isPhone, onClose }: PanelProps) {
   const ids       = useId();
   const statusId  = `${ids}-status`;
   const priorityId = `${ids}-priority`;
+  const areaId    = `${ids}-area`;
   const fromId    = `${ids}-from`;
   const toId      = `${ids}-to`;
   const overdueId = `${ids}-overdue`;
   const projectLabelId = `${ids}-project-label`;
 
-  const panelRef  = useRef<HTMLDivElement>(null);
-  const firstRef  = useRef<HTMLSelectElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
-
-  const isPhone = useIsPhone();
-
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-
-  useLayoutEffect(() => {
-    // Phone renders a bottom sheet, whose position is four fixed edge values and no arithmetic.
-    // Returning before the measurement is what keeps `pos` out of that branch entirely: the phone
-    // style below reads none of it, and this effect writes none of it. Neither half can end up
-    // half-applied, which is the failure mode a shared `pos` between the two shapes would invite.
-    if (isPhone) return;
-    const el = panelRef.current;
-    if (!el) return;
-    const { width, height } = el.getBoundingClientRect();
-
-    let left = anchor.right - width;
-    if (left + width > window.innerWidth - MARGIN) left = window.innerWidth - MARGIN - width;
-    if (left < MARGIN) left = MARGIN;
-
-    let top = anchor.bottom + GAP;
-    if (top + height > window.innerHeight - MARGIN) {
-      const above = anchor.top - height - GAP;
-      top = above >= MARGIN ? above : Math.max(MARGIN, window.innerHeight - MARGIN - height);
-    }
-    setPos({ left, top });
-  }, [anchor, isPhone]);
-
-  // Opening moves focus into the panel; the trigger's own Escape/Done handling moves it back.
-  // `opacity: 0` rather than `visibility: hidden` for the pre-measurement frame precisely so
-  // this can run — a `visibility: hidden` element is not focusable.
-  useEffect(() => { firstRef.current?.focus(); }, []);
 
   const set = <K extends keyof FilterState>(key: K, value: FilterState[K]) =>
     onChange({ ...filters, [key]: value });
@@ -529,6 +449,14 @@ function FiltersPanel({ filters, onChange, context, projects, anchor, onClose }:
 
   const activeCount = countActiveFilters(filters);
 
+  /** §13: "Project" is not what every context calls this concept. Academic's is scoped under a
+   *  course, Organization's under an org — naming the section after the domain word each context
+   *  actually uses is the whole point of a context-aware filter set, not just which sections
+   *  appear. My Work spans all four, so it keeps the neutral umbrella term. */
+  const projectSectionLabel = context === 'academic' ? 'Academic Project'
+    : context === 'organization' ? 'Initiative/Project'
+    : 'Project';
+
   /** Builds one option row. `flatIndex` is its position in `optionValues`, which is what the
    *  roving tabindex and the arrow keys both index by. The row itself is a real component
    *  (`ProjectOptionRow`) rather than JSX returned from here — see that component's comment; JSX
@@ -549,341 +477,225 @@ function FiltersPanel({ filters, onChange, context, projects, anchor, onClose }:
   // across group boundaries, and "All projects" already occupies 0.
   let flat = 0;
 
-  /**
-   * Addendum §21's two shapes for this surface, and the `isPhone` ternary is the only thing that
-   * chooses between them — there is no width at which a property from one leaks into the other.
-   *
-   * **Non-phone** is byte-for-byte what shipped: the measured `left`/`top` with the pre-measured
-   * fallback, the `opacity`/`pointerEvents` guard that hides the panel for the one frame before
-   * the layout effect runs, and the 292px rounded card.
-   *
-   * **Phone** is the drawer's bottom sheet, sharing its phone metrics (`width: 100%`,
-   * `height: min(88vh, 100%)`, `border-radius: 18px 18px 0 0`). Three decisions inside that are
-   * this control's rather than §21's, since §21 says only "sharing the drawer's phone metrics":
-   *
-   * 1. **Border on the top edge only.** Bottom-anchored and full-width leaves three of the four
-   *    edges flush with the viewport, where a border draws a line against nothing; the top edge
-   *    is the one newly exposed against the page behind it and is the one that needs the rule.
-   *    Exactly the swap the drawer makes (`border-left: none` + `border-top`), applied to this
-   *    sheet's own geometry.
-   * 2. **No `opacity`/`pointerEvents` guard.** That guard exists to hide the panel until `pos` is
-   *    measured, and this branch has no measurement to wait for — carrying it over would read
-   *    `pos`, which stays `null` here forever, and leave the sheet permanently invisible and
-   *    click-through. This is the specific way the two branches could have been wired into each
-   *    other, and it is why the effect's early return and this omission are a pair.
-   * 3. **`overflow-y: auto`.** The panel is content-height everywhere else, but this branch gives
-   *    it a fixed `88vh`; on a short viewport the footer buttons would otherwise fall outside a
-   *    box with no way to scroll to them. The drawer carries the same property for the same
-   *    reason. The panel is inside `containerRef`, so the trigger's capture-phase scroll-dismiss
-   *    already ignores scrolls that originate in here, exactly as it does for the project listbox.
-   *
-   * Everything else — ground, shadow, padding, gap, type — is `PANEL_SURFACE`, unchanged. This is
-   * a repositioning, not a restyle: the shadow stays the downward `0 8px 24px` it has always been
-   * rather than being flipped upward for the sheet, because the new top border is what separates
-   * the sheet from the page and §21 asks for no shadow change.
-   */
-  const panelStyle: React.CSSProperties = isPhone
-    ? {
-        ...PANEL_SURFACE,
-        // Above `PANEL_SURFACE`'s own `zIndex: 40` — P1-4. That value was set when this panel's
-        // only sibling was ordinary page content it merely floated over; at `isPhone` it now sits
-        // above a dedicated scrim too (`vb-filters-backdrop`, `999`, rendered below), and needs to
-        // clear it with room to spare. `1000` matches `WorkItemDetail.tsx`'s own drawer/backdrop
-        // pair exactly, so nothing on the page can ever land between a phone-mode scrim and its
-        // sheet, the same guarantee that pairing already gives the drawer.
-        zIndex: 1000,
-        left: 0, right: 0, bottom: 0,
-        width: '100%', height: 'min(88vh, 100%)', overflowY: 'auto',
-        borderRadius: '18px 18px 0 0',
-        borderTop: '1px solid rgba(200,210,230,0.6)',
-      }
-    : {
-        ...PANEL_SURFACE,
-        left: pos?.left ?? Math.max(MARGIN, anchor.right - PANEL_WIDTH),
-        top:  pos?.top  ?? anchor.bottom + GAP,
-        // Hidden until measured, but still focusable — see the focus effect above.
-        opacity: pos === null ? 0 : 1,
-        pointerEvents: pos === null ? 'none' : 'auto',
-        width: `${PANEL_WIDTH}px`,
-        borderRadius: '12px',
-        border: '1px solid rgba(200,210,230,0.6)',
-      };
-
-  /**
-   * P1-4, phone-only. Clicking the scrim closes the sheet, matching `WorkItemDetail.tsx`'s
-   * `handleBackdropMouseDown` (`e.target === e.currentTarget`, guarding against a click that
-   * bubbled up from a descendant rather than landing on the scrim itself — moot today since this
-   * backdrop has no children, but kept for parity with the precedent and as cheap insurance
-   * against a future child).
-   *
-   * This does **not** go through the container's existing `document`-level `mousedown` outside-
-   * click listener (`WorkboardFilters`'s own effect, below) — it calls this panel's `onClose`
-   * prop directly instead. The two do not compete: that listener only closes on a `mousedown`
-   * whose target is *outside* `containerRef`'s DOM subtree, and this backdrop is rendered as a
-   * React child inside `FiltersPanel`, which is itself a child of `containerRef` — `position:
-   * fixed` changes where it paints, not where it sits in the DOM. Since the backdrop is `inset:
-   * 0` and paints behind the full-width sheet, every point a phone user can touch while this is
-   * open lands on one of the two (backdrop or panel), both inside `containerRef` — so the
-   * `document` listener finds nothing to call "outside" in this mode and simply goes dormant for
-   * it, harmlessly, rather than firing a second, competing close.
-   */
-  function handleBackdropMouseDown(e: React.MouseEvent<HTMLDivElement>) {
-    if (e.target === e.currentTarget) onClose();
-  }
-
-  /**
-   * `WorkItemDetail.tsx`'s `handleKeyDown` (the Tab-trap half, after its own Escape branch),
-   * duplicated rather than imported — this module's established convention for a small
-   * self-contained piece of logic shared by sibling files (see `CONTEXT_ACCENT`'s comment above)
-   * — and adapted to this panel's own `panelRef`/`onClose`. The Escape branch is untouched from
-   * before this task; the Tab branch is new and is gated on `isPhone` so the desktop/tablet
-   * popover keeps its current behaviour exactly — Tab can still walk out of it, because it is not
-   * a modal and never covers the page the way the phone sheet does.
-   */
-  function handlePanelKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    // `DeadlineCell`'s ruling 3: Escape closes and hands focus back to the trigger (the
-    // trigger's `onClose` does the refocus). `stopPropagation` so nothing outside the panel
-    // also acts on the key.
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); return; }
-
-    if (!isPhone || e.key !== 'Tab') return;
-    const root = panelRef.current;
-    if (!root) return;
-    const focusables = Array.from(
-      root.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'),
-    ).filter(el => el.offsetParent !== null);
-    if (!focusables.length) return;
-    const first = focusables[0];
-    const last  = focusables[focusables.length - 1];
-    // `document.activeElement === root` alongside `=== first`: see `WorkItemDetail.tsx`'s own
-    // comment on this exact line. `querySelectorAll` above only matches root's *descendants*, so
-    // root can never appear in `focusables` and is therefore never `first` — without this second
-    // disjunct, a Shift+Tab pressed while focus sat on root would fall through to native browser
-    // handling instead of this wrap check. This panel never explicitly focuses its own root today
-    // (nothing here plays `WorkItemDetail`'s `refocusIfLost` role), so the branch is not known to
-    // be reachable yet — kept anyway, as the same defensive case the precedent documents, so a
-    // future change that does focus the root does not silently reopen this gap.
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === root)) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }
-
   return (
-    <>
-      {/* P1-4: a real scrim, phone-only, matching `WorkItemDetail.tsx`'s `vb-detail-backdrop`
-          values exactly. Not nested as this sheet's flex-centering parent the way the drawer's is
-          — this panel is independently `position: fixed`, so the backdrop is a plain full-viewport
-          sibling instead; see `panelStyle`'s comment above for why it needs its own `999`/`1000`
-          pair rather than reusing `PANEL_SURFACE`'s `zIndex: 40`. */}
-      {isPhone && (
-        <div
-          className="vb-filters-backdrop"
-          onMouseDown={handleBackdropMouseDown}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,38,0.45)', zIndex: 999 }}
-        />
+    <div
+      className="vb-filters-panel"
+      style={{
+        display: 'flex', flexDirection: 'column', gap: '12px', textAlign: 'left', fontFamily: FONT,
+        padding: isPhone ? '16px 16px 20px' : '12px',
+        // Popover only (the sheet scrolls itself): keeps Clear/Done reachable on short screens.
+        ...(isPhone ? null : { maxHeight: 'calc(100vh - 16px)', overflowY: 'auto', boxSizing: 'border-box' }),
+      }}
+    >
+      {/* Status — the context's own stage vocabulary, or My Work's normalised three. */}
+      <div>
+        <label htmlFor={statusId} style={SECTION_LABEL}>Status</label>
+        <select
+          data-autofocus
+          id={statusId}
+          className="vb-filters-control"
+          value={filters.status}
+          onChange={e => set('status', e.target.value)}
+          style={CONTROL_STYLE}
+        >
+          <option value="">All statuses</option>
+          {statusOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </div>
+
+      {/* Priority — context-independent, so it survives a context switch. */}
+      <div>
+        <label htmlFor={priorityId} style={SECTION_LABEL}>Priority</label>
+        <select
+          id={priorityId}
+          className="vb-filters-control"
+          value={filters.priority}
+          onChange={e => set('priority', e.target.value as WorkPriority | '')}
+          style={CONTROL_STYLE}
+        >
+          <option value="">All priorities</option>
+          {PRIORITY_OPTIONS.map(p => <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>)}
+        </select>
+      </div>
+
+      {/* Life has no project hierarchy at all (`PROJECT_CONTEXTS` excludes it) — this section
+          would always render "No projects in this context yet." forever, which is exactly the
+          dead-end §13 flagged. Area (below) is Life's own equivalent grouping, so it replaces
+          this section outright rather than sitting uselessly beside it. */}
+      {context !== 'life' && (
+      <div>
+        <span id={projectLabelId} style={SECTION_LABEL}>{projectSectionLabel}</span>
+        {!hasProjects ? (
+          // Naming the scope, because under a context tab "No projects yet" would contradict the
+          // project list the user can see on another tab. Hiding the listbox entirely also removes
+          // the lone "All projects" row, which is the correct loss: with nothing to narrow to,
+          // `projectId` is already '' (the shell clears it on every context change) and "Clear
+          // filters" remains the escape hatch for any state that outlives a payload refresh.
+          <p style={{ margin: 0, fontSize: 'var(--wb-fs-12)', fontWeight: 600, color: 'var(--wb-text-muted)' }}>
+            {context === 'all' ? 'No projects yet.' : 'No projects in this context yet.'}
+          </p>
+        ) : (
+          <div
+            role="listbox"
+            aria-labelledby={projectLabelId}
+            className="vb-filters-listbox"
+            style={{
+              maxHeight: '164px', overflowY: 'auto', padding: '4px',
+              borderRadius: 'var(--wb-r-md)', border: '1px solid var(--wb-border)',
+              background: 'var(--wb-hover)',
+            }}
+          >
+            {optionRow('', 'All projects', flat++)}
+            {groups.map(g => {
+              const rows = g.projects.map(p => optionRow(p.id, p.name, flat++));
+              if (g.context === null) return rows;
+              return (
+                <div key={g.context} role="group" aria-label={CONTEXT_LABELS[g.context]}>
+                  <ContextCompactLabel context={g.context} />
+                  {rows}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
       )}
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-label="Filter work items"
-        // `true` only at `isPhone`; `undefined` (i.e. the attribute is absent) otherwise, not
-        // `false` — an explicit `aria-modal="false"` would still be a new attribute the desktop/
-        // tablet popover never carried, and P1-4's own recommendation is that a non-modal popover
-        // should stay exactly as unmarked as it already is.
-        aria-modal={isPhone ? true : undefined}
-        className="vb-filters-panel"
-        onKeyDown={handlePanelKeyDown}
-        style={panelStyle}
-      >
-        {/* Status — the context's own stage vocabulary, or My Work's normalised three. */}
-        <div>
-          <label htmlFor={statusId} style={SECTION_LABEL}>Status</label>
-          <select
-            ref={firstRef}
-            id={statusId}
-            className="vb-filters-control"
-            value={filters.status}
-            onChange={e => set('status', e.target.value)}
-            style={CONTROL_STYLE}
-          >
-            <option value="">All statuses</option>
-            {statusOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
 
-        {/* Priority — context-independent, so it survives a context switch. */}
-        <div>
-          <label htmlFor={priorityId} style={SECTION_LABEL}>Priority</label>
-          <select
-            id={priorityId}
-            className="vb-filters-control"
-            value={filters.priority}
-            onChange={e => set('priority', e.target.value as WorkPriority | '')}
-            style={CONTROL_STYLE}
-          >
-            <option value="">All priorities</option>
-            {PRIORITY_OPTIONS.map(p => <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>)}
-          </select>
-        </div>
+      {/* Area — Life's own grouping, replacing Project rather than sitting beside its
+          permanently-empty section (see the comment above). A native `<select>` is enough
+          here: unlike Project, Area has no per-context grouping of its own to render. */}
+      {context === 'life' && (
+      <div>
+        <label htmlFor={areaId} style={SECTION_LABEL}>Area</label>
+        <select
+          id={areaId}
+          className="vb-filters-control"
+          value={filters.lifeArea}
+          onChange={e => set('lifeArea', e.target.value as LifeArea | '')}
+          style={CONTROL_STYLE}
+        >
+          <option value="">All areas</option>
+          {LIFE_AREAS.map(a => <option key={a} value={a}>{LIFE_AREA_LABELS[a]}</option>)}
+        </select>
+      </div>
+      )}
 
-        {/* Project — the one section that cannot be a native `<select>`: §16c puts the compact
-            label on these context rows, and a native `<optgroup>` cannot render a coloured dot. */}
-        <div>
-          <span id={projectLabelId} style={SECTION_LABEL}>Project</span>
-          {!hasProjects ? (
-            // Naming the scope, because under a context tab "No projects yet" would contradict the
-            // project list the user can see on another tab. Hiding the listbox entirely also removes
-            // the lone "All projects" row, which is the correct loss: with nothing to narrow to,
-            // `projectId` is already '' (the shell clears it on every context change) and "Clear
-            // filters" remains the escape hatch for any state that outlives a payload refresh.
-            <p style={{ margin: 0, fontSize: '0.76rem', fontWeight: 600, color: '#8a94a6' }}>
-              {context === 'all' ? 'No projects yet.' : 'No projects in this context yet.'}
-            </p>
-          ) : (
-            <div
-              role="listbox"
-              aria-labelledby={projectLabelId}
-              className="vb-filters-listbox"
-              style={{
-                maxHeight: '164px', overflowY: 'auto', padding: '4px',
-                borderRadius: '8px', border: '1px solid rgba(200,210,230,0.6)',
-                background: 'rgba(255,255,255,0.6)',
-              }}
-            >
-              {optionRow('', 'All projects', flat++)}
-              {groups.map(g => {
-                const rows = g.projects.map(p => optionRow(p.id, p.name, flat++));
-                if (g.context === null) return rows;
-                return (
-                  <div key={g.context} role="group" aria-label={CONTEXT_LABELS[g.context]}>
-                    <ContextCompactLabel context={g.context} />
-                    {rows}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Deadline range — inclusive on both ends; an undated item matches neither bound. */}
-        <div>
-          <span style={SECTION_LABEL}>Deadline</span>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <label htmlFor={fromId} style={{ ...SECTION_LABEL, fontWeight: 600, color: '#8a94a6', marginBottom: '3px' }}>
-                From
-              </label>
-              <input
-                id={fromId}
-                type="date"
-                className="vb-filters-control"
-                // The native empty value is `''`; the state's empty value is `null`, so the two are
-                // translated at this boundary rather than letting `''` leak into `FilterState` and
-                // give "no bound" two spellings.
-                value={filters.deadlineFrom ?? ''}
-                onChange={e => set('deadlineFrom', e.target.value === '' ? null : e.target.value)}
-                style={CONTROL_STYLE}
-              />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <label htmlFor={toId} style={{ ...SECTION_LABEL, fontWeight: 600, color: '#8a94a6', marginBottom: '3px' }}>
-                To
-              </label>
-              <input
-                id={toId}
-                type="date"
-                className="vb-filters-control"
-                value={filters.deadlineTo ?? ''}
-                onChange={e => set('deadlineTo', e.target.value === '' ? null : e.target.value)}
-                style={CONTROL_STYLE}
-              />
-            </div>
+      {/* Deadline range — inclusive on both ends; an undated item matches neither bound. */}
+      <div>
+        <span style={SECTION_LABEL}>Deadline</span>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <label htmlFor={fromId} style={{ ...SECTION_LABEL, fontWeight: 600, color: 'var(--wb-text-muted)', marginBottom: '3px' }}>
+              From
+            </label>
+            <input
+              id={fromId}
+              type="date"
+              className="vb-filters-control"
+              // The native empty value is `''`; the state's empty value is `null`, so the two are
+              // translated at this boundary rather than letting `''` leak into `FilterState` and
+              // give "no bound" two spellings.
+              value={filters.deadlineFrom ?? ''}
+              onChange={e => set('deadlineFrom', e.target.value === '' ? null : e.target.value)}
+              style={CONTROL_STYLE}
+            />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <label htmlFor={toId} style={{ ...SECTION_LABEL, fontWeight: 600, color: 'var(--wb-text-muted)', marginBottom: '3px' }}>
+              To
+            </label>
+            <input
+              id={toId}
+              type="date"
+              className="vb-filters-control"
+              value={filters.deadlineTo ?? ''}
+              onChange={e => set('deadlineTo', e.target.value === '' ? null : e.target.value)}
+              style={CONTROL_STYLE}
+            />
           </div>
         </div>
+      </div>
 
-        {/* Overdue only. */}
-        <label
-          htmlFor={overdueId}
+      {/* Overdue only. */}
+      <label
+        htmlFor={overdueId}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '8px',
+          fontFamily: FONT, fontSize: 'var(--wb-fs-13)', fontWeight: 600, color: 'var(--wb-text)',
+          cursor: 'pointer',
+        }}
+      >
+        <input
+          id={overdueId}
+          type="checkbox"
+          className="vb-filters-control"
+          checked={filters.overdueOnly}
+          onChange={e => set('overdueOnly', e.target.checked)}
+          style={{ width: '16px', height: '16px', margin: 0, accentColor: 'var(--wb-blue-ink)', cursor: 'pointer' }}
+        />
+        Overdue only
+      </label>
+
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px',
+        paddingTop: '10px', borderTop: '1px solid var(--wb-hairline)',
+      }}>
+        <button
+          type="button"
+          className="vb-filters-btn"
+          // Disabled rather than hidden: a control that appears and disappears as the last filter
+          // clears would move the Done button under the pointer mid-click.
+          disabled={activeCount === 0}
+          onClick={() => onChange(EMPTY_FILTERS)}
           style={{
-            display: 'flex', alignItems: 'center', gap: '8px',
-            fontFamily: FONT, fontSize: '0.8rem', fontWeight: 600, color: '#2d3748',
+            minHeight: '30px', padding: '6px 12px', borderRadius: 'var(--wb-r-md)',
+            background: 'var(--wb-hover)', border: '1px solid var(--wb-border)',
+            fontFamily: FONT, fontSize: 'var(--wb-fs-12)', fontWeight: 600, color: 'var(--wb-text-muted)',
+            cursor: activeCount === 0 ? 'default' : 'pointer',
+            opacity: activeCount === 0 ? 0.45 : 1,
+          }}
+        >
+          Clear filters
+        </button>
+        <button
+          type="button"
+          className="vb-filters-btn"
+          onClick={onClose}
+          style={{
+            minHeight: '30px', padding: '6px 14px', borderRadius: 'var(--wb-r-md)',
+            background: 'var(--wb-blue-strong)', border: '1px solid var(--wb-blue-strong)',
+            fontFamily: FONT, fontSize: 'var(--wb-fs-12)', fontWeight: 700, color: 'var(--wb-inverse-text)',
             cursor: 'pointer',
           }}
         >
-          <input
-            id={overdueId}
-            type="checkbox"
-            className="vb-filters-control"
-            checked={filters.overdueOnly}
-            onChange={e => set('overdueOnly', e.target.checked)}
-            style={{ width: '16px', height: '16px', margin: 0, accentColor: '#256f92', cursor: 'pointer' }}
-          />
-          Overdue only
-        </label>
+          Done
+        </button>
+      </div>
 
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px',
-          paddingTop: '10px', borderTop: '1px solid rgba(200,210,230,0.5)',
-        }}>
-          <button
-            type="button"
-            className="vb-filters-btn"
-            // Disabled rather than hidden: a control that appears and disappears as the last filter
-            // clears would move the Done button under the pointer mid-click.
-            disabled={activeCount === 0}
-            onClick={() => onChange(EMPTY_FILTERS)}
-            style={{
-              minHeight: '30px', padding: '6px 12px', borderRadius: '8px',
-              background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(200,210,230,0.6)',
-              fontFamily: FONT, fontSize: '0.76rem', fontWeight: 600, color: '#5c6b80',
-              cursor: activeCount === 0 ? 'default' : 'pointer',
-              opacity: activeCount === 0 ? 0.45 : 1,
-            }}
-          >
-            Clear filters
-          </button>
-          <button
-            type="button"
-            className="vb-filters-btn"
-            onClick={onClose}
-            style={{
-              minHeight: '30px', padding: '6px 14px', borderRadius: '8px',
-              background: '#2a7fa8', border: '1px solid #2a7fa8',
-              fontFamily: FONT, fontSize: '0.76rem', fontWeight: 700, color: '#fff',
-              cursor: 'pointer',
-            }}
-          >
-            Done
-          </button>
-        </div>
-
-        {/* These rules MUST live in the component that renders the elements they target — each
-            component gets its own styled-jsx scope hash, so the same rule written in the parent
-            would compile cleanly and match nothing. The trap several tasks in this plan have hit. */}
-        <style jsx>{`
-          /* The .vb-filters-option rules are deliberately NOT here: those buttons are rendered by
-             ProjectOptionRow, a different component with a different styled-jsx scope hash, so a
-             rule written here would compile to a selector matching none of them. They live in that
-             component instead. */
-          .vb-filters-control:focus-visible,
-          .vb-filters-btn:focus-visible,
-          .vb-filters-listbox:focus-visible {
-            outline: 2px solid #2a7fa8;
-            outline-offset: 2px;
-          }
+      {/* These rules MUST live in the component that renders the elements they target — each
+          component gets its own styled-jsx scope hash, so the same rule written in the parent
+          would compile cleanly and match nothing. The trap several tasks in this plan have hit. */}
+      <style jsx>{`
+        /* The .vb-filters-option rules are deliberately NOT here: those buttons are rendered by
+           ProjectOptionRow, a different component with a different styled-jsx scope hash, so a
+           rule written here would compile to a selector matching none of them. They live in that
+           component instead. */
+        .vb-filters-control:focus-visible,
+        .vb-filters-btn:focus-visible,
+        .vb-filters-listbox:focus-visible {
+          outline: 2px solid var(--wb-blue-strong);
+          outline-offset: 2px;
+        }
+        @media (hover: hover) and (pointer: fine) {
           .vb-filters-control:hover:not(:disabled) {
-            border-color: rgba(140,160,190,0.75);
+            border-color: var(--wb-text-faint);
           }
           .vb-filters-btn:hover:not(:disabled) {
             filter: brightness(0.97);
           }
-        `}</style>
-      </div>
-    </>
+        }
+      `}</style>
+    </div>
   );
 }
 
@@ -896,6 +708,8 @@ export interface WorkboardFiltersProps {
    *  whether the project list is grouped. */
   context:  WorkContext | 'all';
   projects: ProjectSummary[];
+  /** Reports whether the phone bottom sheet is mounted, so the shell can ignore Ctrl+K under it. */
+  onSheetChange?: (open: boolean) => void;
 }
 
 /**
@@ -903,107 +717,84 @@ export interface WorkboardFiltersProps {
  * badge is the promise the brief makes explicit: a filtered board is never *silently* filtered,
  * so the number is visible the moment the panel closes.
  */
-export default function WorkboardFilters({ filters, onChange, context, projects }: WorkboardFiltersProps) {
-  const [anchor, setAnchor] = useState<AnchorRect | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const triggerRef   = useRef<HTMLButtonElement>(null);
+export default function WorkboardFilters({ filters, onChange, context, projects, onSheetChange }: WorkboardFiltersProps) {
+  const [open, setOpen] = useState(false);
+  // Keyboard-opened UI does not animate (spec 4.3 rule 3); recorded per open.
+  const [instant, setInstant] = useState(false);
+  // State rather than a ref so `WbPopover` re-renders with the element it anchors to.
+  const [trigger, setTrigger] = useState<HTMLButtonElement | null>(null);
+  const isPhone = useIsPhone();
+  // Crossing 768px swaps primitives, so close rather than jump; skip the mount-time correction.
+  const seenPhone = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (seenPhone.current !== null && seenPhone.current !== isPhone) setOpen(false);
+    seenPhone.current = isPhone;
+  }, [isPhone]);
+  // The sheet stays mounted for its exit transition; the popover handles its own exit.
+  const sheet = usePresence(open && isPhone ? true : null);
+  const sheetMounted = sheet.value !== null;
+  useEffect(() => { onSheetChange?.(sheetMounted); }, [sheetMounted, onSheetChange]);
 
-  const open  = anchor !== null;
   const count = countActiveFilters(filters);
 
-  const close = () => setAnchor(null);
-  const closeAndRefocus = () => { setAnchor(null); triggerRef.current?.focus(); };
+  // Outside click / scroll-out (popover) and scrim click (sheet) are deliberate exits and do not
+  // refocus; Done does. The sheet's own unmount restores focus to the trigger regardless.
+  const close = () => setOpen(false);
+  const closeAndRefocus = () => { setOpen(false); trigger?.focus({ preventScroll: true }); };
 
-  /** `DeadlineCell`'s ruling 3, same `mousedown` + `contains` shape: the container holds both the
-   *  trigger and (a DOM descendant, even though it is `position: fixed`) the panel, so including
-   *  the trigger in the "inside" test is what stops a click on it closing and reopening at once.
-   *  Outside-click is a deliberate exit and deliberately does *not* refocus the trigger — the
-   *  same asymmetry `DeadlineCell` ships.
-   *
-   *  Scroll dismissal is included, but narrowed twice from that precedent. It has to exist at all
-   *  because the panel is `position: fixed` and this trigger — unlike a table cell's — sits in the
-   *  normally-scrolling page, so a page scroll would leave the panel floating over unrelated
-   *  content. It ignores scrolls originating *inside* the container, because the project listbox
-   *  is itself a scroll region and a capture-phase listener sees its events too; dismissing the
-   *  panel the moment a user scrolls its own project list would be a bug. And it refocuses with
-   *  `preventScroll` so restoring focus does not yank the page back to the toolbar and fight the
-   *  very gesture that dismissed the panel. */
-  useEffect(() => {
-    if (!open) return;
-    const handlePointerDown = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) close();
-    };
-    const handleScroll = (e: Event) => {
-      if (containerRef.current && e.target instanceof Node && containerRef.current.contains(e.target)) return;
-      close();
-      triggerRef.current?.focus({ preventScroll: true });
-    };
-    const handleResize = () => {
-      close();
-      triggerRef.current?.focus({ preventScroll: true });
-    };
-    document.addEventListener('mousedown', handlePointerDown);
-    window.addEventListener('scroll', handleScroll, true);
-    window.addEventListener('resize', handleResize);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      window.removeEventListener('scroll', handleScroll, true);
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [open]);
-
-  const handleTriggerClick = () => {
-    if (open) { closeAndRefocus(); return; }
-    const el = triggerRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    // Captured at open rather than read during render: the panel is `position: fixed`, so it
-    // needs viewport coordinates, and measuring in render would make layout a render side effect.
-    setAnchor({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
-  };
+  const panel = (
+    <FiltersPanel
+      filters={filters}
+      onChange={onChange}
+      context={context}
+      projects={projects}
+      isPhone={isPhone}
+      onClose={closeAndRefocus}
+    />
+  );
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', display: 'inline-flex' }}>
+    <div style={{ position: 'relative', display: 'inline-flex' }}>
       <button
-        ref={triggerRef}
+        ref={setTrigger}
         type="button"
         className="vb-filters-trigger"
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={handleTriggerClick}
+        onClick={e => {
+          if (!open) setInstant(e.detail === 0);
+          setOpen(o => !o);
+        }}
         style={{
           // The view switcher's resting pill, matched exactly (minus its active fill, which
           // belongs to the selected view and would read as "this is the current view" here).
           display: 'inline-flex', alignItems: 'center', gap: '6px',
-          minHeight: '40px', padding: '8px 14px', borderRadius: '999px', boxSizing: 'border-box',
-          background: 'rgba(255,255,255,0.5)',
+          minHeight: '40px', padding: '8px 14px', borderRadius: 'var(--wb-r-pill)', boxSizing: 'border-box',
+          background: 'var(--wb-hover)',
           // Longhands, not the `border` shorthand — same P2-1 fix as `CONTROL_STYLE` above: a
           // shorthand here would re-assert this resting `border-color` on every render and beat
           // `.vb-filters-trigger:hover`'s longhand override below, no matter which count-driven
           // value is active.
           borderWidth: '1px', borderStyle: 'solid',
-          borderColor: count > 0 ? 'rgba(37,111,146,0.55)' : 'rgba(200,210,230,0.5)',
-          fontFamily: FONT, fontSize: '0.82rem', fontWeight: 700,
-          color: count > 0 ? '#1f5c7a' : '#5c6b80',
+          borderColor: count > 0 ? 'color-mix(in srgb, var(--wb-blue-ink) 55%, transparent)' : 'var(--wb-hairline)',
+          fontFamily: FONT, fontSize: 'var(--wb-fs-13)', fontWeight: 700,
+          color: count > 0 ? 'var(--wb-blue-ink)' : 'var(--wb-text-muted)',
           cursor: 'pointer', whiteSpace: 'nowrap',
-          transition: 'border-color 150ms ease, color 150ms ease',
         }}
       >
         <SlidersHorizontal size={16} aria-hidden />
         Filters
         {count > 0 && (
-          // The Board's per-column count badge, with the view selector's `#256f92` swapped in for
-          // its neutral grey ground: this badge is not routine chrome reporting a number, it is
-          // the signal that the view the user is looking at is currently narrowed. It has to read
-          // as "on" at a glance, which a `rgba(255,255,255,0.5)` pill on a white-ish toolbar does
-          // not. White on `#256f92` is 5.3:1, comfortably past AA for this size.
+          // A filled badge rather than routine chrome: it is the signal that the view the user is
+          // looking at is currently narrowed, so it has to read as "on" at a glance. White on
+          // blue-ink is 5.3:1, comfortably past AA for this size.
           <span
             aria-hidden
             style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              minWidth: '18px', borderRadius: '999px', padding: '2px 7px',
-              background: '#256f92', color: '#fff',
-              fontFamily: FONT, fontSize: '0.7rem', fontWeight: 700, lineHeight: 1.2,
+              minWidth: '18px', borderRadius: 'var(--wb-r-pill)', padding: '2px 7px',
+              background: 'var(--wb-blue-ink)', color: 'var(--wb-inverse-text)',
+              fontFamily: FONT, fontSize: 'var(--wb-fs-12)', fontWeight: 700, lineHeight: 1.2,
             }}
           >
             {count}
@@ -1020,24 +811,35 @@ export default function WorkboardFilters({ filters, onChange, context, projects 
         )}
       </button>
 
-      {anchor !== null && (
-        <FiltersPanel
-          filters={filters}
-          onChange={onChange}
-          context={context}
-          projects={projects}
-          anchor={anchor}
-          onClose={closeAndRefocus}
-        />
+      {!isPhone && (
+        <WbPopover
+          open={open}
+          anchor={trigger}
+          onClose={close}
+          placement="bottom-end"
+          width={320}
+          ariaLabel="Filter work items"
+          instant={instant}
+        >
+          {panel}
+        </WbPopover>
+      )}
+
+      {sheet.value && (
+        <WbOverlay open={sheet.open} onClose={close} variant="drawer" ariaLabel="Filter work items" instant={instant}>
+          {panel}
+        </WbOverlay>
       )}
 
       <style jsx>{`
         .vb-filters-trigger:focus-visible {
-          outline: 2px solid #2a7fa8;
+          outline: 2px solid var(--wb-blue-strong);
           outline-offset: 2px;
         }
-        .vb-filters-trigger:hover {
-          border-color: rgba(140,160,190,0.75);
+        @media (hover: hover) and (pointer: fine) {
+          .vb-filters-trigger:hover {
+            border-color: var(--wb-text-faint);
+          }
         }
       `}</style>
     </div>

@@ -7,9 +7,9 @@ import { WORK_CATEGORIES } from '@/lib/workboard/workItems';
 import { manilaNowDatetime, normaliseDeadlineTime, TIME_PATTERN } from '@/lib/workboard/dates';
 import { checkReferences } from '@/lib/workboard/ownership';
 import {
-  LIFE_AREAS, isStageLegal, normaliseStage,
+  LIFE_AREAS, isRevisionStage, isStageLegal, isWaitingStage, normaliseStage, normaliseWaitingReason,
   validateWorkItemCategoryParent, validateWorkItemProjectConsistency,
-  type WorkContext,
+  type WorkContext, type WorkStage,
 } from '@/lib/workboard/workContexts';
 
 // `work_status`, `work_stage`, `deadline_time` and `life_area` are deliberately absent:
@@ -36,8 +36,12 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
        FROM workboard_work_items WHERE id = ? AND user_id = ?`, [itemId, userId],
   );
   if (!owns.length) return Response.json({ error: 'Not found' }, { status: 404 });
-  const currentStatus   = owns[0].current_status as string;
   const currentStage    = (owns[0].current_stage ?? '') as string;
+  // A row saved while `submitted` still normalised to done stores work_status 'done'; it is
+  // active now, so compare against the status its stage implies (keeps completed_at honest).
+  const storedStatus    = owns[0].current_status as string;
+  const currentStatus   = isRevisionStage(currentStage)
+    ? normaliseStage(currentStage as WorkStage) : storedStatus;
   const currentCategory = owns[0].current_category as WorkContext;
 
   const body = await req.json();
@@ -68,6 +72,9 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   if ('deadline_time' in body && deadlineTime !== null && deadlineTime !== undefined
       && !TIME_PATTERN.test(deadlineTime)) {
     return Response.json({ error: 'deadline_time must be HH:MM or HH:MM:SS' }, { status: 400 });
+  }
+  if ('blocked_reason' in body && body.blocked_reason !== null && typeof body.blocked_reason !== 'string') {
+    return Response.json({ error: 'blocked_reason must be a string or null' }, { status: 400 });
   }
 
   // A stage is legal relative to the context the row will have *after* this PATCH, not the
@@ -127,10 +134,16 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
 
   // --- work_stage / work_status: one source, one fragment per column, never divergent ---
   // Exactly one branch can run, so neither column is ever written twice in one statement.
+  // `nextStage` (the raw stage, not the normalised status) is tracked alongside `nextStatus`
+  // purely for the blocked_reason/blocked_since block below — 'blocked' is a stage, never a
+  // status, so `nextStatus` alone can't answer "is this row becoming, staying, or leaving
+  // blocked?".
   let nextStatus: string | null = null;
+  let nextStage: string | null = null;
   if ('work_stage' in body) {
     // The stage decides; a `work_status` the body also sent is ignored.
     nextStatus = normaliseStage(body.work_stage);
+    nextStage = body.work_stage;
     sets.push('work_stage = ?', 'work_status = ?');
     values.push(body.work_stage, nextStatus);
   } else if ('work_status' in body && body.work_status !== currentStatus) {
@@ -142,22 +155,65 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     // normalises to it by this route's own invariant, so leaving both columns alone is
     // correct.
     nextStatus = body.work_status;
+    nextStage = body.work_status;
     sets.push('work_stage = ?', 'work_status = ?');
     values.push(body.work_status, body.work_status);
   } else if ('category' in body && !isStageLegal(nextContext, currentStage)) {
     // The context moved and the body did not restage, leaving a stage the new vocabulary
     // does not contain (a review-stage Projects item dragged to Life, which has no such
     // column). Fall back to the canonical stage for the unchanged status: legal in every
-    // context, and `work_status` does not move, so `completed_at` is untouched.
+    // context. `work_status` normally does not move, so `completed_at` is untouched; the one
+    // exception is a legacy `submitted` row still storing 'done', repaired just below.
+    nextStage = currentStatus;
     sets.push('work_stage = ?');
     values.push(currentStatus);
+    if (storedStatus !== currentStatus) {
+      // A legacy `submitted` row still storing 'done': repair work_status too, and let the
+      // completed_at block below clear its stale date.
+      nextStatus = currentStatus;
+      sets.push('work_status = ?');
+      values.push(currentStatus);
+    }
+  }
+
+  // --- blocked_reason / blocked_since: tracks the transition `nextStage` just decided ---
+  // Server-stamped, like `completed_at` — never client-supplied, so it can't be spoofed or
+  // drift from clock skew. Only the reason (free text describing what it's waiting on) comes
+  // from the caller.
+  // "Waiting" is any of `WAITING_STAGES` (`blocked`, `submitted`): moving between two of them
+  // (blocked ↔ submitted) keeps the original `blocked_since`.
+  if (nextStage !== null) {
+    const wasBlocked = isWaitingStage(currentStage);
+    const isBlocked   = isWaitingStage(nextStage);
+    const reasonValue = normaliseWaitingReason(body.blocked_reason);
+    if (isBlocked && !wasBlocked) {
+      sets.push('blocked_since = ?', 'blocked_reason = ?');
+      values.push(manilaNowDatetime(), reasonValue);
+    } else if (!isBlocked && wasBlocked) {
+      // Leaving a waiting stage clears both — stale waiting info must not survive into
+      // whatever stage comes next, exactly as `completed_at` is cleared the moment `done` isn't.
+      sets.push('blocked_since = ?', 'blocked_reason = ?');
+      values.push(null, null);
+    } else if (isBlocked && wasBlocked && 'blocked_reason' in body) {
+      // Staying waiting, but the caller is updating why — `blocked_since` (the original
+      // wait-start) is deliberately left untouched.
+      sets.push('blocked_reason = ?');
+      values.push(reasonValue);
+    }
+  } else if ('blocked_reason' in body && isWaitingStage(currentStage)) {
+    // A PATCH that edits only the reason, no stage change in the same request — not reachable
+    // from any UI today, but the sparse-patch contract honours it either way.
+    const reasonValue = normaliseWaitingReason(body.blocked_reason);
+    sets.push('blocked_reason = ?');
+    values.push(reasonValue);
   }
   // Only re-stamp `completed_at` when the *normalised* status is actually *changing* — a
   // PATCH that includes `work_status: 'done'` (or the equivalent stage) merely because the
   // dialog always seeds it from the existing value (editing an unrelated field on an
   // already-done item, say) must not rewrite the true completion date. See Finding 1 of the
-  // whole-branch review.
-  if (nextStatus !== null && nextStatus !== currentStatus) {
+  // whole-branch review. A legacy `submitted` row (stored 'done', see `currentStatus`) also
+  // gets its stale completed_at rewritten on any status write.
+  if (nextStatus !== null && (nextStatus !== currentStatus || storedStatus !== currentStatus)) {
     sets.push('completed_at = ?');
     values.push(nextStatus === 'done' ? manilaNowDatetime() : null);
   }

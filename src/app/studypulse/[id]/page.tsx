@@ -5,6 +5,9 @@ import type { RowDataPacket } from 'mysql2';
 import SubjectCardView from '@/components/studypulse/SubjectCardView';
 import type { EntryRow, GradingConfig } from '@/components/studypulse/SubjectCardView';
 import { ensureCanvasSchema, ensureSubjectSection } from '@/lib/migrate';
+import { loadGradingConfig } from '@/lib/studypulse/subjectCards';
+import { todayManila } from '@/lib/studypulse/ui/format';
+import '../studypulse.css';
 
 export default async function SubjectCardPage(
   props: { params: Promise<{ id: string }> }
@@ -60,7 +63,7 @@ export default async function SubjectCardPage(
   if (!subjects.length) redirect('/studypulse');
   const sub = subjects[0];
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = todayManila();
 
   function toEntry(r: RowDataPacket, overrideType?: string): EntryRow {
     const rawAc = r.accomplished_at ? String(r.accomplished_at).split('T')[0] : '';
@@ -80,77 +83,28 @@ export default async function SubjectCardPage(
     };
   }
 
-  /* ── Try to load custom grading config ── */
-  let gradingConfig: GradingConfig | null = null;
-  let initialGradeEntries: Record<number, EntryRow[]> = {};
-
-  try {
-    const [sgRows] = await pool.execute<RowDataPacket[]>(
-      'SELECT * FROM subject_grading WHERE user_subject_id=?',
-      [userSubjectId]
-    );
-
-    if (sgRows.length) {
-      const sg       = sgRows[0];
-      const presetId = sg.preset_id as number;
-
-      const [presets] = await pool.execute<RowDataPacket[]>(
-        'SELECT * FROM grading_presets WHERE preset_id=?', [presetId]
+  /* ── Custom grading config (shared loader) + its grade_entries ── */
+  const gradingConfig: GradingConfig | null = await loadGradingConfig(userSubjectId);
+  const initialGradeEntries: Record<number, EntryRow[]> = {};
+  if (gradingConfig) {
+    try {
+      const entries = await selectEntries(
+        `SELECT ge.entry_id AS id, ge.name, '' AS specificType, ge.urgency, ge.status, ge.deadline,
+                ge.score, ge.items, ge.grade, ge.cat_id, ge.is_lab, ge.accomplished_at,
+                (cel.grade_entry_id IS NOT NULL) AS canvas_linked
+         FROM grade_entries ge
+         LEFT JOIN canvas_entry_links cel ON cel.grade_entry_id = ge.entry_id
+         WHERE ge.user_subject_id=? ORDER BY ge.entry_id ASC`,
+        `SELECT ge.entry_id AS id, ge.name, '' AS specificType, ge.urgency, ge.status, ge.deadline,
+                ge.score, ge.items, ge.grade, ge.cat_id, ge.is_lab, ge.accomplished_at
+         FROM grade_entries ge
+         WHERE ge.user_subject_id=? ORDER BY ge.entry_id ASC`,
+        [userSubjectId]
       );
-      const [periods] = await pool.execute<RowDataPacket[]>(
-        'SELECT * FROM grading_periods WHERE preset_id=? ORDER BY sort_order', [presetId]
-      );
-      const [cats] = await pool.execute<RowDataPacket[]>(
-        `SELECT gc.* FROM grading_categories gc
-         JOIN grading_periods gp ON gc.period_id=gp.period_id
-         WHERE gp.preset_id=? ORDER BY gc.period_id, gc.sort_order`,
-        [presetId]
-      );
-
-      if (presets.length) {
-        const preset = {
-          ...presets[0],
-          periods: periods.map(p => ({
-            ...p,
-            categories: cats.filter(c => c.period_id === p.period_id),
-          })),
-        };
-
-        gradingConfig = {
-          preset_id:   Number(sg.preset_id),
-          has_lab:     Number(sg.has_lab),
-          lec_weight:  Number(sg.lec_weight),
-          lab_weight:  Number(sg.lab_weight),
-          grade_scale: ((preset as unknown as Record<string, unknown>).grade_scale as GradingConfig['grade_scale']) ?? '4pt',
-          preset:      preset as GradingConfig['preset'],
-        };
-
-        /* Load grade_entries grouped by cat_id */
-        const allCatIds = cats.map(c => c.cat_id as number);
-        if (allCatIds.length) {
-          const entries = await selectEntries(
-            `SELECT ge.entry_id AS id, ge.name, '' AS specificType, ge.urgency, ge.status, ge.deadline,
-                    ge.score, ge.items, ge.grade, ge.cat_id, ge.is_lab, ge.accomplished_at,
-                    (cel.grade_entry_id IS NOT NULL) AS canvas_linked
-             FROM grade_entries ge
-             LEFT JOIN canvas_entry_links cel ON cel.grade_entry_id = ge.entry_id
-             WHERE ge.user_subject_id=? ORDER BY ge.entry_id ASC`,
-            `SELECT ge.entry_id AS id, ge.name, '' AS specificType, ge.urgency, ge.status, ge.deadline,
-                    ge.score, ge.items, ge.grade, ge.cat_id, ge.is_lab, ge.accomplished_at
-             FROM grade_entries ge
-             WHERE ge.user_subject_id=? ORDER BY ge.entry_id ASC`,
-            [userSubjectId]
-          );
-          for (const e of entries) {
-            const catId = e.cat_id as number;
-            if (!initialGradeEntries[catId]) initialGradeEntries[catId] = [];
-            initialGradeEntries[catId].push(toEntry(e));
-          }
-        }
-      }
+      for (const e of entries) (initialGradeEntries[e.cat_id as number] ??= []).push(toEntry(e));
+    } catch {
+      // grade_entries missing: render the config with no entries
     }
-  } catch {
-    // grading tables not yet created — fall through to legacy mode
   }
 
   /* ── Load existing presets list (for wizard) ── */

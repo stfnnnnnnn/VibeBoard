@@ -1,18 +1,24 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, List, Table2, Columns3, GanttChart, Search } from 'lucide-react';
+import { ArrowLeft, List, Table2, Columns3, GanttChart, Search, Plus } from 'lucide-react';
 import WorkListView from './views/WorkListView';
 import WorkBoardView from './views/WorkBoardView';
 import WorkTableView from './views/WorkTableView';
 import WorkTimelineView from './views/WorkTimelineView';
 import WorkboardStats from './WorkboardStats';
-import WorkboardRail from './WorkboardRail';
 import WorkItemDialog, { type DialogTarget } from './WorkItemDialog';
 import WorkItemDetail from './WorkItemDetail';
 import NewItemTypeChooser, { type NewItemType } from './NewItemTypeChooser';
 import WorkboardEventDialog, { type EventDialogTarget } from './WorkboardEventDialog';
+import CommandPalette from './CommandPalette';
+import WbToaster from './ui/WbToaster';
+import { QuickAddFullDialogContext } from './ui/WbQuickAdd';
+import { usePresence } from './ui/WbOverlay';
+import WbSegmented from './ui/WbSegmented';
+import { useBulkActions, bulkStatusOptions } from './useBulkActions';
+import { itemKey } from '@/lib/workboard/ui/itemKey';
 // Spec §23's Filters popover. `matchesFilters` is the pure predicate this shell composes into
 // `visibleItems` below — the popover owns the panel's UI, this file owns where the result is
 // applied, so all four views keep filtering through exactly one memo.
@@ -25,7 +31,8 @@ import type { WorkItem, ProjectSummary } from '@/lib/workboard/workItems';
 // latter imports `@/lib/db` (mysql2), which cannot be bundled into this client component.
 import { WORK_CATEGORIES, type WorkCategory } from '@/lib/workboard/workCategories';
 import type { WorkStats, WorkloadDay } from '@/lib/workboard/workStats';
-import { dueDateOf } from '@/lib/workboard/dates';
+import { oldestOverdueDue as oldestOverdueDueOf } from '@/lib/workboard/ui/kpiSeries';
+import { courseOptions } from '@/lib/workboard/ui/quickAdd';
 
 export interface WorkPayload {
   items:         WorkItem[];
@@ -63,43 +70,31 @@ const CATEGORY_LABEL: Record<WorkCategory, string> = {
   life:         'Life',
 };
 
-/** Direction doc §13: five tabs, "My Work" first (the combined/all-categories tab, gradient
- *  indicator) followed by the four single-category tabs in `WORK_CATEGORIES` order, each with
- *  the neutral `#74bcd9` indicator — deliberately not the category's own chip color (see §13's
- *  rationale: reusing chip hues here would overload them with a second, colliding meaning). */
+/** Direction doc §13: five tabs, "My Work" first (the combined/all-categories tab) followed by
+ *  the four single-category tabs in `WORK_CATEGORIES` order. Every tab shares one
+ *  `--wb-pink-strong` underline (refine spec §4) — deliberately not the category's own chip
+ *  color (§13: reusing chip hues here would overload them with a second, colliding meaning). */
 const CATEGORY_TABS: { key: CategoryFilter; label: string }[] = [
   { key: 'all', label: 'My Work' },
   ...WORK_CATEGORIES.map(c => ({ key: c, label: CATEGORY_LABEL[c] })),
 ];
 
-const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
-
-/** Direction-addendum §14b: the context row — and *only* the context row — flips to the app's
- *  titling face as it moves into the header, because it is now part of the title block. A second
- *  constant rather than an edit to `FONT` above: `FONT` is also on the toolbar row's search input
- *  (Inter, the UI face), which §14a explicitly keeps as one of the five axes separating the two
- *  "pick one of a few" rows — changing the shared constant would silently move that too. Named
- *  to match `WorkboardStats.tsx`'s identical constant, since both now render inside the same
- *  header block and share its face. */
-const HEADER_FONT = "'DM Sans','Segoe UI',sans-serif";
-
-/** Direction doc §11's outer-panel glass treatment, matched to `WorkboardWeekView.tsx`'s and
- *  `WorkboardRail.tsx`'s `GLASS` constant exactly (same values, duplicated rather than
- *  imported — each of the three files stays independent of the others so none of them risks
- *  acquiring a runtime import path into `aggregate.ts`/`workItems.ts`, both of which pull in
- *  `pool` (mysql2) at module scope and would 500 this page if reached from a client bundle). */
-const GLASS: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.4)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
-  borderRadius: '22px', border: '1px solid rgba(255,255,255,0.4)', boxShadow: '0 8px 24px rgba(31,38,68,0.09)',
+/** `display` is in the stylesheet: one of the two New item buttons is hidden at each width.
+ *  The fill, padding and type come from `.wb-btn-primary`. */
+const NEW_ITEM_STYLE: React.CSSProperties = {
+  minHeight: 40, boxSizing: 'border-box', whiteSpace: 'nowrap',
 };
 
-/** Roving-tabindex arrow-key navigation shared by the view switcher (a true tablist — see
- *  its own comment below) and the category filter (a radiogroup — see its comment below).
- *  Both are single-select button rows of the same shape: Right/Down moves to the next
- *  control, Left/Up to the previous, Home/End to the first/last, wrapping at the ends. Moving
- *  focus also activates the newly-focused control in both patterns (automatic activation for
- *  tabs; native radio-button behavior for the radiogroup), so `activate` both updates state
- *  and is immediately followed by moving DOM focus to the same index. */
+/** Long header date: "Tuesday, October 20". Local-midnight parse of a "YYYY-MM-DD" string. */
+function formatLongDate(dateStr: string): string {
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+}
+
+/** Roving-tabindex arrow-key navigation for the context radiogroup (the view switcher's own
+ *  keyboard handling now lives in `WbSegmented`): Right/Down moves to the next control,
+ *  Left/Up to the previous, Home/End to the first/last, wrapping at the ends. Moving focus also
+ *  activates the newly-focused control (native radio-button behaviour), so `activate` updates
+ *  state and is immediately followed by moving DOM focus to the same index. */
 function handleRovingKeyDown(
   e: React.KeyboardEvent,
   idx: number,
@@ -118,6 +113,30 @@ function handleRovingKeyDown(
   refs.current[next]?.focus();
 }
 
+/** Spec 4.3: an overlay opened from the keyboard appears without animation. Rather than thread
+ *  the triggering event through every view's `onEdit`/`onNewItem` callback, the shell tracks the
+ *  last input modality: a keydown (including the Enter/Space that fires a keyboard click, whose
+ *  `detail` is 0) marks keyboard, a pointerdown clears it. Capture phase, so it is current before
+ *  any handler that opens an overlay runs. */
+function useKeyboardIntent(): React.MutableRefObject<boolean> {
+  const ref = useRef(false);
+  useEffect(() => {
+    const onKey = () => { ref.current = true; };
+    const onPointer = () => { ref.current = false; };
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('pointerdown', onPointer, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('pointerdown', onPointer, true);
+    };
+  }, []);
+  return ref;
+}
+
+/** An overlay's target plus whether it was opened from the keyboard, captured at open time so the
+ *  exit window (usePresence) keeps the same `instant` it entered with. */
+type Opened<T> = { target: T; instant: boolean };
+
 export default function WorkboardShell(
   { initialWeek, initialWork }: { initialWeek: WorkboardWeek; initialWork: WorkPayload },
 ) {
@@ -128,42 +147,123 @@ export default function WorkboardShell(
   /** The Filters popover's state, owned here rather than inside the popover so `visibleItems`
    *  can read it — the popover is the editor, this is the value every view filters by. */
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
-  /** Timeline's own navigable week — independent of `work.week_start` (the whole board's fixed
-   *  Monday, used by the stat cards), since paging Timeline forward/backward must never move a
-   *  number that describes the whole board. Seeded from the same server-rendered payload
-   *  `page.tsx` already fetches for this — this prop went unread from Task 36 (when Calendar
-   *  moved to its own route) until now, when Timeline absorbed Calendar's data. */
+  /** The page's one navigable week, shared by Timeline and the Focus week picker (plan R4):
+   *  paging either pages both. Independent of `work.week_start` (the whole board's fixed
+   *  Monday, used by the stat cards), since paging a week must never move a number that
+   *  describes the whole board. Seeded from the server-rendered payload `page.tsx` fetches. */
   const [week, setWeek] = useState<WorkboardWeek>(initialWeek);
   const [weekLoading, setWeekLoading] = useState(false);
-  const [dialogTarget, setDialogTarget] = useState<DialogTarget | null>(null);
+  const keyboardIntent = useKeyboardIntent();
+  const [dialogState, setDialogState] = useState<Opened<DialogTarget> | null>(null);
+  const setDialogTarget = (target: DialogTarget | null) =>
+    setDialogState(target && { target, instant: keyboardIntent.current });
+  // Keeps the dialog mounted through its exit transition (WbOverlay's `open` goes false first).
+  const dlg = usePresence(dialogState);
   /** "New Work Item" opens this first, not `dialogTarget` directly — a Task and an
    *  Event/Reminder are different tables behind one button (see `NewItemTypeChooser`'s own
    *  doc), so the button's first job is finding out which the user means. `true` only while
    *  this initial choice is showing; the moment one is made it closes and hands off to
    *  `dialogTarget` (Task) or `eventDialogTarget` (Event/Reminder) below. */
-  const [typeChooserOpen, setTypeChooserOpen] = useState(false);
+  const [typeChooser, setTypeChooser] = useState<{ instant: boolean } | null>(null);
+  const setTypeChooserOpen = (isOpen: boolean) =>
+    setTypeChooser(isOpen ? { instant: keyboardIntent.current } : null);
+  const chooser = usePresence(typeChooser);
   /** `dialogTarget`'s sibling for the other table `openCreateDialog` can now reach —
    *  `workboard_items`, via `WorkboardEventDialog`. Also opened directly (skipping the
    *  chooser) when Timeline's `EventCard` is clicked to edit one that already exists, since at
    *  that point the type is already settled by which row was clicked. */
-  const [eventDialogTarget, setEventDialogTarget] = useState<EventDialogTarget | null>(null);
+  const [eventDialogState, setEventDialogState] = useState<Opened<EventDialogTarget> | null>(null);
+  const setEventDialogTarget = (target: EventDialogTarget | null) =>
+    setEventDialogState(target && { target, instant: keyboardIntent.current });
+  const evd = usePresence(eventDialogState);
   /** The item whose detail drawer is open, or null. Same shape and same lifetime as
    *  `dialogTarget` above — the drawer is the dialog's sibling, not a second kind of state. */
   const [detailItem, setDetailItem] = useState<WorkItem | null>(null);
-  const viewTabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  /** Captured at open (not reset on close), so the exit window keeps the value it entered with. */
+  const [detailInstant, setDetailInstant] = useState(false);
   const categoryTabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  /** The phone tab strip's right-edge fade is a scroll cue, so it goes once the strip is at its end
+   *  (or never overflowed). Re-checked on scroll and resize. */
+  const contextNavRef = useRef<HTMLDivElement | null>(null);
+  const [contextNavAtEnd, setContextNavAtEnd] = useState(false);
+  const checkContextNavEnd = useCallback(() => {
+    const el = contextNavRef.current;
+    if (el) setContextNavAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 1);
+  }, []);
+  useEffect(() => {
+    checkContextNavEnd();
+    window.addEventListener('resize', checkContextNavEnd);
+    return () => window.removeEventListener('resize', checkContextNavEnd);
+  }, [checkContextNavEnd]);
+
+  /** Spec 13's Ctrl+K palette. `instant` is true when Ctrl+K (or a keyboard-activated trigger)
+   *  opened it, false for a pointer click on the hint chip or the phone search button. */
+  const [palette, setPalette] = useState<{ instant: boolean; id: number } | null>(null);
+  const pal = usePresence(palette, 100);
+  // Each open gets a fresh id (the palette's key), so a reopen inside the exit window starts empty.
+  const paletteSeq = useRef(0);
+  /** The last five items opened in the drawer or the edit dialog, newest first: the palette's Recent. */
+  const [recentKeys, setRecentKeys] = useState<string[]>([]);
+  const pushRecent = (item: WorkItem) => {
+    const key = itemKey(item);
+    setRecentKeys(r => [key, ...r.filter(k => k !== key)].slice(0, 5));
+  };
+  const openPalette = (viaKeyboard: boolean) => setPalette({ instant: viaKeyboard, id: ++paletteSeq.current });
+
+  /** Read by the Ctrl+K listener (bound once), so kept current every render below. */
+  const paletteOpenRef = useRef(false);
+  const modalOpenRef = useRef(false);
+  paletteOpenRef.current = palette !== null;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      // e.code covers layouts where the K key does not produce a latin k.
+      if (e.key.toLowerCase() !== 'k' && e.code !== 'KeyK') return;
+      if (e.repeat) return;
+      if (paletteOpenRef.current) { e.preventDefault(); setPalette(null); return; }
+      // Never stack the palette over a dialog, the chooser or the drawer.
+      if (modalOpenRef.current) return;
+      e.preventDefault();
+      setPalette({ instant: true, id: ++paletteSeq.current });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   /** Re-pulls the whole work payload. Called after any mutation so stats, the workload
    *  chart, and every view stay consistent without each one tracking its own deltas. */
+  const refreshSeq = useRef(0);
   const refreshWork = async () => {
-    const res = await fetch('/api/workboard/work');
-    if (res.ok) setWork(await res.json());
+    // Latest request wins: a slower, older response must not overwrite a newer one
+    // (complete() and its Undo each refresh, and the two can resolve out of order).
+    // Never rejects: callers await this after a write that already landed (and then offer
+    // Undo), so a failed refresh just leaves the current payload in place.
+    const seq = ++refreshSeq.current;
+    try {
+      const res = await fetch('/api/workboard/work');
+      if (!res.ok) return;
+      const next: WorkPayload = await res.json();
+      if (seq === refreshSeq.current) setWork(next);
+    } catch {
+      // Offline or a non-JSON body: keep the current payload.
+    }
   };
 
-  /** Fetches a different week's class schedule/conflicts/heatmap/events for Timeline — the
-   *  same endpoint and shape `WorkboardWeekView.tsx`'s Calendar page already used for the
-   *  identical navigation. `weekLoading` disables Timeline's own nav buttons so a second click
-   *  cannot race the first and land the two out of order. */
+  /** Spec §12 bulk actions. `hiddenKeys` hides rows whose delete is waiting out its Undo
+   *  window; `selectionCount` lifts the toaster above the bulk bar while anything is selected. */
+  const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(() => new Set());
+  const hide = useCallback((keys: string[]) => setHiddenKeys(s => { const n = new Set(s); keys.forEach(k => n.add(k)); return n; }), []);
+  const unhide = useCallback((keys: string[]) => setHiddenKeys(s => { const n = new Set(s); keys.forEach(k => n.delete(k)); return n; }), []);
+  const [selectionCount, setSelectionCount] = useState(0);
+  const bulk = useBulkActions({ refresh: refreshWork, hide, unhide });
+  // Handed to Table (Task 20) and Board (Task 23).
+  const bulkStatus = useMemo(() => bulkStatusOptions(category), [category]);
+
+  /** Fetches a different week's class schedule/conflicts/heatmap/events for Timeline and the
+   *  Focus week picker — the same endpoint and shape `WorkboardWeekView.tsx`'s Calendar page
+   *  already used. `weekLoading` disables both views' paging buttons so a second click cannot
+   *  race the first and land the two out of order. */
   const goToWeek = async (weekStart: string) => {
     setWeekLoading(true);
     try {
@@ -175,7 +275,12 @@ export default function WorkboardShell(
   };
 
   const openCreateDialog = () => setTypeChooserOpen(true);
-  const openEditDialog = (item: WorkItem) => setDialogTarget({ mode: 'edit', item });
+  /** Quick add's hand-off (Academic tab, no courses): the palette's pre-filled create path. */
+  const openCreateWithTitle = useCallback((title: string) => setDialogTarget({ mode: 'create', initialTitle: title }), []);
+  const openEditDialog = (item: WorkItem) => {
+    pushRecent(item);
+    setDialogTarget({ mode: 'edit', item });
+  };
 
   /** The chooser's one job: decide which of the two dialogs "New Work Item" actually meant. */
   const handleChooseType = (type: NewItemType) => {
@@ -191,11 +296,15 @@ export default function WorkboardShell(
    *  write just changed" for `WorkboardEventDialog`'s `onSaved`. Timeline's own override editor
    *  does the equivalent by calling `onWeekChange` directly (see its own comment for why it
    *  avoids this wrapper specifically); this one is fine to use here because closing the type
-   *  chooser or the event dialog was never coupled to `focusedDay` the way Timeline's internal
+   *  chooser or the event dialog was never coupled to `selectedDay` the way Timeline's internal
    *  navigation is. */
   const refreshWeek = () => goToWeek(week.week_start);
 
-  const openDetail = (item: WorkItem) => setDetailItem(item);
+  const openDetail = (item: WorkItem) => {
+    pushRecent(item);
+    setDetailInstant(keyboardIntent.current);
+    setDetailItem(item);
+  };
   const closeDetail = () => setDetailItem(null);
 
   /** The open item as the *current* payload knows it, not as it was when the title was clicked.
@@ -210,6 +319,12 @@ export default function WorkboardShell(
   const detailLive = detailItem === null
     ? null
     : work.items.find(i => i.source === detailItem.source && i.id === detailItem.id) ?? detailItem;
+  /** Keeps the drawer mounted through its exit transition. */
+  const det = usePresence(detailLive);
+  /** The phone Filters sheet, reported up by WorkboardFilters: Ctrl+K must not open over it either. */
+  const [filtersSheetOpen, setFiltersSheetOpen] = useState(false);
+  modalOpenRef.current = dlg.value !== null || evd.value !== null || chooser.value !== null || det.value !== null
+    || filtersSheetOpen;
 
   /** Keeps the dialog's project select current the moment a project is created inline,
    *  without waiting for the next `refreshWork()` (which only runs after the item itself
@@ -251,10 +366,13 @@ export default function WorkboardShell(
    *  with no filters set costs nothing. */
   const selectCategory = (next: CategoryFilter) => {
     setCategory(next);
+    // `lifeArea` joins `status`/`projectId` here for the same reason: it is Life's own
+    // vocabulary (see `WorkboardFilters.tsx`'s `FilterState` doc), meaningless — and, since
+    // `matchesFilters` reads it unconditionally, silently still-applied — under every other tab.
     setFilters(current =>
-      current.status === '' && current.projectId === ''
+      current.status === '' && current.projectId === '' && current.lifeArea === ''
         ? current
-        : { ...current, status: '', projectId: '' },
+        : { ...current, status: '', projectId: '', lifeArea: '' },
     );
   };
 
@@ -265,6 +383,7 @@ export default function WorkboardShell(
   const visibleItems = useMemo(() => {
     const q = query.trim().toLowerCase();
     return work.items.filter(item => {
+      if (hiddenKeys.has(itemKey(item))) return false;
       if (category !== 'all' && item.category !== category) return false;
       // Spec §23 step 2: the popover's filters compose into *this* memo rather than into each
       // view, so Focus, Table, Board and Timeline all narrow identically. `matchesFilters` is
@@ -275,7 +394,7 @@ export default function WorkboardShell(
       return item.title.toLowerCase().includes(q)
           || (item.chip_label ?? '').toLowerCase().includes(q);
     });
-  }, [work.items, work.generated_at, category, query, filters]);
+  }, [work.items, work.generated_at, category, query, filters, hiddenKeys]);
 
   /** Widened by Task 38 to include the popover: `isFiltered` drives every view's empty-state
    *  wording, and a board emptied by a priority filter must say "nothing matches your filter",
@@ -308,20 +427,22 @@ export default function WorkboardShell(
   /** The Overdue card's subtitle wants "oldest from <date>" (direction doc §6's example).
    *  Derived from the whole-board `work.items` (never `visibleItems`) so it never moves as
    *  the user filters — same rule as `stats`/`workload` above. */
-  const oldestOverdueDue = useMemo(() => {
-    let oldest: string | null = null;
-    for (const item of work.items) {
-      if (item.work_status === 'done') continue;
-      const due = dueDateOf(item);
-      if (due === null || due >= work.generated_at) continue;
-      if (oldest === null || due < oldest) oldest = due;
-    }
-    return oldest;
-  }, [work.items, work.generated_at]);
+  const oldestOverdueDue = useMemo(
+    () => oldestOverdueDueOf(work.items, work.generated_at), [work.items, work.generated_at],
+  );
+
+  /** The palette searches the whole board, minus rows waiting out a delete's Undo window. */
+  const paletteItems = useMemo(
+    () => work.items.filter(item => !hiddenKeys.has(itemKey(item))), [work.items, hiddenKeys],
+  );
+
+  /** Whole-board course list for every quick add, so a filtered view still offers all courses. */
+  const courses = useMemo(() => courseOptions(work.items), [work.items]);
 
   return (
-    <div className="vb-bg min-h-screen pb-10" style={{ padding: '40px 5%', fontFamily: "'Inter','DM Sans','Segoe UI',sans-serif" }}>
-      <Link href="/dashboard" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#5c6b80', fontSize: '0.85rem', fontWeight: 600, textDecoration: 'none', marginBottom: '14px' }}>
+    <QuickAddFullDialogContext.Provider value={openCreateWithTitle}>
+    <div className="vb-bg min-h-screen pb-10" style={{ padding: '40px 5%', fontFamily: 'var(--wb-font-ui)' }}>
+      <Link href="/dashboard" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: 'var(--wb-text-muted)', font: '600 var(--wb-fs-14) var(--wb-font-ui)', textDecoration: 'none', marginBottom: '14px' }}>
         <ArrowLeft size={15} /> Dashboard
       </Link>
 
@@ -334,150 +455,182 @@ export default function WorkboardShell(
           it takes `width: 100%` below 1024px; that rule, and the <768px scroll strip, are in the
           styled-jsx block at the bottom of this file (addendum §21). */}
       <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: '22px' }}>
-        <div>
-          <h1 className="gradient-text" style={{ fontSize: '2.2rem', fontWeight: 700, margin: '0 0 4px' }}>Workboard</h1>
-          <p style={{ margin: 0, color: '#5c6b80', fontSize: '0.95rem' }}>All your work, in one place.</p>
+        {/* Refine spec §4: a solid title behind a small gradient mark, and the date alone
+            underneath (the KPI cards already say what is due and overdue). */}
+        <div className="vb-title-block">
+          <h1 className="vb-title">
+            <span className="vb-title__mark" aria-hidden />
+            Workboard
+          </h1>
+          <p style={{ margin: 0, font: '500 var(--wb-fs-13) var(--wb-font-ui)', color: 'var(--wb-text-muted)' }}>
+            {formatLongDate(work.generated_at)}
+          </p>
         </div>
 
-        {/* Context navigation (direction doc §13, addendum §14) — underline-indicator pattern,
-            deliberately not the view switcher's pill-fill, so the two "pick one of a few"
-            controls read as different jobs (filter vs. view) at a glance. §14a makes that
-            distinction carry on five axes at once now that the rows sit far apart: shape,
-            active signal, resting boundary, typeface (DM Sans here, Inter there) and position.
+        {/* display/flex live in the stylesheet: below 1024px this wrapper becomes
+            display: contents so New item can sit on the title row and the tabs wrap under it. */}
+        <div className="vb-header-actions">
+          {/* New item is rendered twice so Tab follows the visual order at every width: this copy
+              leads (title row, before the tabs) below 1024px, the one after the tabs trails at
+              1024px and up. The other is display: none, so only one is ever focusable or announced. */}
+          <button
+            type="button"
+            className="wb-btn-primary wb-pressable wb-focus-ring vb-new-item vb-new-item--lead"
+            onClick={openCreateDialog}
+            style={NEW_ITEM_STYLE}
+          >
+            <Plus size={16} aria-hidden /> New item
+          </button>
 
-            Deliberately `role="radiogroup"`/`role="radio"`, not the tabs pattern: this row picks
-            a *filter* applied to whichever view is showing, it doesn't switch to a distinct
-            content panel the way the view switcher below does. The WAI-ARIA tabs pattern assumes
-            each tab owns an associated (and otherwise hidden) tabpanel; there is no second panel
-            here for "Academic" to own — the same Focus/Table/Board/Timeline panel just renders
-            a narrower slice of `work.items`. A single-select group of otherwise-plain buttons is
-            exactly what `radiogroup`/`radio` describes, and `aria-checked` says "selected", which
-            is what `aria-pressed` here was always straining to mean.
+          {/* Context navigation (direction doc §13, addendum §14) — underline-indicator pattern,
+              deliberately not the view switcher's pill-fill, so the two "pick one of a few"
+              controls read as different jobs (filter vs. view) at a glance. §14a makes that
+              distinction carry on five axes at once now that the rows sit far apart: shape,
+              active signal, resting boundary, typeface (DM Sans here, Inter there) and position.
 
-            `align-self: flex-end` is §14b's exact instruction for keeping the group shrink-to-fit
-            and bottom-aligned against the title: a `width: 100%` group under a right-aligned row
-            would read as a page divider rather than as this control's own baseline. For the same
-            reason the row no longer carries a bottom margin of its own — inside a flex row, a
-            bottom margin under `align-self: flex-end` would lift the underline off the baseline
-            it is supposed to share with the title block. That `align-self`, the group's
-            `flex-wrap` and each tab's `padding` are declared in the styled-jsx block below rather
-            than inline, because §21's breakpoints override exactly those three (and only those
-            three) properties. */}
-        <div role="radiogroup" aria-label="Filter by context" className="vb-context-nav" style={{ display: 'flex', gap: '4px', borderBottom: '1px solid rgba(200,210,230,0.35)' }}>
-          {CATEGORY_TABS.map(({ key, label }, idx) => {
-            const active = category === key;
-            return (
-              <button
-                key={key}
-                ref={el => { categoryTabRefs.current[idx] = el; }}
-                type="button"
-                role="radio"
-                aria-checked={active}
-                tabIndex={active ? 0 : -1}
-                onClick={() => selectCategory(key)}
-                onKeyDown={e => handleRovingKeyDown(e, idx, CATEGORY_TABS.length, categoryTabRefs, next => selectCategory(CATEGORY_TABS[next].key))}
-                className="vb-category-tab"
-                style={{
-                  position: 'relative', display: 'inline-flex', alignItems: 'center',
-                  minHeight: '40px', background: 'transparent', border: 'none',
-                  // §14b: DM Sans (the title block's face, now that this row is part of it) and an
-                  // explicit `letter-spacing: 0`, so §1's 0.04em uppercase tracking can never be
-                  // inherited onto these sentence-case labels. Weight stays 700 in both states.
-                  fontFamily: HEADER_FONT, letterSpacing: '0',
-                  fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer',
-                  color: active ? '#2d3748' : '#5c6b80',
-                }}
-              >
-                {label}
-                <span
-                  aria-hidden
+              Deliberately `role="radiogroup"`/`role="radio"`, not the tabs pattern: this row picks
+              a *filter* applied to whichever view is showing, it doesn't switch to a distinct
+              content panel the way the view switcher below does. The WAI-ARIA tabs pattern assumes
+              each tab owns an associated (and otherwise hidden) tabpanel; there is no second panel
+              here for "Academic" to own — the same Focus/Table/Board/Timeline panel just renders
+              a narrower slice of `work.items`. A single-select group of otherwise-plain buttons is
+              exactly what `radiogroup`/`radio` describes, and `aria-checked` says "selected", which
+              is what `aria-pressed` here was always straining to mean.
+
+              `align-self: flex-end` is §14b's exact instruction for keeping the group shrink-to-fit
+              and bottom-aligned against the title: a `width: 100%` group under a right-aligned row
+              would read as a page divider rather than as this control's own baseline. For the same
+              reason the row no longer carries a bottom margin of its own — inside a flex row, a
+              bottom margin under `align-self: flex-end` would lift the underline off the baseline
+              it is supposed to share with the title block. That `align-self`, the group's
+              `flex-wrap` and each tab's `padding` are declared in the styled-jsx block below rather
+              than inline, because §21's breakpoints override exactly those three (and only those
+              three) properties. */}
+          <div
+            ref={contextNavRef}
+            role="radiogroup"
+            aria-label="Filter by context"
+            className="vb-context-nav"
+            data-at-end={contextNavAtEnd ? 'true' : undefined}
+            onScroll={checkContextNavEnd}
+            style={{ display: 'flex', gap: '4px', borderBottom: '1px solid var(--wb-hairline)' }}
+          >
+            {CATEGORY_TABS.map(({ key, label }, idx) => {
+              const active = category === key;
+              return (
+                <button
+                  key={key}
+                  ref={el => { categoryTabRefs.current[idx] = el; }}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  tabIndex={active ? 0 : -1}
+                  onClick={() => selectCategory(key)}
+                  onKeyDown={e => handleRovingKeyDown(e, idx, CATEGORY_TABS.length, categoryTabRefs, next => selectCategory(CATEGORY_TABS[next].key))}
+                  className="vb-category-tab"
                   style={{
-                    position: 'absolute', left: 0, right: 0, bottom: '-1px', height: '2px',
-                    background: !active ? 'transparent' : key === 'all'
-                      ? 'linear-gradient(to right, #f2a7c0, #74bcd9)'
-                      : '#74bcd9',
+                    position: 'relative', display: 'inline-flex', alignItems: 'center',
+                    minHeight: '40px', background: 'transparent', border: 'none',
+                    // §14b: DM Sans (the title block's face, now that this row is part of it) and an
+                    // explicit `letter-spacing: 0`, so §1's 0.04em uppercase tracking can never be
+                    // inherited onto these sentence-case labels. Weight stays 700 in both states.
+                    fontFamily: 'var(--wb-font-head)', letterSpacing: '0',
+                    fontSize: 'var(--wb-fs-13)', fontWeight: 700, cursor: 'pointer',
+                    color: active ? 'var(--wb-text)' : 'var(--wb-text-muted)',
                   }}
-                />
-              </button>
-            );
-          })}
+                >
+                  {label}
+                  <span
+                    aria-hidden
+                    style={{
+                      position: 'absolute', left: 0, right: 0, bottom: '-1px', height: '2px',
+                      background: active ? 'var(--wb-pink-strong)' : 'transparent',
+                    }}
+                  />
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            className="wb-btn-primary wb-pressable wb-focus-ring vb-new-item vb-new-item--trail"
+            onClick={openCreateDialog}
+            style={NEW_ITEM_STYLE}
+          >
+            <Plus size={16} aria-hidden /> New item
+          </button>
         </div>
       </div>
 
-      <WorkboardStats stats={work.stats} oldestOverdueDue={oldestOverdueDue} />
+      <WorkboardStats
+        stats={work.stats}
+        oldestOverdueDue={oldestOverdueDue}
+        items={work.items}
+        today={work.generated_at}
+        weekStart={work.week_start}
+      />
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '18px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-        {/* True tabs pattern: each button selects one of four mutually-exclusive, entirely
-            different content panels (Focus/Table/Board/Timeline all render into the single
-            `role="tabpanel"` below), which is exactly the case the WAI-ARIA tabs pattern is
-            for — unlike the category filter above. `aria-label` on every button is what keeps
-            the accessible name intact once the label text is visually hidden below 1024px
-            (direction doc §10: "icon-only", label hidden, name retained); it also means the
-            visible `<span>` text is redundant to a screen reader at every width, which is fine
-            since `aria-label` always wins over visible content for the accessible name. */}
-        <div role="tablist" aria-label="Workboard view" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          {VIEWS.map(({ key, label, Icon }, idx) => (
-            <button
-              key={key}
-              ref={el => { viewTabRefs.current[idx] = el; }}
-              id={`vb-view-tab-${key}`}
-              type="button"
-              role="tab"
-              aria-selected={view === key}
-              aria-controls="vb-view-panel"
-              tabIndex={view === key ? 0 : -1}
-              aria-label={label}
-              title={label}
-              onClick={() => setView(key)}
-              onKeyDown={e => handleRovingKeyDown(e, idx, VIEWS.length, viewTabRefs, next => setView(VIEWS[next].key))}
-              className="vb-view-switch-btn"
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: '6px',
-                minHeight: '40px', borderRadius: '999px',
-                border: view === key ? 'none' : '1px solid rgba(200,210,230,0.5)',
-                fontWeight: 700, fontSize: '0.82rem', cursor: 'pointer',
-                background: view === key ? '#256f92' : 'rgba(255,255,255,0.5)',
-                color: view === key ? '#fff' : '#5c6b80',
-                transition: 'background 150ms ease, color 150ms ease',
-              }}>
-              <Icon size={16} aria-hidden /> <span className="vb-view-switch-label">{label}</span>
-            </button>
-          ))}
+        {/* True tabs pattern (Focus/Table/Board/Timeline each own the single tabpanel below).
+            The ids stay `vb-view-tab-<key>` because the tabpanel's aria-labelledby and the
+            Overdue tile's jump-to-Focus click both look them up. */}
+        <div className="vb-seg-scroll">
+          <WbSegmented
+            options={VIEWS.map(({ key, label, Icon }) => ({ key, label, icon: <Icon size={16} aria-hidden /> }))}
+            value={view}
+            onChange={setView}
+            ariaLabel="Workboard view"
+            idPrefix="vb-view-tab"
+            controls="vb-view-panel"
+            hideLabelsBelow={1024}
+            variant="view"
+          />
         </div>
 
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="vb-toolbar-tools" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          {/* Below 768px the field gives way to this button (the palette is the phone's search);
+              the field stays while a query is applied, so it can still be seen and cleared. */}
           <button
             type="button"
-            className="vb-btn-pink"
-            onClick={openCreateDialog}
-            style={{ width: 'auto', minHeight: '40px', padding: '8px 18px', boxSizing: 'border-box' }}
+            className="vb-search-btn wb-focus-ring wb-pressable"
+            aria-label="Search (opens the command palette)"
+            onClick={e => openPalette(e.detail === 0)}
           >
-            New Item
+            <Search size={18} aria-hidden />
           </button>
-
-          <div style={{ position: 'relative', minWidth: '220px' }}>
-            <Search size={15} color="#8a94a6" aria-hidden style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+          <div className="vb-search-wrap" data-has-query={query !== '' ? 'true' : undefined} style={{ position: 'relative' }}>
+            <Search size={15} color="var(--wb-text-subtle)" aria-hidden style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
             <input
               type="search"
               className="vb-work-search"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder="Search work items…"
+              placeholder="Search…"
               aria-label="Search work items"
               style={{
-                width: '100%', minHeight: '40px', boxSizing: 'border-box', borderRadius: '999px',
-                padding: '8px 14px 8px 36px', background: 'rgba(255,255,255,0.5)',
-                border: '1px solid rgba(200,210,230,0.5)', fontFamily: FONT, fontSize: '0.82rem',
-                fontWeight: 500, color: '#2d3748',
+                // Right padding reserves room for the Ctrl K chip (Task 32).
+                width: '100%', minHeight: '40px', boxSizing: 'border-box', borderRadius: 'var(--wb-r-lg)',
+                padding: '8px 64px 8px 36px', background: 'rgba(255,255,255,.6)',
+                border: '1px solid var(--wb-hairline)', font: '500 var(--wb-fs-13) var(--wb-font-ui)',
+                color: 'var(--wb-text)',
               }}
             />
+            <button
+              type="button"
+              className="wb-pal-hint wb-focus-ring"
+              aria-label="Open command palette (Ctrl+K)"
+              onClick={e => openPalette(e.detail === 0)}
+            >
+              <span className="wb-kbd">Ctrl</span><span className="wb-kbd">K</span>
+            </button>
           </div>
 
           {/* Spec §23: a compact Filter control *beside* Search, never a permanently-expanded
               form. Placed immediately after the search box because the two do the same job —
               narrowing what the view below shows — and reading "Search … Filters" left to right
               keeps the pair together at the toolbar's trailing edge, where the panel can anchor
-              to the trigger's right edge without crossing the New Item button.
+              to the trigger's right edge.
               `context={category}` is the same value `visibleItems` filters by, deliberately: the
               popover's status vocabulary and its project grouping both have to describe the slice
               the user is actually looking at. */}
@@ -486,119 +639,125 @@ export default function WorkboardShell(
             onChange={setFilters}
             context={category}
             projects={work.projects}
+            onSheetChange={setFiltersSheetOpen}
           />
         </div>
       </div>
 
-      {/* Direction doc §10/§12: the rail sits beside Focus (fixed 240px column) at >=1024px,
-          collapses entirely on Table/Board/Timeline so the grid, the kanban columns and the
-          date axis get the full canvas, and moves below the main content (instead of beside
-          it) from 1023px down on Focus, where it stays visible rather than collapsing. Focus
-          is now the only view that gets the rail at all: Calendar, the other view that used to
-          carry it, no longer exists as its own view — its week schedule/conflicts/heatmap/
-          events are now folded into Timeline's own week columns, and `/workboard/calendar`
-          redirects here rather than rendering anything of its own.
-          Both `flex-direction` and `align-items` are kept out of the inline style
-          below and set only in the stylesheet (same specificity reasoning as elsewhere in this
-          task): `align-items: flex-start` cross-aligns the two side-by-side columns to their
-          own content height at >=1024px, but that same value would shrink-wrap both children
-          to their own content *width* once the row becomes a column below 1024px — a plain
-          class rule can't override an inline `alignItems` to fix that, so the value has to live
-          here from the start. `WorkboardRail.tsx` separately owns its own `flex`/`width`
-          override for the stacked case. */}
-      <div className="vb-content-row" style={{ display: 'flex', gap: '18px' }}>
-        {/* The view switcher's single shared tabpanel — `id`/`aria-labelledby` track whichever
-            tab is currently selected. Direction doc §11: all four views (Focus/Table/Board/
-            Timeline) share one GLASS outer panel — the shell's own view-content container, which
-            none of the views applies itself, so it is applied once, here, rather than four times.
-            Calendar was never one of the four and still isn't (its function lives inside
-            Timeline now), so every view this shell can show wants the wrapper, with no exclusion
-            left to branch on. */}
-        <div id="vb-view-panel" role="tabpanel" aria-labelledby={`vb-view-tab-${view}`} tabIndex={0} style={{ flex: '1 1 auto', minWidth: 0 }}>
-          <div style={{ ...GLASS, padding: '20px', boxSizing: 'border-box' }}>
-            {view === 'list' && (
-              <WorkListView
-                items={visibleItems}
-                todayStr={work.generated_at}
-                isFiltered={isFiltered}
-                onChanged={refreshWork}
-                onEdit={openEditDialog}
-                onOpenDetail={openDetail}
-                onNewItem={openCreateDialog}
-              />
-            )}
-            {view === 'table' && (
-              <WorkTableView
-                items={visibleItems}
-                context={category}
-                todayStr={work.generated_at}
-                isFiltered={isFiltered}
-                isSearching={isSearching}
-                onChanged={refreshWork}
-                onNewItem={openCreateDialog}
-                onOpenDetail={openDetail}
-              />
-            )}
-            {view === 'board' && (
-              <WorkBoardView
-                items={visibleItems}
-                // The SAME value `visibleItems` is filtered by, deliberately: the Board judges
-                // a drop's stage legality against the board's context rather than each item's
-                // own, which is only sound while the two agree. Task 16 shipped this prop
-                // optional (defaulting to 'all'), so its absence would not have failed the
-                // build — the Board would just have kept My Work's three columns under every
-                // tab, invisibly, until someone opened Projects looking for Backlog.
-                context={category}
-                todayStr={work.generated_at}
-                isFiltered={isFiltered}
-                onChanged={refreshWork}
-                onNewItem={openCreateDialog}
-              />
-            )}
-            {view === 'timeline' && (
-              <WorkTimelineView
-                items={visibleItems}
-                // `week.week_start`, NOT `work.week_start`: Timeline pages its own week
-                // independently of the whole-board Monday the stat cards use — see `week`'s own
-                // declaration above for why the two must stay decoupled.
-                weekStart={week.week_start}
-                today={work.generated_at}
-                isFiltered={isFiltered}
-                // The same value `visibleItems` is filtered by, same as Table's and Board's
-                // `context` props just above — required (not optional) on `WorkTimelineView`,
-                // so omitting this would fail `tsc` rather than silently keeping My Work's four
-                // fixed lanes under every tab (Task 16's Board-context history, repeated here).
-                context={category}
-                classOccurrences={week.class_occurrences}
-                conflicts={week.conflicts}
-                heatmap={week.heatmap}
-                // Calendar's payload keeps events and reminders as two separate arrays server-
-                // side (both the same `WorkboardEventItem` shape, discriminated by `item_type`);
-                // Timeline shows them in one merged day-column stack, so they arrive as one prop.
-                events={[...week.events, ...week.reminders]}
-                onWeekChange={goToWeek}
-                weekLoading={weekLoading}
-                onEditEvent={openEditEventDialog}
-              />
-            )}
-          </div>
+      {/* The view switcher's single shared tabpanel — `id`/`aria-labelledby` track whichever
+          tab is currently selected. Table uses the refine `.wb-glass-panel` (spec §6); Focus
+          (refine spec §5), Board (spec §7, whose lanes are the panels) and Timeline (spec §8,
+          whose week sheet is the panel) render bare. `flow-root` keeps the formatting context
+          the removed rail's flex row gave it, so no view's margins collapse out of the panel. */}
+      <div id="vb-view-panel" role="tabpanel" aria-labelledby={`vb-view-tab-${view}`} tabIndex={0} style={{ display: 'flow-root' }}>
+        {/* Table sits on the refine glass panel (spec §6); its padding is 10 so the rows float
+            close to the panel edge. */}
+        <div
+          className={view === 'table' ? 'wb-glass-panel' : undefined}
+          style={view === 'table' ? { padding: '10px', boxSizing: 'border-box' } : undefined}
+        >
+          {view === 'list' && (
+            <WorkListView
+              items={visibleItems}
+              todayStr={work.generated_at}
+              isFiltered={isFiltered}
+              onChanged={refreshWork}
+              onEdit={openEditDialog}
+              onOpenDetail={openDetail}
+              filter={category}
+              courses={courses}
+              // Shares the shell's one `week` with Timeline (plan R4); `work.items` is whole-board.
+              weekStart={week.week_start}
+              classOccurrences={week.class_occurrences}
+              onWeekChange={goToWeek}
+              weekLoading={weekLoading}
+              allItems={work.items}
+            />
+          )}
+          {view === 'table' && (
+            <WorkTableView
+              items={visibleItems}
+              context={category}
+              todayStr={work.generated_at}
+              isFiltered={isFiltered}
+              isSearching={isSearching}
+              onChanged={refreshWork}
+              onNewItem={openCreateDialog}
+              onOpenDetail={openDetail}
+              bulk={bulk}
+              statusOptions={bulkStatus}
+              onSelectionCount={setSelectionCount}
+            />
+          )}
+          {view === 'board' && (
+            <WorkBoardView
+              items={visibleItems}
+              // The SAME value `visibleItems` is filtered by, deliberately: the Board judges
+              // a drop's stage legality against the board's context rather than each item's
+              // own, which is only sound while the two agree. Task 16 shipped this prop
+              // optional (defaulting to 'all'), so its absence would not have failed the
+              // build — the Board would just have kept My Work's three columns under every
+              // tab, invisibly, until someone opened Projects looking for Backlog.
+              context={category}
+              todayStr={work.generated_at}
+              isFiltered={isFiltered}
+              onChanged={refreshWork}
+              onNewItem={openCreateDialog}
+              filter={category}
+              courses={courses}
+              bulk={bulk}
+              statusOptions={bulkStatus}
+              onSelectionCount={setSelectionCount}
+            />
+          )}
+          {view === 'timeline' && (
+            <WorkTimelineView
+              items={visibleItems}
+              // `week.week_start`, NOT `work.week_start`: Timeline pages its own week
+              // independently of the whole-board Monday the stat cards use — see `week`'s own
+              // declaration above for why the two must stay decoupled.
+              weekStart={week.week_start}
+              today={work.generated_at}
+              isFiltered={isFiltered}
+              classOccurrences={week.class_occurrences}
+              conflicts={week.conflicts}
+              heatmap={week.heatmap}
+              // Calendar's payload keeps events and reminders as two separate arrays server-
+              // side (both the same `WorkboardEventItem` shape, discriminated by `item_type`);
+              // Timeline shows them in one merged day-column stack, so they arrive as one prop.
+              events={[...week.events, ...week.reminders]}
+              onWeekChange={goToWeek}
+              weekLoading={weekLoading}
+              onEditEvent={openEditEventDialog}
+              // The same value `visibleItems` is filtered by (required on `WorkTimelineView`),
+              // also the day panel's quick-add default. That quick add creates work items, so
+              // `refreshWork` (not `refreshWeek`) is what makes them appear.
+              filter={category}
+              courses={courses}
+              onChanged={refreshWork}
+              onOpenDetail={openDetail}
+            />
+          )}
         </div>
-
-        {view === 'list' && (
-          // Whole-board data (`work.workload` / `work.items`), never `visibleItems` — the
-          // rail describes the whole board, same rule the stat cards follow, so its numbers
-          // never move as the user types in search or switches category tabs.
-          <WorkboardRail workload={work.workload} items={work.items} todayStr={work.generated_at} />
-        )}
       </div>
 
-      {typeChooserOpen && (
-        <NewItemTypeChooser onChoose={handleChooseType} onClose={() => setTypeChooserOpen(false)} />
+      {chooser.value && (
+        <NewItemTypeChooser
+          open={chooser.open}
+          instant={chooser.value.instant}
+          onChoose={handleChooseType}
+          onClose={() => setTypeChooserOpen(false)}
+        />
       )}
 
-      {dialogTarget && (
+      {dlg.value && (
         <WorkItemDialog
-          target={dialogTarget}
+          // A different target remounts, so a reopen inside the exit window never inherits
+          // the previous item's form state.
+          key={dlg.value.target.mode === 'edit' ? itemKey(dlg.value.target.item) : 'create'}
+          open={dlg.open}
+          instant={dlg.value.instant}
+          target={dlg.value.target}
           projects={work.projects}
           onClose={() => setDialogTarget(null)}
           onSaved={refreshWork}
@@ -606,9 +765,13 @@ export default function WorkboardShell(
         />
       )}
 
-      {eventDialogTarget && (
+      {evd.value && (
         <WorkboardEventDialog
-          target={eventDialogTarget}
+          // Same reason as the item dialog's key: a reopen inside the exit window starts clean.
+          key={evd.value.target.mode === 'edit' ? `edit-${evd.value.target.item.id}` : `create-${evd.value.target.itemType}`}
+          open={evd.open}
+          instant={evd.value.instant}
+          target={evd.value.target}
           onClose={() => setEventDialogTarget(null)}
           onSaved={refreshWeek}
         />
@@ -621,59 +784,98 @@ export default function WorkboardShell(
           Keyed by the owner pair so opening a *different* item remounts the panel rather than
           reusing it — the drawer holds that item's subtask list and draft text in state, and
           carrying either across two different work items would be a bug the user sees. */}
-      {detailLive && (
+      {det.value && (
         <WorkItemDetail
-          key={`${detailLive.source}-${detailLive.id}`}
-          item={detailLive}
+          key={itemKey(det.value)}
+          open={det.open}
+          instant={detailInstant}
+          item={det.value}
           todayStr={work.generated_at}
           onClose={closeDetail}
           onChanged={refreshWork}
+          onDelete={item => bulk.remove([item])}
+          onEdit={openEditDialog}
         />
       )}
 
+      {pal.value && (
+        <CommandPalette
+          key={pal.value.id}
+          open={pal.open}
+          instant={pal.value.instant}
+          items={paletteItems}
+          today={work.generated_at}
+          recentKeys={recentKeys}
+          onClose={() => setPalette(null)}
+          onOpenItem={openDetail}
+          onGoView={setView}
+          onGoContext={selectCategory}
+          onCreateTask={title => setDialogTarget({ mode: 'create', initialTitle: title })}
+          onCreateEvent={title => setEventDialogTarget({ mode: 'create', itemType: 'event', initialTitle: title })}
+          onCreateReminder={() => setEventDialogTarget({ mode: 'create', itemType: 'reminder' })}
+          onShowAllInTable={q => {
+            // Clear every other narrowing first, so the Table shows the same matches the palette counted.
+            selectCategory('all');
+            setFilters(EMPTY_FILTERS);
+            setQuery(q);
+            setView('table');
+          }}
+        />
+      )}
+
+      <WbToaster raised={selectionCount > 0} />
+
       <style jsx>{`
-        .vb-view-switch-btn:focus-visible,
+        .vb-title {
+          display: flex; align-items: center; gap: 10px; margin: 0 0 4px;
+          font: 800 28px/1.15 var(--wb-font-head); letter-spacing: -0.02em; color: var(--wb-text);
+        }
+        .vb-title__mark {
+          flex: none; width: 12px; height: 28px; border-radius: 6px;
+          background: linear-gradient(180deg, var(--wb-pink-strong), var(--wb-mark-blue));
+        }
+        @media (max-width: 767px) {
+          .vb-title { font-size: 22px; }
+          .vb-title__mark { width: 10px; height: 22px; border-radius: 5px; }
+        }
         .vb-category-tab:focus-visible,
         .vb-work-search:focus-visible {
-          outline: 2px solid #2a7fa8;
+          outline: 2px solid var(--wb-blue-strong);
           outline-offset: 2px;
           border-radius: inherit;
         }
         #vb-view-panel:focus-visible {
-          outline: 2px solid #2a7fa8;
+          outline: 2px solid var(--wb-blue-strong);
           outline-offset: 2px;
-          border-radius: 22px;
+          border-radius: var(--wb-r-panel);
         }
-        /* Direction doc §10: rail moves below main content from 1023px down instead of
-           sitting beside it (kept out of the inline style above for the same specificity
-           reason documented on .vb-board-col and .vb-rail in their own files). align-items
-           switches from flex-start (top-align the two side-by-side columns at their own
-           height) to stretch (fill the full row width once stacked into a column) — leaving
-           it at flex-start under flex-direction: column would shrink both the view panel and
-           the rail down to their own content width instead of the full page width. */
-        .vb-content-row {
-          align-items: flex-start;
+        .vb-seg-scroll { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+        .vb-seg-scroll::-webkit-scrollbar { display: none; }
+        .vb-toolbar-tools { flex-wrap: wrap; }
+        .vb-search-wrap { min-width: 220px; }
+        .vb-search-btn {
+          display: none; place-items: center; width: 40px; height: 40px; flex-shrink: 0; padding: 0;
+          border-radius: var(--wb-r-lg); border: 1px solid var(--wb-hairline);
+          background: var(--wb-hover); color: var(--wb-text-muted); cursor: pointer;
         }
-        @media (max-width: 1023px) {
-          .vb-content-row {
-            flex-direction: column;
-            align-items: stretch;
-          }
+        @media (max-width: 767px) {
+          .vb-seg-scroll { width: 100%; }
+          /* Phone: the search icon, an applied query (if any) and Filters share one row. */
+          .vb-toolbar-tools { width: 100%; flex-wrap: nowrap; }
+          .vb-search-btn { display: grid; }
+          .vb-search-wrap { display: none; flex: 1; min-width: 0; }
+          .vb-search-wrap[data-has-query='true'] { display: block; }
+          .vb-work-search { padding-right: 12px !important; }
         }
-        /* Direction doc §10: the view switcher goes icon-only below 1024px — the label text
-           is hidden visually but each button's aria-label (set above) keeps its accessible
-           name, so screen-reader users still get "Focus"/"Board"/etc. rather than nothing. */
-        .vb-view-switch-btn {
-          padding: 8px 14px;
+        /* Header actions: tabs then New item, right of the title, at >= 1024px. */
+        .vb-header-actions {
+          display: flex;
+          gap: 12px;
+          align-items: flex-end;
+          flex-wrap: wrap;
         }
-        @media (max-width: 1023px) {
-          .vb-view-switch-label {
-            display: none;
-          }
-          .vb-view-switch-btn {
-            padding: 8px 12px;
-          }
-        }
+        .vb-new-item { display: inline-flex; }
+        .vb-new-item--lead { display: none; }
         /* Addendum §21's context-navigation row. Every property below is in the stylesheet
            rather than inline for one reason: a media query has to override it, and an inline
            declaration beats a class selector in every media state. align-self, flex-wrap
@@ -692,8 +894,25 @@ export default function WorkboardShell(
            line, at §21's 10px 12px floor. It never shrinks below that, never drops labels for
            icons, and never collapses to a select element — unlike the view switcher above,
            whose four icons are conventional where "Organization" has no guessable glyph (§21). */
+        /* Below 1024px the wrapper dissolves: title and New item share the first line
+           (space-between pushes the button right), and the tabs take the next line at full width. */
         @media (max-width: 1023px) {
+          .vb-header-actions {
+            display: contents;
+          }
+          .vb-title-block {
+            flex: 1 1 0;
+            min-width: 0;
+          }
+          .vb-new-item {
+            order: 1;
+            align-self: center;
+            flex-shrink: 0;
+          }
+          .vb-new-item--lead { display: inline-flex; }
+          .vb-new-item--trail { display: none; }
           .vb-context-nav {
+            order: 2;
             align-self: stretch;
             width: 100%;
           }
@@ -717,6 +936,17 @@ export default function WorkboardShell(
             padding-bottom: 1px;
             scroll-snap-type: x proximity;
             -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            /* Right-edge fade as a scroll cue (refine spec §4), dropped at the end of the strip. */
+            -webkit-mask-image: linear-gradient(90deg, black 80%, transparent);
+            mask-image: linear-gradient(90deg, black 80%, transparent);
+          }
+          .vb-context-nav[data-at-end='true'] {
+            -webkit-mask-image: none;
+            mask-image: none;
+          }
+          .vb-context-nav::-webkit-scrollbar {
+            display: none;
           }
           .vb-category-tab {
             scroll-snap-align: start;
@@ -725,5 +955,6 @@ export default function WorkboardShell(
         }
       `}</style>
     </div>
+    </QuickAddFullDialogContext.Provider>
   );
 }

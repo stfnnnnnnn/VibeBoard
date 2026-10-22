@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { Link2 } from 'lucide-react';
+import { Link2, Plus, ExternalLink } from 'lucide-react';
 // Type-only import from `workItems.ts` — that module imports `pool` (mysql2) at module scope,
 // so a *value* import here would drag the driver into this client bundle and 500 the page.
 // Same hazard documented in `StatusCell.tsx`, `PriorityCell.tsx`, `DeadlineCell.tsx`,
@@ -11,10 +11,6 @@ import type { WorkLink } from '@/lib/workboard/links';
 // The editor, and the shared owner-links store it and this cell both read. `LinksPopover` is a
 // client component with no `@/lib/db` reach of its own, so these are safe as value imports.
 import LinksPopover, { cachedOwnerLinks, loadOwnerLinks, useOwnerLinks } from '../LinksPopover';
-
-const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
-
-const DASH = '—';
 
 /** `"Canvas · GitHub · +2"` — the separator is a middle dot with hair space either side, the
  *  same one the Focus row's meta line uses. */
@@ -39,7 +35,9 @@ const VISUALLY_HIDDEN: React.CSSProperties = {
 };
 
 /**
- * The Links column's text, in the two states it can be in.
+ * The Links column's text, in the two states it can be in. Empty string for "nothing to show" —
+ * the caller renders its own "+ Link" invitation rather than this function spelling out an
+ * absence, since a zero-links row isn't a summary of anything, it's a different control.
  *
  * **When the labels are known, they are the truth.** The cache is updated the instant an add or
  * a delete succeeds inside the popover, while `link_count` has to wait for the whole work
@@ -56,12 +54,12 @@ const VISUALLY_HIDDEN: React.CSSProperties = {
  */
 export function summariseLinks(linkCount: number, links: readonly WorkLink[] | undefined): string {
   if (links !== undefined) {
-    if (links.length === 0) return DASH;
+    if (links.length === 0) return '';
     const labels = links.slice(0, MAX_LABELS).map(link => link.label);
     const rest = links.length - labels.length;
     return (rest > 0 ? [...labels, `+${rest}`] : labels).join(SEPARATOR);
   }
-  if (linkCount <= 0) return DASH;
+  if (linkCount <= 0) return '';
   return linkCount === 1 ? '1 link' : `${linkCount} links`;
 }
 
@@ -99,12 +97,19 @@ export interface LinksCellProps {
  */
 export default function LinksCell({ item, style, onChanged }: LinksCellProps) {
   const [open, setOpen] = useState(false);
+  // Keyboard-opened UI does not animate (spec 4.3); a keyboard-synthesised click has `detail` 0.
+  const [instant, setInstant] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   const links   = useOwnerLinks(item.source, item.id);
   const summary = summariseLinks(item.link_count, links);
   // The store wins here too, for the same reason it does in `summariseLinks`.
   const count   = links?.length ?? item.link_count;
+  const isEmpty = count === 0;
+  // Only once the actual label is known — a still-loading "1 link" fallback isn't a label worth
+  // pairing with an external-link glyph, since there's no link text there for the glyph to sit
+  // beside yet.
+  const showExternalGlyph = links !== undefined && links.length === 1;
 
   /** Primes the store on intent. Cheap to call repeatedly: `loadOwnerLinks` returns the cached
    *  value without a request, and joins an in-flight one rather than issuing a second.
@@ -122,76 +127,97 @@ export default function LinksCell({ item, style, onChanged }: LinksCellProps) {
 
   return (
     <td style={{ ...style, padding: CELL_PADDING }}>
-      <div style={{ position: 'relative', display: 'inline-flex' }}>
-        <button
-          ref={triggerRef}
-          type="button"
-          className="vb-links-trigger"
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          onPointerEnter={prefetch}
-          onFocus={prefetch}
-          onClick={() => setOpen(current => !current)}
-          style={{
-            // `StatusCell`'s control language exactly — itself the dialog's `CONTROL_STYLE`
-            // compressed for a table cell — so the Table's editable columns read as one
-            // control rather than four unrelated ones.
-            display: 'inline-flex', alignItems: 'center', gap: '5px',
-            boxSizing: 'border-box', minHeight: '26px', borderRadius: '8px',
-            padding: '2px 8px', background: 'rgba(255,255,255,0.6)',
-            border: '1px solid rgba(200,210,230,0.6)', fontFamily: FONT, fontSize: '0.76rem',
-            fontWeight: 600, color: '#5c6b80', lineHeight: 1.2, cursor: 'pointer',
-          }}
-        >
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`vb-links-trigger${isEmpty ? ' vb-links-trigger--empty' : ''}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onPointerEnter={prefetch}
+        onFocus={prefetch}
+        onClick={e => { setInstant(e.detail === 0); setOpen(current => !current); }}
+      >
+        {isEmpty ? (
+          <Plus size={12} aria-hidden style={{ flexShrink: 0 }} />
+        ) : (
           <Link2 size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.75 }} />
-          <span style={{
-            display: 'block', maxWidth: SUMMARY_MAX_WIDTH, overflow: 'hidden',
-            textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {summary}
-          </span>
-          {/* The accessible name is composed from the button's own content rather than an
-              `aria-label`, so the visible string is always contained in it (WCAG 2.5.3). An em
-              dash alone would name this button "—", hence the spelled-out absent state. */}
-          <span style={VISUALLY_HIDDEN}>
-            {count === 0 ? ' No links.' : ''}
-            {` Edit links for "${item.title}".`}
-          </span>
-        </button>
-
-        {open && (
-          <LinksPopover
-            // `source` and `id` *are* the owner pair — `LinkOwner['kind']` is exactly
-            // `WorkSource`, so an academic row resolves through the academic path with no
-            // translation on either side of the wire.
-            ownerKind={item.source}
-            ownerId={item.id}
-            title={item.title}
-            linkCount={count}
-            triggerRef={triggerRef}
-            onClose={() => setOpen(false)}
-            onChanged={onChanged}
-            // This cell renders inside the Table, whose ancestor chain includes the shell's
-            // `backdrop-filter` view-content wrapper — see `LinksPopoverProps.usePortal`'s own
-            // doc for why that traps a `position: fixed` popover's viewport-relative coordinates
-            // and why only this caller (not `WorkItemDetail`'s drawer) needs to opt out of it.
-            usePortal
-          />
         )}
-      </div>
+        <span style={{
+          display: 'block', maxWidth: SUMMARY_MAX_WIDTH, overflow: 'hidden',
+          textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {isEmpty ? 'Link' : summary}
+        </span>
+        {showExternalGlyph && (
+          <ExternalLink size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.55 }} />
+        )}
+        {/* The accessible name is composed from the button's own content rather than an
+            `aria-label`, so the visible string is always contained in it (WCAG 2.5.3). "Link"
+            alone would name this button ambiguously, hence the spelled-out action either way. */}
+        <span style={VISUALLY_HIDDEN}>
+          {isEmpty ? ` Add a link to "${item.title}".` : ` Edit links for "${item.title}".`}
+        </span>
+      </button>
 
-      {/* Scoped to this component, which is the one that renders the trigger. A rule for it
-          written in `WorkTableView` or in `LinksPopover` would compile cleanly and match
-          nothing — each component gets its own styled-jsx scope hash. */}
+      {open && (
+        <LinksPopover
+          // `source` and `id` *are* the owner pair — `LinkOwner['kind']` is exactly
+          // `WorkSource`, so an academic row resolves through the academic path with no
+          // translation on either side of the wire.
+          ownerKind={item.source}
+          ownerId={item.id}
+          title={item.title}
+          linkCount={count}
+          triggerRef={triggerRef}
+          onClose={() => setOpen(false)}
+          onChanged={onChanged}
+          instant={instant}
+        />
+      )}
+
+      {/* Scoped to this component, which is the one that renders the trigger. Quiet like the
+          other cells: no border or fill until the row is hovered or the trigger takes focus. An
+          empty cell keeps its "+ Link" invitation as blue text rather than a dashed box. */}
       <style jsx>{`
-        /* §9's ring, on the darker blue — :focus-visible so a mouse click does not leave a ring
-           nobody asked for, while keyboard arrival through the column always does. */
-        .vb-links-trigger:focus-visible {
-          outline: 2px solid #2a7fa8;
-          outline-offset: 2px;
+        .vb-links-trigger {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          box-sizing: border-box;
+          min-height: 26px;
+          border: 1px solid transparent;
+          border-radius: var(--wb-r-sm);
+          padding: 3px 6px;
+          background: transparent;
+          font: 600 var(--wb-fs-13) var(--wb-font-ui);
+          line-height: 1.2;
+          color: var(--wb-text-muted);
+          cursor: pointer;
         }
-        .vb-links-trigger:hover {
-          border-color: rgba(140,160,190,0.75);
+        .vb-links-trigger--empty {
+          gap: 4px;
+          font-weight: 700;
+          color: var(--wb-blue-ink);
+        }
+        @media (hover: hover) and (pointer: fine) {
+          :global(.vb-table-row:hover) .vb-links-trigger {
+            border-color: var(--wb-border);
+            background: var(--wb-surface);
+          }
+          :global(.vb-table-row:hover) .vb-links-trigger--empty {
+            border-style: dashed;
+            border-color: var(--wb-blue);
+            background: var(--wb-selected);
+          }
+        }
+        .vb-links-trigger:focus-visible {
+          border-color: var(--wb-blue-strong);
+          outline: 2px solid var(--wb-blue-strong);
+          outline-offset: 1px;
+          background: var(--wb-surface);
+        }
+        @media (hover: none) {
+          .vb-links-trigger { border-color: var(--wb-hairline); }
         }
       `}</style>
     </td>

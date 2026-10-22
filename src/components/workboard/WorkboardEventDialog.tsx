@@ -1,39 +1,32 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import WbOverlay from './ui/WbOverlay';
+import { FIELD_GROUP, FIELD_HINT, FIELD_INPUT, FIELD_LABEL } from './dialog/dialogStyles';
+// Pool-free (see its module header).
+import { addDays, manilaNowDatetime } from '@/lib/workboard/dates';
 // Type-only — `aggregate.ts` reaches `pool` (mysql2) at module scope for its *value* exports
 // (`getWorkboardWeek`), but `import type` is erased entirely, so none of that reaches this
 // client bundle. Same shape `WorkboardShell.tsx`'s own `WorkboardWeek` import already uses.
 import type { WorkboardEventItem } from '@/lib/workboard/aggregate';
 
-const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
-const HEADER_FONT = "'DM Sans','Segoe UI',sans-serif";
-
-const LABEL_STYLE: React.CSSProperties = {
-  display: 'block', fontFamily: FONT, fontSize: '0.78rem', fontWeight: 700,
-  color: '#5c6b80', marginBottom: '6px',
-};
-
-const CONTROL_STYLE: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box', minHeight: '40px', borderRadius: '10px',
-  padding: '8px 12px', background: 'rgba(255,255,255,0.6)',
-  border: '1px solid rgba(200,210,230,0.6)', fontFamily: FONT, fontSize: '0.85rem',
-  fontWeight: 500, color: '#2d3748',
-};
-
-function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
+function Field({ label, htmlFor, children, hint }: { label: string; htmlFor: string; children: React.ReactNode; hint?: string }) {
   return (
-    <div style={{ marginBottom: '16px' }}>
-      <label style={LABEL_STYLE}>{label}</label>
+    <div>
+      <label htmlFor={htmlFor} style={FIELD_LABEL}>{label}</label>
       {children}
-      {hint && <p style={{ margin: '6px 0 0', fontFamily: FONT, fontSize: '0.72rem', color: '#8a94a6' }}>{hint}</p>}
+      {hint && <p style={{ ...FIELD_HINT, marginBottom: 0 }}>{hint}</p>}
     </div>
   );
 }
 
+const ROW: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 };
+
 export type EventDialogTarget =
-  | { mode: 'create'; itemType: 'event' | 'reminder' }
+  /** `initialTitle` (ruling R6): pre-fills the title; an event lands on today 09:00-10:00, a
+   *  reminder on the next whole hour today (tomorrow 09:00 if that crosses midnight). */
+  | { mode: 'create'; itemType: 'event' | 'reminder'; initialTitle?: string }
   | { mode: 'edit'; item: WorkboardEventItem };
 
 const NETWORK_ERROR = 'Could not reach the server. Check your connection and try again.';
@@ -65,12 +58,9 @@ function toMysqlDatetime(date: string, time: string): string | null {
 
 /**
  * Create or edit a Workboard Event or Reminder — `workboard_items`' two kinds, which
- * `NewItemTypeChooser` routes here for (Task stays on the unchanged `WorkItemDialog`). Follows
- * that dialog's exact overlay shape (backdrop, Escape, outside-click, Tab trap, opener-focus
- * restore) as its own independent copy rather than a shared import, the same reasoning
- * `WorkboardShell.tsx`'s `GLASS` gives for its own triplicated constant: this file must never
- * gain a reason to import anything that reaches `pool` (mysql2) at module scope, and importing
- * from the much larger `WorkItemDialog.tsx` would tie this dialog's bundle to that one's.
+ * `NewItemTypeChooser` routes here for (Task stays on `WorkItemDialog`). The overlay mechanics
+ * (scrim, Escape, outside click, Tab trap, opener-focus restore, scroll lock) come from
+ * `WbOverlay`; the form styles from the pool-free `dialog/dialogStyles.ts`.
  *
  * Event and Reminder share this one component because they share a table and an API
  * (`workboard_items`/`/api/workboard/items`) — only the middle of the form (a start/end range
@@ -78,8 +68,12 @@ function toMysqlDatetime(date: string, time: string): string | null {
  * itself already draws between the two.
  */
 export default function WorkboardEventDialog({
-  target, onClose, onSaved,
+  open = true, instant = false, target, onClose, onSaved,
 }: {
+  /** Defaults to true so a plain conditional render keeps working; pass usePresence's flag to play the exit. */
+  open?: boolean;
+  /** Opened from the keyboard: no enter animation (spec 4.3). */
+  instant?: boolean;
   target: EventDialogTarget;
   onClose: () => void;
   onSaved: () => void | Promise<void>;
@@ -87,16 +81,29 @@ export default function WorkboardEventDialog({
   const editingItem = target.mode === 'edit' ? target.item : null;
   const itemType = target.mode === 'edit' ? target.item.item_type : target.itemType;
 
-  const dialogRef = useRef<HTMLDivElement>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const uid = useId();
+  const fid = (name: string) => `${uid}-${name}`;
 
-  const [title, setTitle] = useState(editingItem?.title ?? '');
+  // R6: a create carrying a title (e.g. from the palette) also gets a default time, in Manila time.
+  const prefill = target.mode === 'create' && target.initialTitle !== undefined;
+  const now = prefill ? manilaNowDatetime() : '';
+  const today = now.slice(0, 10);
+  const nextHour = prefill ? Number(now.slice(11, 13)) + 1 : 0;
+  const reminderDefault = nextHour >= 24
+    ? { date: addDays(today, 1), time: '09:00' }
+    : { date: today, time: `${String(nextHour).padStart(2, '0')}:00` };
+
+  const [title, setTitle] = useState(
+    editingItem?.title ?? (target.mode === 'create' ? target.initialTitle ?? '' : ''),
+  );
   const [location, setLocation] = useState(editingItem?.location ?? '');
   const [note, setNote] = useState(editingItem?.note ?? '');
 
-  const startSplit = splitDatetime(editingItem?.starts_at ?? null);
-  const endSplit = splitDatetime(editingItem?.ends_at ?? null);
-  const remindSplit = splitDatetime(editingItem?.remind_at ?? null);
+  const startSplit = prefill ? { date: today, time: '09:00' } : splitDatetime(editingItem?.starts_at ?? null);
+  const endSplit = prefill ? { date: today, time: '10:00' } : splitDatetime(editingItem?.ends_at ?? null);
+  const remindSplit = prefill ? reminderDefault : splitDatetime(editingItem?.remind_at ?? null);
   const [startDate, setStartDate] = useState(startSplit.date);
   const [startTime, setStartTime] = useState(startSplit.time);
   const [endDate, setEndDate] = useState(endSplit.date);
@@ -108,34 +115,12 @@ export default function WorkboardEventDialog({
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null;
-    firstFieldRef.current?.focus();
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      if (opener?.isConnected) opener.focus();
-    };
-  }, []);
-
-  function handleBackdropMouseDown(e: React.MouseEvent<HTMLDivElement>) {
-    if (e.target === e.currentTarget) onClose();
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); return; }
-    if (e.key !== 'Tab') return;
-    const root = dialogRef.current;
-    if (!root) return;
-    const focusables = Array.from(
-      root.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'),
-    ).filter(el => el.offsetParent !== null);
-    if (!focusables.length) return;
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  function handleFormKeyDown(e: React.KeyboardEvent<HTMLFormElement>) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      // requestSubmit keeps native `required` validation in the path, same as clicking Create.
+      formRef.current?.requestSubmit();
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -203,160 +188,143 @@ export default function WorkboardEventDialog({
   const busy = submitting || deleting;
 
   return (
-    <div
-      className="vb-dialog-backdrop"
-      onMouseDown={handleBackdropMouseDown}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(20,24,38,0.45)', zIndex: 1000,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
-      }}
+    <WbOverlay
+      open={open}
+      instant={instant}
+      onClose={onClose}
+      variant="modal"
+      labelledBy="eventDialogHeading"
+      initialFocusRef={firstFieldRef}
+      panelStyle={{ width: 'min(480px, calc(100vw - 32px))', padding: 20 }}
     >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="eventDialogHeading"
-        onKeyDown={handleKeyDown}
-        style={{
-          width: 'min(480px, 100%)', maxHeight: '88vh', overflowY: 'auto', boxSizing: 'border-box',
-          background: '#fbfbfd', borderRadius: '20px', border: '1px solid rgba(200,210,230,0.6)',
-          boxShadow: '0 20px 60px rgba(31,38,68,0.35)', padding: '24px', position: 'relative',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '18px' }}>
-          <h2 id="eventDialogHeading" style={{ margin: 0, fontFamily: HEADER_FONT, fontSize: '1.1rem', fontWeight: 800, color: '#2d3748' }}>
-            {heading}
-          </h2>
-          <button
-            type="button"
-            aria-label="Close dialog"
-            onClick={onClose}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
+        <h2 id="eventDialogHeading" style={{ margin: 0, font: '800 var(--wb-fs-20) var(--wb-font-head)', color: 'var(--wb-text)' }}>
+          {heading}
+        </h2>
+        <button
+          type="button"
+          aria-label="Close dialog"
+          onClick={onClose}
+          className="wb-pressable"
+          style={{
+            width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'transparent', border: 'none', borderRadius: 'var(--wb-r-md)',
+            color: 'var(--wb-text-muted)', cursor: 'pointer',
+          }}
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      <form ref={formRef} onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} style={FIELD_GROUP}>
+        {formError && (
+          <p
+            role="alert"
             style={{
-              width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'transparent', border: 'none', borderRadius: '8px', color: '#5c6b80', cursor: 'pointer',
+              margin: 0, padding: '8px 12px', borderRadius: 'var(--wb-r-md)',
+              background: 'var(--wb-danger-bg)', color: 'var(--wb-danger)',
+              font: '600 var(--wb-fs-13) var(--wb-font-ui)',
             }}
           >
-            <X size={18} />
-          </button>
-        </div>
+            {formError}
+          </p>
+        )}
 
-        <form onSubmit={handleSubmit}>
-          <Field label="Title">
-            <input
-              ref={firstFieldRef}
-              type="text"
-              style={CONTROL_STYLE}
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              placeholder={itemType === 'event' ? 'What\'s the event?' : 'What should this remind you of?'}
-              required
-            />
-          </Field>
+        <Field label="Title" htmlFor={fid('title')}>
+          <input
+            id={fid('title')}
+            ref={firstFieldRef}
+            type="text"
+            style={FIELD_INPUT}
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            placeholder={itemType === 'event' ? 'What\'s the event?' : 'What should this remind you of?'}
+            required
+          />
+        </Field>
 
-          {itemType === 'event' ? (
-            <>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <div style={{ flex: 1 }}>
-                  <Field label="Start date">
-                    <input type="date" style={CONTROL_STYLE} value={startDate} onChange={e => setStartDate(e.target.value)} required />
-                  </Field>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <Field label="Start time">
-                    <input type="time" style={CONTROL_STYLE} value={startTime} onChange={e => setStartTime(e.target.value)} required />
-                  </Field>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <div style={{ flex: 1 }}>
-                  <Field label="End date">
-                    <input type="date" style={CONTROL_STYLE} value={endDate} onChange={e => setEndDate(e.target.value)} required />
-                  </Field>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <Field label="End time">
-                    <input type="time" style={CONTROL_STYLE} value={endTime} onChange={e => setEndTime(e.target.value)} required />
-                  </Field>
-                </div>
-              </div>
-              <Field label="Location" hint="Optional.">
-                <input type="text" style={CONTROL_STYLE} value={location} onChange={e => setLocation(e.target.value)} />
+        {itemType === 'event' ? (
+          <>
+            <div style={ROW}>
+              <Field label="Start date" htmlFor={fid('sd')}>
+                <input id={fid('sd')} type="date" style={FIELD_INPUT} value={startDate} onChange={e => setStartDate(e.target.value)} required />
               </Field>
-            </>
-          ) : (
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <div style={{ flex: 1 }}>
-                <Field label="Date">
-                  <input type="date" style={CONTROL_STYLE} value={remindDate} onChange={e => setRemindDate(e.target.value)} required />
-                </Field>
-              </div>
-              <div style={{ flex: 1 }}>
-                <Field label="Time">
-                  <input type="time" style={CONTROL_STYLE} value={remindTime} onChange={e => setRemindTime(e.target.value)} required />
-                </Field>
-              </div>
+              <Field label="Start time" htmlFor={fid('st')}>
+                <input id={fid('st')} type="time" style={FIELD_INPUT} value={startTime} onChange={e => setStartTime(e.target.value)} required />
+              </Field>
             </div>
-          )}
-
-          <Field label="Note" hint="Optional.">
-            <textarea
-              style={{ ...CONTROL_STYLE, minHeight: '72px', resize: 'vertical' }}
-              value={note}
-              onChange={e => setNote(e.target.value)}
-            />
-          </Field>
-
-          {formError && (
-            <p role="alert" style={{ margin: '0 0 16px', fontFamily: FONT, fontSize: '0.78rem', fontWeight: 600, color: '#922e48' }}>
-              {formError}
-            </p>
-          )}
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
-            {editingItem ? (
-              <button
-                type="button"
-                onClick={() => void handleDelete()}
-                disabled={busy}
-                style={{
-                  minHeight: '38px', padding: '8px 16px', borderRadius: '10px',
-                  background: 'rgba(224,96,124,0.12)', border: '1px solid rgba(224,96,124,0.4)',
-                  fontFamily: FONT, fontSize: '0.82rem', fontWeight: 700, color: '#922e48',
-                  cursor: busy ? 'progress' : 'pointer', opacity: busy ? 0.6 : 1,
-                }}
-              >
-                {deleting ? 'Deleting…' : 'Delete'}
-              </button>
-            ) : <span />}
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={busy}
-                style={{
-                  minHeight: '38px', padding: '8px 18px', borderRadius: '10px',
-                  background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(200,210,230,0.6)',
-                  fontFamily: FONT, fontSize: '0.82rem', fontWeight: 600, color: '#5c6b80', cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={busy}
-                style={{
-                  minHeight: '38px', padding: '8px 20px', borderRadius: '10px',
-                  background: '#c0507c', border: '1px solid #c0507c',
-                  fontFamily: FONT, fontSize: '0.82rem', fontWeight: 700, color: '#fff',
-                  cursor: busy ? 'progress' : 'pointer', opacity: busy ? 0.7 : 1,
-                }}
-              >
-                {submitting ? 'Saving…' : target.mode === 'create' ? 'Create' : 'Save changes'}
-              </button>
+            <div style={ROW}>
+              <Field label="End date" htmlFor={fid('ed')}>
+                <input id={fid('ed')} type="date" style={FIELD_INPUT} value={endDate} onChange={e => setEndDate(e.target.value)} required />
+              </Field>
+              <Field label="End time" htmlFor={fid('et')}>
+                <input id={fid('et')} type="time" style={FIELD_INPUT} value={endTime} onChange={e => setEndTime(e.target.value)} required />
+              </Field>
             </div>
+            <Field label="Location" htmlFor={fid('loc')} hint="Optional.">
+              <input id={fid('loc')} type="text" style={FIELD_INPUT} value={location} onChange={e => setLocation(e.target.value)} />
+            </Field>
+          </>
+        ) : (
+          <div style={ROW}>
+            <Field label="Date" htmlFor={fid('rd')}>
+              <input id={fid('rd')} type="date" style={FIELD_INPUT} value={remindDate} onChange={e => setRemindDate(e.target.value)} required />
+            </Field>
+            <Field label="Time" htmlFor={fid('rt')}>
+              <input id={fid('rt')} type="time" style={FIELD_INPUT} value={remindTime} onChange={e => setRemindTime(e.target.value)} required />
+            </Field>
           </div>
-        </form>
-      </div>
-    </div>
+        )}
+
+        <Field label="Note" htmlFor={fid('note')} hint="Optional.">
+          <textarea
+            id={fid('note')}
+            style={{ ...FIELD_INPUT, minHeight: 72, resize: 'vertical' }}
+            value={note}
+            onChange={e => setNote(e.target.value)}
+          />
+        </Field>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 4 }}>
+          {editingItem ? (
+            <button
+              type="button"
+              className="wb-pressable"
+              onClick={() => void handleDelete()}
+              disabled={busy}
+              aria-busy={deleting || undefined}
+              style={{
+                minHeight: 38, padding: '8px 16px', borderRadius: 'var(--wb-r-lg)',
+                background: 'var(--wb-danger-bg)', border: '1px solid color-mix(in srgb, var(--wb-danger) 35%, transparent)',
+                font: '700 var(--wb-fs-13) var(--wb-font-ui)', color: 'var(--wb-danger)',
+                cursor: busy ? 'progress' : 'pointer', opacity: busy ? 0.6 : 1,
+              }}
+            >
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          ) : <span />}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className="wb-add-trigger"
+              onClick={onClose}
+              disabled={busy}
+              style={{ minHeight: 38, padding: '8px 14px' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="vb-btn-pink wb-pressable"
+              disabled={busy}
+              aria-busy={submitting || undefined}
+              aria-keyshortcuts="Control+Enter"
+            >
+              {submitting ? 'Saving…' : target.mode === 'create' ? 'Create' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+      </form>
+    </WbOverlay>
   );
 }

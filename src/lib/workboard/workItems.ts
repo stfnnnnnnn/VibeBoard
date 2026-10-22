@@ -4,7 +4,7 @@ import { todayInManilaAsUtcDate } from '@/lib/workboard/aggregate';
 import { addDays, dueDateOf } from '@/lib/workboard/dates';
 import type { WorkCategory } from '@/lib/workboard/workCategories';
 import type { WorkContext, WorkStage, LifeArea } from '@/lib/workboard/workContexts';
-import { isStageLegal, normaliseStage } from '@/lib/workboard/workContexts';
+import { isRevisionStage, isStageLegal, isWaitingStage, normaliseStage } from '@/lib/workboard/workContexts';
 import type { OrganizationSummary } from '@/lib/workboard/organizations';
 import { listOrganizations } from '@/lib/workboard/organizations';
 
@@ -63,6 +63,16 @@ export interface WorkItem {
   link_count:       number;
   subtask_total:    number;
   subtask_done:     number;
+  /** Set only while the item is in a waiting stage (`WAITING_STAGES`: Project/Organization's
+   *  `blocked`, Academic's `submitted` — whose reason is the revision note); never populated
+   *  for Life rows, and cleared together the moment the item leaves a waiting stage.
+   *  §18's "Waiting" content: what it's waiting on, and since when — Focus's own Waiting
+   *  section reads both straight off the item, no join. */
+  blocked_reason:   string | null;
+  /** "YYYY-MM-DD HH:MM:SS", Manila wall-clock — stamped server-side the instant the item
+   *  enters a waiting stage, exactly like `completed_at` is for `done`. Never
+   *  client-supplied, so it can't be spoofed or drift from actual clock skew. */
+  blocked_since:    string | null;
 }
 
 export interface ProjectSummary {
@@ -121,8 +131,10 @@ export function deriveAcademicStatus(
 
 /**
  * The stage-level companion to `deriveAcademicStatus`. Study Pulse's `'Done'` is still
- * checked FIRST — a stale overlay stage can never mask a genuinely completed item. When
- * the entry is done, the overlay only decides *which* done-ish label to show.
+ * checked FIRST — a stale overlay stage can never mask a genuinely completed item — with
+ * one exception: an overlay `submitted` ("For Revision") wins over an entry that was
+ * already Done when it was sent back (a graded entry's trigger pins it Done; see
+ * `patchAcademicItem`). An entry completed at or after `blocked_since` reads `done`.
  *
  * `inProgress` is the legacy `workboard_entry_meta.in_progress` flag, used only as a
  * fallback when no legal `work_stage` is present. As of Task 10 the PATCH route
@@ -139,8 +151,21 @@ export function deriveAcademicStage(
   entryStatus: string | null | undefined,
   metaStage: string | null | undefined,
   inProgress?: number | boolean | null,
+  accomplishedAt?: string | null,
+  blockedSince?: string | null,
 ): WorkStage {
-  if (entryStatus === 'Done') return metaStage === 'submitted' ? 'submitted' : 'done';
+  if (entryStatus === 'Done') {
+    if (metaStage !== 'submitted') return 'done';
+    // Sent back, then completed in Study Pulse: an entry Done at or after the overlay's
+    // `blocked_since` was finished after the revision request, so Study Pulse wins. Done
+    // earlier (e.g. graded before being sent back) keeps For Revision. `accomplished_at` is
+    // a DATE, compared as midnight against the DATETIME; either one null keeps the overlay.
+    if (accomplishedAt && blockedSince
+        && `${String(accomplishedAt).slice(0, 10)} 00:00:00` >= String(blockedSince).slice(0, 19)) {
+      return 'done';
+    }
+    return 'submitted';
+  }
   if (metaStage && isStageLegal('academic', metaStage)) return metaStage;
   return inProgress ? 'in_progress' : 'todo';
 }
@@ -196,7 +221,7 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
     `SELECT wi.id, wi.category, wi.project_id, wi.user_subject_id, wi.title, wi.note,
             wi.priority, wi.work_status, wi.work_stage, wi.due_at, wi.deadline_time,
             wi.start_date, wi.estimated_hours, wi.completed_at,
-            wi.life_area, wi.organization_id,
+            wi.life_area, wi.organization_id, wi.blocked_reason, wi.blocked_since,
             p.name AS project_name, p.context AS project_context,
             o.name AS organization_name,
             s.course_code,
@@ -209,48 +234,60 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
      LEFT JOIN user_subjects us ON us.user_subject_id = wi.user_subject_id
      LEFT JOIN subjects s ON s.subject_id = us.subject_id
      WHERE wi.user_id = ?
-       AND (wi.work_status != 'done' OR DATE(wi.completed_at) >= ?)`,
+       AND (wi.work_status != 'done' OR wi.work_stage = 'submitted' OR DATE(wi.completed_at) >= ?)`,
     [userId, cutoff],
   );
 
-  const items: WorkItem[] = ownedRows.map(r => ({
-    source:          'owned' as const,
-    id:              r.id,
-    title:           r.title,
-    category:        r.category,
-    context:         r.category,
-    chip_label:      r.project_name ?? r.organization_name ?? r.course_code ?? null,
-    project_name:    r.project_name ?? null,
-    course_code:     r.course_code ?? null,
-    project_id:      r.project_id,
-    user_subject_id: r.user_subject_id,
-    priority:        r.priority,
-    work_status:     r.work_status,
+  const items: WorkItem[] = ownedRows.map(r => {
     // Defensive fallback: rows created by a write path that hasn't yet been migrated to set
     // work_stage (pre-v3 POST/PATCH routes) leave the column NULL. Falling back to work_status
     // keeps the normaliseStage(work_stage) === work_status invariant true for every row.
-    work_stage:      (r.work_stage ?? r.work_status) as WorkStage,
-    due_at:          r.due_at,
-    deadline_time:   r.deadline_time,
-    start_date:      r.start_date ? String(r.start_date).slice(0, 10) : null,
-    estimated_hours: r.estimated_hours === null ? null : Number(r.estimated_hours),
-    completed_at:    r.completed_at,
-    note:            r.note,
-    life_area:       r.life_area,
-    organization_id: r.organization_id,
-    organization_name: r.organization_name,
-    project_context: r.project_context ?? null,
-    link_count:      Number(r.link_count),
-    subtask_total:   Number(r.subtask_total),
-    subtask_done:    Number(r.subtask_done),
-  }));
+    const stage = (r.work_stage ?? r.work_status) as WorkStage;
+    // Rows saved while `submitted` still normalised to done carry work_status 'done' and a
+    // completed_at; read them as the active state they now are.
+    const revision = isRevisionStage(stage);
+    return {
+      source:          'owned' as const,
+      id:              r.id,
+      title:           r.title,
+      category:        r.category,
+      context:         r.category,
+      chip_label:      r.project_name ?? r.organization_name ?? r.course_code ?? null,
+      project_name:    r.project_name ?? null,
+      course_code:     r.course_code ?? null,
+      project_id:      r.project_id,
+      user_subject_id: r.user_subject_id,
+      priority:        r.priority,
+      work_status:     revision ? normaliseStage(stage) : r.work_status,
+      work_stage:      stage,
+      due_at:          r.due_at,
+      deadline_time:   r.deadline_time,
+      start_date:      r.start_date ? String(r.start_date).slice(0, 10) : null,
+      estimated_hours: r.estimated_hours === null ? null : Number(r.estimated_hours),
+      completed_at:    revision ? null : r.completed_at,
+      note:            r.note,
+      life_area:       r.life_area,
+      organization_id: r.organization_id,
+      organization_name: r.organization_name,
+      project_context: r.project_context ?? null,
+      link_count:      Number(r.link_count),
+      subtask_total:   Number(r.subtask_total),
+      subtask_done:    Number(r.subtask_done),
+      blocked_reason:  r.blocked_reason,
+      blocked_since:   r.blocked_since,
+    };
+  });
 
   for (const spec of ACADEMIC_TABLES) {
+    // The cutoff's For Revision bypass holds only while the overlay `submitted` still wins over
+    // a Done entry: exactly `deriveAcademicStage`'s rule, the DATE `accomplished_at` read as
+    // midnight against the DATETIME `blocked_since`.
     const [rows] = await pool.execute<RowDataPacket[]>(
       `SELECT t.\`${spec.pk}\` AS entry_id, t.\`${spec.nameCol}\` AS title, t.user_subject_id,
               t.urgency, t.status, t.deadline, t.accomplished_at,
               s.course_code,
               m.in_progress, m.estimated_hours, m.start_date, m.deadline_time, m.work_stage,
+              m.blocked_reason, m.blocked_since,
               (SELECT COUNT(*) FROM workboard_item_links l WHERE l.\`${spec.metaCol}\` = t.\`${spec.pk}\`) AS link_count,
               (SELECT COUNT(*) FROM workboard_subtasks st WHERE st.\`${spec.metaCol}\` = t.\`${spec.pk}\`) AS subtask_total,
               (SELECT COUNT(*) FROM workboard_subtasks st WHERE st.\`${spec.metaCol}\` = t.\`${spec.pk}\` AND st.is_done = 1) AS subtask_done
@@ -259,7 +296,9 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
        JOIN subjects s ON s.subject_id = us.subject_id
        LEFT JOIN workboard_entry_meta m ON m.\`${spec.metaCol}\` = t.\`${spec.pk}\`
        WHERE us.user_id = ?
-         AND (t.status != 'Done' OR t.accomplished_at >= ?)`,
+         AND (t.status != 'Done' OR t.accomplished_at >= ?
+              OR (m.work_stage = 'submitted' AND (m.blocked_since IS NULL OR t.accomplished_at IS NULL
+                  OR CAST(t.accomplished_at AS DATETIME) < m.blocked_since)))`,
       [userId, cutoff],
     );
 
@@ -268,7 +307,9 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
       // separately from deriveAcademicStatus) so normaliseStage(work_stage) === work_status
       // holds by construction for every row, regardless of which write path (v2's
       // in_progress-only PATCH, or a later task's work_stage-aware one) produced it.
-      const stage = deriveAcademicStage(r.status, r.work_stage, r.in_progress);
+      const stage = deriveAcademicStage(
+        r.status, r.work_stage, r.in_progress, r.accomplished_at, r.blocked_since,
+      );
       items.push({
         source:          spec.source,
         id:              r.entry_id,
@@ -288,7 +329,10 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
         start_date:      r.start_date ? String(r.start_date).slice(0, 10) : null,
         estimated_hours: r.estimated_hours === null || r.estimated_hours === undefined
                            ? null : Number(r.estimated_hours),
-        completed_at:    r.accomplished_at ? String(r.accomplished_at).slice(0, 10) : null,
+        // Only a done stage has a completion date: a For Revision row on a Done (graded)
+        // entry must not read as completed.
+        completed_at:    normaliseStage(stage) === 'done' && r.accomplished_at
+                           ? String(r.accomplished_at).slice(0, 10) : null,
         note:            null,
         life_area:       null,
         organization_id: null,
@@ -297,6 +341,10 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
         link_count:      Number(r.link_count),
         subtask_total:   Number(r.subtask_total),
         subtask_done:    Number(r.subtask_done),
+        // Academic's waiting stage is `submitted` ("For Revision"). Gated on the derived stage
+        // so a stale overlay pair never surfaces on a row that no longer reads as waiting.
+        blocked_reason:  isWaitingStage(stage) ? r.blocked_reason ?? null : null,
+        blocked_since:   isWaitingStage(stage) ? r.blocked_since ?? null : null,
       });
     }
   }

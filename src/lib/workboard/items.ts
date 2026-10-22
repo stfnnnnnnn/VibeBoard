@@ -39,6 +39,7 @@ export interface ScheduleOverrideInput {
   overrideDate:         string;  // "YYYY-MM-DD"
   modality:             OverrideModality;
   note:                 string | null;
+  room:                 string | null;  // one-day room change; only meaningful while face-to-face
   movedDate:            string | null;  // "YYYY-MM-DD"
   movedStartTime:       string | null;  // "HH:MM"
   movedEndTime:         string | null;  // "HH:MM"
@@ -51,10 +52,10 @@ export async function insertScheduleOverride(
 ): Promise<{ overrideId: number }> {
   const [r] = await db.execute<ResultSetHeader>(
     `INSERT INTO schedule_overrides
-       (block_id, override_date, modality, note, moved_date, moved_start_time, moved_end_time,
+       (block_id, override_date, modality, note, room, moved_date, moved_start_time, moved_end_time,
         source_type, source_announcement_id)
-     VALUES (?,?,?,?,?,?,?,?,?)`,
-    [input.blockId, input.overrideDate, input.modality, input.note,
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [input.blockId, input.overrideDate, input.modality, input.note, input.room,
      input.movedDate, input.movedStartTime, input.movedEndTime,
      input.sourceType, input.sourceAnnouncementId],
   );
@@ -67,6 +68,7 @@ export async function insertScheduleOverride(
 export interface ScheduleOverrideUpdate {
   modality:       OverrideModality;
   note:           string | null;
+  room:           string | null;
   movedDate:      string | null;
   movedStartTime: string | null;
   movedEndTime:   string | null;
@@ -77,9 +79,9 @@ export async function updateScheduleOverride(
 ): Promise<void> {
   await db.execute(
     `UPDATE schedule_overrides
-     SET modality = ?, note = ?, moved_date = ?, moved_start_time = ?, moved_end_time = ?
+     SET modality = ?, note = ?, room = ?, moved_date = ?, moved_start_time = ?, moved_end_time = ?
      WHERE id = ?`,
-    [input.modality, input.note, input.movedDate, input.movedStartTime, input.movedEndTime, overrideId],
+    [input.modality, input.note, input.room, input.movedDate, input.movedStartTime, input.movedEndTime, overrideId],
   );
 }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Calendar, CheckCircle2, ChevronDown, ChevronUp, Clock, Link2, SearchX, Table2 } from 'lucide-react';
+import { AlertTriangle, Calendar, CheckCircle2, ChevronDown, ChevronUp, Clock, Link2, SearchX, Table2, Plus, ExternalLink } from 'lucide-react';
 // Type-only import from `workItems.ts` — that module imports `pool` (mysql2) at module scope,
 // so a *value* import here would drag the driver into this client bundle and 500 the page.
 // Same hazard documented in `WorkboardShell.tsx`, `WorkItemRow.tsx` and `WorkBoardView.tsx`.
@@ -15,7 +15,8 @@ import {
 // Task 17's column projections. Also pool-free: its only runtime imports are `workContexts`
 // and `dueSemantics`, and `dueSemantics` reaches only the import-free `dates.ts`.
 import { COLUMNS_BY_CONTEXT, cellValue, type ColumnKey, type TableColumn } from '@/lib/workboard/tableColumns';
-import { dueStateOf, type DueState } from '@/lib/workboard/dueSemantics';
+import { dueStateOf } from '@/lib/workboard/dueSemantics';
+import { DUE_COLOR, DUE_SR_SUFFIX } from '@/lib/workboard/ui/dueColors';
 // Pool-free by design — see the module header in `dates.ts` for the incident that put it there.
 import { dueDateOf } from '@/lib/workboard/dates';
 // Task 20's one interactive cell. It owns its own `<td>` — partly so its select's hover and
@@ -56,43 +57,62 @@ import LinksPopover, { cachedOwnerLinks, loadOwnerLinks, useOwnerLinks } from '.
 // `WorkItemRow` is already this module's home for row primitives the views share: `setWorkStage`,
 // `setPriority` and `setDeadline` are all imported from it by the Table's own cells.
 import { WorkTitleButton } from '../WorkItemRow';
+import { itemKey } from '@/lib/workboard/ui/itemKey';
+import { useSelection } from '../ui/useSelection';
+import WbCheckbox from '../ui/WbCheckbox';
+import WbBulkBar, { type BulkStatusOption } from '../ui/WbBulkBar';
+// Type-only: the hook's return shape. The shell owns the one `useBulkActions` instance.
+import type { useBulkActions } from '../useBulkActions';
+// Pool-free: the context-dot colours (refine spec §6's Context cell).
+import { CONTEXT_FILL } from '@/lib/workboard/ui/tokens';
+import { courseColor } from '@/lib/workboard/color';
+import { shortCourseCode } from '@/lib/workboard/ui/courseCode';
 
-const FONT    = "'Inter','DM Sans','Segoe UI',sans-serif";
-const DM_FONT = "'DM Sans','Segoe UI',sans-serif";
+const FONT    = 'var(--wb-font-ui)';
+const DM_FONT = 'var(--wb-font-head)';
 
 /** `'all'` is the shell's My Work tab — every context at once. Mirrors `WorkBoardView`'s
  *  `BoardContext`, and takes the same value from the same shell state. */
 export type TableContext = WorkContext | 'all';
 
-/** Direction doc §4: the coloured left edge renders on every row, always, keyed by priority.
- *  Values copied from `WorkItemRow.tsx`/`WorkBoardView.tsx` so "that pink-red edge means high"
- *  reads identically across Focus, Board and Table. */
-const EDGE_COLOR: Record<WorkItem['priority'], string> = {
-  high:   '#e0607c',
-  normal: '#b8c6da',
-  low:    '#d3dbe6',
-};
+/** Priority lives in the Priority column alone (`PriorityCell`, plan ruling R1): the row's
+ *  coloured left edge is gone with the refine pass's side stripes (spec §3). */
 
-/** §4's second half used to render here as a pill for `high` and plain text otherwise. Both now
- *  live in `PriorityCell`, which owns the column: the labels moved with the control that shows
- *  them, and the pill's alert red moved onto that control's text so the "this one is urgent"
- *  reading survives the pill's removal. `EDGE_COLOR` above — §4's *first* half, the coloured
- *  left edge — still renders from here on every row, unchanged. */
-
-/** The Deadline cell's colour (`DEADLINE_COLOR`), its visually-hidden overdue suffix
- *  (`DEADLINE_SR_SUFFIX`) and the `VISUALLY_HIDDEN` style that carried it all moved into
- *  `DeadlineCell` with the cell that renders them — same move `PriorityCell` made for the High
- *  pill's labels and colour. They are unchanged in value; they simply live next to the markup
- *  they style now that the Deadline column is a control rather than a string.
- *
- *  Task 24 brings copies of all three back to this file, under `CARD_`-prefixed names and
- *  `VISUALLY_HIDDEN` below: the phone card renders the same two values without rendering either
- *  cell, and none of the three constants is exported (nothing outside those cells had ever
- *  needed them). The copies are marked at their definitions. */
+/** The due-date colour and its visually-hidden lateness suffix come from
+ *  `lib/workboard/ui/dueColors`, shared with `DeadlineCell` so the phone card and the Deadline
+ *  cell cannot disagree about whether a date is late. */
 
 const DASH = '—';
 
-const DIVIDER = '1px solid rgba(200,210,230,0.35)';
+/** Refine spec §6 washes, shared by the table row's glass layer and the phone card. */
+const OVERDUE_WASH  = 'linear-gradient(90deg, rgba(255,196,218,.95), rgba(255,255,255,.6) 55%)';
+const SELECTED_WASH = 'linear-gradient(90deg, rgba(59,143,224,.14), rgba(255,255,255,.6))';
+const SELECTED_RING = 'inset 0 0 0 1.5px rgba(59,143,224,.45)';
+
+/** Spec §6's overdue deadline, "⚠ Overdue · Jul 7" at 700. `DeadlineCell` already draws the ⚠
+ *  icon, the date and the danger colour; these inherited properties, set on the Deadline `<td>`
+ *  only, let this view's `.is-overdue` rules add the word and the weight without the Time cell
+ *  (same component, same trigger class) picking them up. */
+const OVERDUE_LABEL_HOOK = {
+  '--vb-od-label':  '"Overdue ·"',
+  '--vb-od-weight': '700',
+  '--vb-od-color':  'var(--wb-danger)',
+} as React.CSSProperties;
+
+/** Spec §6's column order — checkbox, Work, then the context's own columns. `COLUMNS_BY_CONTEXT`
+ *  leads with the identity column (sorting and the phone card rely on that), so the view moves
+ *  Work to the front here, as a new array: the shared arrays are never touched. */
+function workFirst(cols: readonly TableColumn[]): readonly TableColumn[] {
+  return [...cols.filter(c => c.key === 'work'), ...cols.filter(c => c.key !== 'work')];
+}
+
+/** The Context cell's glow-dot colour: the course's own colour for an academic item with a
+ *  course, else the context's fill. `CONTEXT_FILL` is keyed by a free-form DB value, hence the
+ *  grey fallback. */
+function contextDot(item: WorkItem): string {
+  if (item.context === 'academic' && item.course_code) return courseColor(item.course_code);
+  return CONTEXT_FILL[item.context] ?? 'var(--wb-st-todo)';
+}
 
 /** Moved out of `DeadlineCell` for the phone card's use — the card needs the same visually-hidden
  *  treatment for the field labels its header row no longer provides. Identical values to the
@@ -163,10 +183,6 @@ const NO_COLUMNS: readonly TableColumn[] = [];
 function stageOf(item: WorkItem): WorkStage {
   const raw: string = item.work_stage;
   return raw in STAGE_LABELS ? (raw as WorkStage) : item.work_status;
-}
-
-function itemKey(item: Pick<WorkItem, 'source' | 'id'>): string {
-  return `${item.source}-${item.id}`;
 }
 
 /* ─── Sorting ──────────────────────────────────────────────────────────────────────────
@@ -307,7 +323,7 @@ function defaultComparator(todayStr: string): (a: WorkItem, b: WorkItem) => numb
  * on desktop — `PriorityCell`'s labels and alert colour, `DeadlineCell`'s due colour and its
  * overdue suffix — none of which are exported, because on desktop nothing outside those cells
  * has ever needed them. They are deliberate copies, in the same spirit as this file's own
- * `stageOf` and `EDGE_COLOR`: the alternative is widening three cells' public surface for a
+ * `stageOf`: the alternative is widening three cells' public surface for a
  * branch that renders none of them.
  */
 
@@ -318,33 +334,13 @@ const CARD_PRIORITY_LABEL: Record<WorkItem['priority'], string> = {
   low:    'Low',
 };
 
-/** `PriorityCell`'s `TEXT_COLOR`, with one change for this surface: normal and low take §1's
- *  meta colour rather than the body-text shade, because on a card the priority word sits beside
- *  the title rather than inside a control, and at body-text weight it would compete with it.
- *  High keeps §6's alert red — and the word still reads "High", so colour carries nothing
- *  alone here either. */
+/** The card's priority word: High in the alert red, Normal and Low in the muted meta colour —
+ *  the same colours `PriorityCell`'s styled-jsx gives its select. The word itself still reads
+ *  "High", so colour carries nothing alone. */
 const CARD_PRIORITY_COLOR: Record<WorkItem['priority'], string> = {
-  high:   '#922e48',
-  normal: '#5c6b80',
-  low:    '#5c6b80',
-};
-
-/** `DeadlineCell`'s `DEADLINE_COLOR`, value for value, so a date that reads late in the table
- *  reads late on the card. Keyed by `DueState` so a sixth state fails the build here. */
-const CARD_DUE_COLOR: Record<DueState, string> = {
-  none:           '#5c6b80',
-  upcoming:       '#5c6b80',
-  due_today:      '#5c6b80',
-  completed:      '#5c6b80',
-  completed_late: '#8a5010',
-  overdue:        '#922e48',
-};
-
-/** `DeadlineCell`'s `DEADLINE_SR_SUFFIX`. The card's date is a bare string, so without this the
- *  lateness would be conveyed by colour alone. */
-const CARD_DUE_SR_SUFFIX: Partial<Record<DueState, string>> = {
-  overdue:        ' (overdue)',
-  completed_late: ' (completed late)',
+  high:   'var(--wb-danger)',
+  normal: 'var(--wb-text-muted)',
+  low:    'var(--wb-text-muted)',
 };
 
 /** The identity columns — the one column per context that says *where* a work item lives
@@ -374,11 +370,14 @@ function leadColumnOf(columns: readonly TableColumn[]): TableColumn | undefined 
  * would have made anyway. Fetching every card's list up front is the per-row query `link_count`
  * exists to avoid.
  */
-function CardLinksButton({ item, onChanged }: {
+function CardLinksButton({ item, onChanged, overdue = false }: {
+  /** On the overdue wash, muted text is ~3.8:1, so the label switches to body text. */
+  overdue?:  boolean;
   item:      WorkItem;
   onChanged: () => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const [instant, setInstant] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   const links   = useOwnerLinks(item.source, item.id);
@@ -387,6 +386,10 @@ function CardLinksButton({ item, onChanged }: {
   // it is updated the instant an add or delete succeeds, while `link_count` waits for the
   // whole work payload to be re-pulled.
   const count   = links?.length ?? item.link_count;
+  const isEmpty = count === 0;
+  // `LinksCell`'s reasoning, unchanged: the glyph pairs with an actual known label, not a
+  // still-loading "1 link" placeholder.
+  const showExternalGlyph = links !== undefined && links.length === 1;
 
   /** Cheap to call repeatedly: `loadOwnerLinks` returns a cached value without a request and
    *  joins an in-flight one rather than issuing a second. Failure is silent here — a hover is
@@ -403,41 +406,48 @@ function CardLinksButton({ item, onChanged }: {
       <button
         ref={triggerRef}
         type="button"
-        className="vb-card-links"
+        className={`vb-card-links${isEmpty ? ' vb-card-links--empty' : ''}`}
         aria-haspopup="dialog"
         aria-expanded={open}
         onPointerEnter={prefetch}
         onFocus={prefetch}
-        onClick={() => setOpen(current => !current)}
+        onClick={e => { setInstant(e.detail === 0); setOpen(current => !current); }}
         style={{
-          display: 'inline-flex', alignItems: 'center', gap: '5px',
+          display: 'inline-flex', alignItems: 'center', gap: isEmpty ? '4px' : '5px',
           // 32px rather than the table trigger's 26px: this is a touch surface, and §9 sets
           // comfortable floors above WCAG 2.2's 24px minimum wherever a user actually taps.
-          boxSizing: 'border-box', minHeight: '32px', borderRadius: '8px',
-          padding: '4px 10px', background: 'rgba(255,255,255,0.6)',
+          boxSizing: 'border-box', minHeight: '32px', borderRadius: 'var(--wb-r-md)',
+          padding: '4px 10px', background: isEmpty ? 'var(--wb-selected)' : 'var(--wb-surface)',
           // `borderWidth` and `borderStyle` only. The colour is set in the rules below, for the
           // base state as well as `:hover`, because an inline `border` shorthand sets
           // border-color too — and an inline declaration beats any class selector, so a
           // `border-color` hover rule written against an inline `border` compiles cleanly and
           // never applies. That is this task's named trap, in miniature, on one element.
-          borderWidth: '1px', borderStyle: 'solid',
-          fontFamily: FONT, fontSize: '0.76rem', fontWeight: 600, color: '#5c6b80',
+          borderWidth: isEmpty ? '1.5px' : '1px', borderStyle: isEmpty ? 'dashed' : 'solid',
+          fontFamily: FONT, fontSize: 'var(--wb-fs-13)', fontWeight: isEmpty ? 700 : 600,
+          color: isEmpty ? 'var(--wb-blue-strong)' : overdue ? 'var(--wb-text)' : 'var(--wb-text-muted)',
           lineHeight: 1.2, cursor: 'pointer',
         }}
       >
-        <Link2 size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.75 }} />
+        {isEmpty ? (
+          <Plus size={12} aria-hidden style={{ flexShrink: 0 }} />
+        ) : (
+          <Link2 size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.75 }} />
+        )}
         <span style={{
           display: 'block', maxWidth: '150px', overflow: 'hidden',
           textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
-          {summary}
+          {isEmpty ? 'Link' : summary}
         </span>
+        {showExternalGlyph && (
+          <ExternalLink size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.55 }} />
+        )}
         {/* The accessible name is composed from the button's own content rather than an
-            `aria-label`, so the visible string is always contained in it (WCAG 2.5.3). An em
-            dash alone would name this button "—", hence the spelled-out absent state. */}
+            `aria-label`, so the visible string is always contained in it (WCAG 2.5.3). "Link"
+            alone would name this button ambiguously, hence the spelled-out action either way. */}
         <span style={VISUALLY_HIDDEN}>
-          {count === 0 ? ' No links.' : ''}
-          {` Edit links for "${item.title}".`}
+          {isEmpty ? ` Add a link to "${item.title}".` : ` Edit links for "${item.title}".`}
         </span>
       </button>
 
@@ -453,6 +463,7 @@ function CardLinksButton({ item, onChanged }: {
           triggerRef={triggerRef}
           onClose={() => setOpen(false)}
           onChanged={onChanged}
+          instant={instant}
         />
       )}
 
@@ -462,15 +473,13 @@ function CardLinksButton({ item, onChanged }: {
       <style jsx>{`
         /* The base border colour lives here rather than inline — see the trigger's style. */
         .vb-card-links {
-          border-color: rgba(200,210,230,0.6);
-          transition: border-color 150ms ease;
+          border-color: var(--wb-border);
         }
-        .vb-card-links:hover {
-          border-color: rgba(140,160,190,0.75);
+        .vb-card-links--empty {
+          border-color: var(--wb-blue);
         }
-        /* §9's ring, on the darker blue. */
         .vb-card-links:focus-visible {
-          outline: 2px solid #2a7fa8;
+          outline: 2px solid var(--wb-blue-strong);
           outline-offset: 2px;
         }
       `}</style>
@@ -509,10 +518,17 @@ export interface WorkTableViewProps {
    *  in the table and on the phone card alike. The Table has no `onEdit` of its own, so this is
    *  also the only route from this view to an item's full field set. */
   onOpenDetail: (item: WorkItem) => void;
+  /** The shell's one bulk-actions instance (spec §12). */
+  bulk:          ReturnType<typeof useBulkActions>;
+  /** The bulk bar's Status menu: this context's stages, or the three statuses under My Work. */
+  statusOptions: BulkStatusOption[];
+  /** Reports the selection size up so the shell can lift the toaster above the bulk bar. */
+  onSelectionCount: (n: number) => void;
 }
 
 export default function WorkTableView({
   items, context, todayStr, isFiltered, isSearching, onChanged, onNewItem, onOpenDetail,
+  bulk, statusOptions, onSelectionCount,
 }: WorkTableViewProps) {
   // Never sorted or filtered in place — `COLUMNS_BY_CONTEXT`'s arrays and their `TableColumn`
   // objects are `readonly` precisely because the same object is shared across contexts, and a
@@ -547,10 +563,19 @@ export default function WorkTableView({
    *   scroll container this returns into takes it — the columns are not compressed;
    * - **phone** — nothing, because the phone branch below renders no table.
    */
-  const columns: readonly TableColumn[] =
-    tier === 'desktop' ? contextColumns
-    : tier === 'tablet' ? contextColumns.filter(col => col.priority !== 'low')
-    : NO_COLUMNS;
+  const columns: readonly TableColumn[] = useMemo(
+    () =>
+      tier === 'desktop' ? workFirst(contextColumns)
+      : tier === 'tablet' ? workFirst(contextColumns.filter(col => col.priority !== 'low'))
+      : NO_COLUMNS,
+    [tier, contextColumns],
+  );
+  // The identity column (Context / Course / Organization / Project / Area) wears the glow dot.
+  const leadKey = leadColumnOf(contextColumns)?.key;
+
+  // The sticky header takes its frosted strip only once rows can slide under it; at rest it has
+  // no background (spec §6). `setState` with an unchanged value bails out, so scrolling is cheap.
+  const [scrolled, setScrolled] = useState(false);
 
   // The sort a column *no longer present in this context* would apply is derived away rather
   // than cleared: switching from Projects (sorted by Estimate) to Academic, which has no
@@ -579,6 +604,26 @@ export default function WorkTableView({
     const compare = comparatorFor(activeSort.key, context);
     return rows.sort((a, b) => compare(a, b, activeSort.dir));
   }, [items, activeSort, context, todayStr]);
+
+  // Selection (spec §7, §12). Keyed by `itemKey` over the rows in their displayed order, so a
+  // shift-click range covers what the user sees between the two clicks.
+  const orderedKeys = useMemo(() => sortedItems.map(itemKey), [sortedItems]);
+  const selection = useSelection(orderedKeys);
+  useEffect(() => { onSelectionCount(selection.count); }, [selection.count, onSelectionCount]);
+  useEffect(() => () => onSelectionCount(0), [onSelectionCount]);
+  // Spec §12: switching context clears the selection (a view switch unmounts the view, which clears it too).
+  useEffect(() => { selection.clear(); }, [context]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selectedItems = sortedItems.filter(i => selection.isSelected(itemKey(i)));
+
+  // Phone only: cards show their checkboxes while this is on. Turning it off clears the selection.
+  const [selectMode, setSelectMode] = useState(false);
+  // A width-tier change swaps table for cards (or back), so a selection made in one would
+  // otherwise show its bulk bar over the other with Select mode off. Start both afresh.
+  useEffect(() => { selection.clear(); setSelectMode(false); }, [tier]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleSelectMode = () => {
+    if (selectMode) selection.clear();
+    setSelectMode(on => !on);
+  };
 
   /** Ascending → descending → back to the default order. The third click clears the sort
    *  rather than re-sorting ascending, so the default is reachable without a page reload. */
@@ -611,15 +656,15 @@ export default function WorkTableView({
       // "you have no work", not a Table-flavoured one.
       return (
         <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-          <CheckCircle2 size={56} color="#74bcd9" style={{ marginBottom: '14px' }} />
-          <h2 style={{ fontFamily: DM_FONT, fontSize: '1.05rem', fontWeight: 700, color: '#2d3748', margin: '0 0 6px' }}>
+          <CheckCircle2 size={56} aria-hidden style={{ marginBottom: '14px', color: 'var(--wb-blue)' }} />
+          <h2 style={{ fontFamily: DM_FONT, fontSize: '1.05rem', fontWeight: 700, color: 'var(--wb-text)', margin: '0 0 6px' }}>
             Nothing on your plate
           </h2>
-          <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: '#5c6b80', margin: '0 0 18px' }}>
+          <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: 'var(--wb-text-muted)', margin: '0 0 18px' }}>
             Add your first work item to get started.
           </p>
           <button type="button" className="vb-btn-pink" onClick={onNewItem} style={{ width: 'auto', padding: '10px 22px' }}>
-            New Item
+            New item
           </button>
         </div>
       );
@@ -632,11 +677,11 @@ export default function WorkTableView({
       // v3 §17c's rule that this exact string must never diverge between views.
       return (
         <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-          <SearchX size={48} color="#9aa4b5" style={{ marginBottom: '14px' }} />
-          <h2 style={{ fontFamily: DM_FONT, fontSize: '1.05rem', fontWeight: 700, color: '#2d3748', margin: '0 0 6px' }}>
+          <SearchX size={48} aria-hidden style={{ marginBottom: '14px', color: 'var(--wb-text-faint)' }} />
+          <h2 style={{ fontFamily: DM_FONT, fontSize: '1.05rem', fontWeight: 700, color: 'var(--wb-text)', margin: '0 0 6px' }}>
             No matching work items
           </h2>
-          <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: '#5c6b80', margin: 0 }}>
+          <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: 'var(--wb-text-muted)', margin: 0 }}>
             Try a different category, search term, or filter.
           </p>
         </div>
@@ -647,18 +692,18 @@ export default function WorkTableView({
     // the two tests above are what make the `CONTEXT_LABELS` lookup below type-check.
     // New to Table: a context the user has simply not put any work into yet. Distinct from the
     // two states above because the fix *is* available from this view — direction doc §5e only
-    // grants an action button when that is true — so this one offers New Item.
+    // grants an action button when that is true — so this one offers New item.
     return (
       <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-        <Table2 size={48} color="#9aa4b5" style={{ marginBottom: '14px' }} />
-        <h2 style={{ fontFamily: DM_FONT, fontSize: '1.05rem', fontWeight: 700, color: '#2d3748', margin: '0 0 6px' }}>
+        <Table2 size={48} aria-hidden style={{ marginBottom: '14px', color: 'var(--wb-text-faint)' }} />
+        <h2 style={{ fontFamily: DM_FONT, fontSize: '1.05rem', fontWeight: 700, color: 'var(--wb-text)', margin: '0 0 6px' }}>
           Nothing in {CONTEXT_LABELS[context]} yet
         </h2>
-        <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: '#5c6b80', margin: '0 0 18px' }}>
+        <p style={{ fontFamily: FONT, fontSize: '0.85rem', fontWeight: 500, color: 'var(--wb-text-muted)', margin: '0 0 18px' }}>
           Work items you add under this context will appear here as rows.
         </p>
         <button type="button" className="vb-btn-pink" onClick={onNewItem} style={{ width: 'auto', padding: '10px 22px' }}>
-          New Item
+          New item
         </button>
       </div>
     );
@@ -669,6 +714,44 @@ export default function WorkTableView({
   // that structure carried. The `context === 'all'` test is also what narrows `context` to
   // `WorkContext` for the `CONTEXT_LABELS` lookup.
   const surfaceLabel = context === 'all' ? 'All work items' : `${CONTEXT_LABELS[context]} work items`;
+
+  // Portalled by `WbBulkBar` itself, so where it sits in this tree does not matter.
+  const bulkBar = selection.count > 0 && (
+    <WbBulkBar
+      count={selection.count}
+      statusOptions={statusOptions}
+      busy={bulk.busy}
+      onStatus={v => void bulk.setStatus(selectedItems, v)}
+      onPriority={p => void bulk.setPriority(selectedItems, p)}
+      onDeadline={d => void bulk.setDeadline(selectedItems, d)}
+      onDelete={() => { bulk.remove(selectedItems); selection.clear(); }}
+      onClear={selection.clear}
+    />
+  );
+
+  // Spec §6's footer. Built outside the returned trees, so it uses inline styles and global
+  // classes only — a styled-jsx class here would carry no scope hash and match nothing.
+  const overdueCount = sortedItems.filter(i => dueStateOf(i, todayStr) === 'overdue').length;
+  const footer = (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
+      padding: '8px 4px 2px 14px', fontFamily: FONT, fontSize: 'var(--wb-fs-13)', fontWeight: 600,
+      color: 'var(--wb-text-muted)',
+    }}>
+      <span>
+        {sortedItems.length} {sortedItems.length === 1 ? 'item' : 'items'}
+        {overdueCount > 0 && ` · ${overdueCount} overdue`}
+      </span>
+      <button
+        type="button"
+        className="wb-add-trigger wb-focus-ring"
+        onClick={onNewItem}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+      >
+        <Plus size={14} aria-hidden /> New item
+      </button>
+    </div>
+  );
 
   /* ─── Phone: cards, not a table ──────────────────────────────────────────────────────
    * Below 768px the `<table>` element is not rendered at all. This is a structural
@@ -708,397 +791,571 @@ export default function WorkTableView({
     const leadColumn = leadColumnOf(contextColumns);
 
     return (
-      <ul
-        // `role="list"` stated explicitly, redundant as it looks: WebKit drops a `<ul>`'s list
-        // semantics entirely when `list-style: none` is applied, so without this the card list
-        // would announce its count in every browser except Safari/VoiceOver — and the count is
-        // the whole reason this is a list rather than a stack of `<div>`s.
-        role="list"
-        aria-label={surfaceLabel}
-        style={{ listStyle: 'none', margin: 0, padding: 0, fontFamily: FONT }}
-      >
-        {sortedItems.map((item, rowIdx) => {
-          const isLast = rowIdx === sortedItems.length - 1;
-          const isDone = item.work_status === 'done';
+      <>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '4px' }}>
+          <button
+            type="button"
+            className="wb-add-trigger wb-focus-ring"
+            onClick={toggleSelectMode}
+          >
+            {selectMode ? 'Done' : 'Select'}
+          </button>
+        </div>
+        <ul
+          // `role="list"` stated explicitly, redundant as it looks: WebKit drops a `<ul>`'s list
+          // semantics entirely when `list-style: none` is applied, so without this the card list
+          // would announce its count in every browser except Safari/VoiceOver — and the count is
+          // the whole reason this is a list rather than a stack of `<div>`s.
+          role="list"
+          aria-label={surfaceLabel}
+          style={{
+            listStyle: 'none', margin: 0, padding: 0, fontFamily: FONT,
+            display: 'flex', flexDirection: 'column', gap: '6px',
+          }}
+        >
+          {sortedItems.map(item => {
+            const isDone = item.work_status === 'done';
 
-          // Every string on the card is read through `cellValue`, the same function the `<td>`s
-          // call, rather than formatted again here: a card and a row cannot word the same value
-          // differently, and `cellValue` is what guarantees an absent value reads as an em dash
-          // rather than as a blank. `dueStateOf` likewise decides lateness once for the module.
-          const leadValue = leadColumn === undefined ? null : cellValue(item, leadColumn.key);
-          const dateLabel = cellValue(item, 'deadline') ?? DASH;
-          const timeLabel = cellValue(item, 'time') ?? DASH;
-          const dueState  = dueStateOf(item, todayStr);
+            // Every string on the card is read through `cellValue`, the same function the `<td>`s
+            // call, rather than formatted again here: a card and a row cannot word the same value
+            // differently, and `cellValue` is what guarantees an absent value reads as an em dash
+            // rather than as a blank. `dueStateOf` likewise decides lateness once for the module.
+            const leadValue = leadColumn === undefined ? null : cellValue(item, leadColumn.key);
+            const dateLabel = cellValue(item, 'deadline') ?? DASH;
+            const timeLabel = cellValue(item, 'time') ?? DASH;
+            const dueState  = dueStateOf(item, todayStr);
+            const key       = itemKey(item);
+            const selected  = selection.isSelected(key);
+            // Muted on the overdue wash is ~3.8:1, so overdue cards use body text, as the rows do.
+            const overdue   = dueState === 'overdue';
+            const metaColor = overdue ? 'var(--wb-text)' : 'var(--wb-text-muted)';
+            // The Course lead shows the short code, with the full section code as its tooltip.
+            const leadCourse = leadColumn?.key === 'course' ? item.course_code : null;
 
-          return (
-            <li
-              key={itemKey(item)}
-              style={{
-                position: 'relative',
-                display: 'flex', flexDirection: 'column', gap: '6px',
-                // 15px on the left is the row's 12px rhythm plus the 3px priority edge, so the
-                // text starts where it would in the table. A floor, not a cap, exactly as §10's
-                // two-line List row is: a long title or a wrapped meta line grows the card.
-                padding: '10px 8px 10px 15px', minHeight: '82px', boxSizing: 'border-box',
-                borderBottom: isLast ? 'none' : DIVIDER,
-              }}
-            >
-              {/* §4's priority edge, unchanged in meaning from the table's first-cell border —
-                  drawn as a positioned span here because a card has no first cell to border. */}
-              <span
-                aria-hidden
+            return (
+              <li
+                key={key}
+                // Spec §6: each card is its own glass strip. The overdue and selected washes are
+                // inline because this branch has no styled-jsx block of its own.
+                className="wb-glass-item"
                 style={{
-                  position: 'absolute', left: 0, top: 0, bottom: 0, width: '3px',
-                  background: EDGE_COLOR[item.priority], borderRadius: '2px',
+                  position: 'relative',
+                  display: 'flex', flexDirection: 'column', gap: '6px',
+                  // Select mode makes room for the 40px checkbox. A floor, not a cap: a long
+                  // title or a wrapped meta line grows the card.
+                  padding: selectMode ? '10px 10px 10px 52px' : '10px 10px 10px 14px',
+                  minHeight: '82px', boxSizing: 'border-box',
+                  ...(selected
+                    ? { background: SELECTED_WASH, boxShadow: `${SELECTED_RING}, var(--wb-glass-item-shadow)` }
+                    : dueState === 'overdue' ? { background: OVERDUE_WASH } : null),
                 }}
-              />
-
-              {/* Line 1 — title, and priority at the end of the line, which is where §10's
-                  two-line List row puts the High pill. The title truncates to one line for
-                  the same reason it does there and in the Work cell: it is the one element
-                  that must never push the line taller. */}
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                {/* The card's one *other* control besides its links trigger, and the same
-                    component the table's Work cell renders. */}
-                <WorkTitleButton
-                  item={item}
-                  isDone={isDone}
-                  style={{ flex: 1, minWidth: 0 }}
-                  onOpenDetail={onOpenDetail}
-                />
-                <span style={{
-                  flexShrink: 0, fontSize: '0.72rem', fontWeight: 700,
-                  color: CARD_PRIORITY_COLOR[item.priority],
-                }}>
-                  {/* The label the `<th>` used to supply. Every value on this card carries one. */}
-                  <span style={VISUALLY_HIDDEN}>Priority: </span>
-                  {CARD_PRIORITY_LABEL[item.priority]}
-                </span>
-              </div>
-
-              {/* Line 2 — where this work lives, and what state it is in. The lead value is the
-                  context's identity column (Course / Organization / Project / Area, or Context
-                  under My Work), the same column that leads the table. */}
-              <div style={{
-                display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px',
-                fontSize: '0.76rem', fontWeight: 600, color: '#5c6b80',
-              }}>
-                {leadColumn !== undefined && (
-                  <>
-                    <span>
-                      <span style={VISUALLY_HIDDEN}>{leadColumn.label}: </span>
-                      {leadValue ?? DASH}
-                    </span>
-                    <span aria-hidden style={{ color: '#9aa4b5' }}>·</span>
-                  </>
-                )}
-                <span>
-                  <span style={VISUALLY_HIDDEN}>Status: </span>
-                  {/* `stageOf`, so the card reports the item's own stage exactly as the Status
-                      column does — five vocabularies, one label lookup. */}
-                  {STAGE_LABELS[stageOf(item)]}
-                </span>
-              </div>
-
-              {/* Line 3 — when it is due, and the links affordance. The two icons are the ones
-                  `DeadlineCell` uses for the same two values, so the card and the table read as
-                  the same information rather than two conventions. */}
-              <div style={{
-                display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px',
-                fontSize: '0.76rem', fontWeight: 600,
-              }}>
-                <span style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '4px',
-                  color: CARD_DUE_COLOR[dueState],
-                }}>
-                  <Calendar size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.75 }} />
-                  <span style={VISUALLY_HIDDEN}>Deadline: </span>
-                  {dateLabel}
-                  {/* Without this the lateness would be carried by the colour alone — the card,
-                      like the table cell, shows a bare date with no "Overdue" in the string. */}
-                  <span style={VISUALLY_HIDDEN}>
-                    {dateLabel === DASH ? ' No deadline set.' : (CARD_DUE_SR_SUFFIX[dueState] ?? '')}
+              >
+                {/* 40px on phones: `.wb-check`'s size comes from workboard.css's max-width: 767px rule. */}
+                {selectMode && (
+                  <span style={{ position: 'absolute', left: '8px', top: '2px' }}>
+                    <WbCheckbox
+                      shape="square"
+                      checked={selected}
+                      label={`Select "${item.title}"`}
+                      onChange={(_, e) => selection.toggle(key, e.shiftKey)}
+                    />
                   </span>
-                </span>
-
-                <span style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#5c6b80',
-                }}>
-                  <Clock size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.75 }} />
-                  <span style={VISUALLY_HIDDEN}>Deadline time: </span>
-                  {timeLabel}
-                  <span style={VISUALLY_HIDDEN}>{timeLabel === DASH ? ' No time set.' : ''}</span>
-                </span>
-
-                <div style={{ marginLeft: 'auto' }}>
-                  <CardLinksButton item={item} onChanged={onChanged} />
+                )}
+                {/* Line 1 — title, and priority at the end of the line, which is where §10's
+                    two-line List row puts the High pill. The title truncates to one line for
+                    the same reason it does there and in the Work cell: it is the one element
+                    that must never push the line taller. */}
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                  {/* The card's one *other* control besides its links trigger, and the same
+                      component the table's Work cell renders. */}
+                  <WorkTitleButton
+                    item={item}
+                    isDone={isDone}
+                    // `position: relative` makes the button the containing block of its
+                    // visually-hidden "Open details." span; otherwise that absolute span sits at
+                    // the end of the untruncated title and overflows the card to the right.
+                    style={{ flex: 1, minWidth: 0, position: 'relative' }}
+                    onOpenDetail={onOpenDetail}
+                  />
+                  <span style={{
+                    flexShrink: 0, fontSize: 'var(--wb-fs-12)', fontWeight: 700,
+                    color: overdue && item.priority !== 'high' ? metaColor : CARD_PRIORITY_COLOR[item.priority],
+                  }}>
+                    {/* The label the `<th>` used to supply. Every value on this card carries one. */}
+                    <span style={VISUALLY_HIDDEN}>Priority: </span>
+                    {CARD_PRIORITY_LABEL[item.priority]}
+                  </span>
                 </div>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+
+                {/* Line 2 — where this work lives, and what state it is in. The lead value is the
+                    context's identity column (Course / Organization / Project / Area, or Context
+                    under My Work), the same column that leads the table. */}
+                <div style={{
+                  display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px',
+                  fontSize: 'var(--wb-fs-12)', fontWeight: 600, color: metaColor,
+                }}>
+                  {leadColumn !== undefined && (
+                    <>
+                      <span title={leadCourse ?? undefined}>
+                        <span style={VISUALLY_HIDDEN}>{leadColumn.label}: </span>
+                        {leadCourse ? shortCourseCode(leadCourse) : (leadValue ?? DASH)}
+                      </span>
+                      <span aria-hidden style={{ color: 'var(--wb-text-faint)' }}>·</span>
+                    </>
+                  )}
+                  <span>
+                    <span style={VISUALLY_HIDDEN}>Status: </span>
+                    {/* `stageOf`, so the card reports the item's own stage exactly as the Status
+                        column does — five vocabularies, one label lookup. */}
+                    {STAGE_LABELS[stageOf(item)]}
+                  </span>
+                </div>
+
+                {/* Line 3 — when it is due, and the links affordance. The two icons are the ones
+                    `DeadlineCell` uses for the same two values, so the card and the table read as
+                    the same information rather than two conventions. */}
+                <div style={{
+                  display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px',
+                  fontSize: 'var(--wb-fs-12)', fontWeight: 600,
+                }}>
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '4px',
+                    color: DUE_COLOR[dueState],
+                  }}>
+                    {dueState === 'overdue'
+                      ? <AlertTriangle size={13} aria-hidden style={{ flexShrink: 0 }} />
+                      : <Calendar size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.75 }} />}
+                    <span style={VISUALLY_HIDDEN}>Deadline: </span>
+                    {dateLabel}
+                    {/* Without this the lateness would be carried by the colour alone — the card,
+                        like the table cell, shows a bare date with no "Overdue" in the string. */}
+                    <span style={VISUALLY_HIDDEN}>
+                      {dateLabel === DASH ? ' No deadline set.' : (DUE_SR_SUFFIX[dueState] ?? '')}
+                    </span>
+                  </span>
+
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '4px', color: metaColor,
+                  }}>
+                    <Clock size={12} aria-hidden style={{ flexShrink: 0, opacity: 0.75 }} />
+                    <span style={VISUALLY_HIDDEN}>Deadline time: </span>
+                    {timeLabel}
+                    <span style={VISUALLY_HIDDEN}>{timeLabel === DASH ? ' No time set.' : ''}</span>
+                  </span>
+
+                  <div style={{ marginLeft: 'auto' }}>
+                    <CardLinksButton item={item} onChanged={onChanged} overdue={overdue} />
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        {footer}
+        {bulkBar}
+      </>
     );
   }
 
+  /** The sticky header cell's shared look; the sort buttons and the select-all box sit in it. */
+  /** The sticky header cell's shared look; the sort buttons and the select-all box sit in it.
+   *  No background inline: `.vb-th` gets its frosted strip from the rules below once scrolled. */
+  const thStyle: React.CSSProperties = {
+    position: 'sticky', top: 0, zIndex: 2,
+    // Spec §6: a 40px header. The sort button carries its own vertical padding, so the whole
+    // strip height is the click target (WCAG 2.2 Target Size wants ≥24px).
+    height: 40, boxSizing: 'border-box', padding: '0 12px', whiteSpace: 'nowrap', verticalAlign: 'middle',
+  };
+
   return (
-    // The scroll container, not the page, is what the sticky header sticks inside — and it is
-    // focusable with a name because a scrollable region must be reachable by keyboard alone.
-    <div
-      className="vb-table-scroll"
-      role="region"
-      aria-label="Work items table"
-      tabIndex={0}
-      // `scroll-padding-top` per addendum §15d: tabbing between inline controls scrolls this
-      // container to bring the next one into view, and the sticky header would then sit on top of
-      // it — WCAG 2.2 AA *Focus Not Obscured (Minimum)* forbids persistent UI fully covering the
-      // focused control. The header is `2 + 27 + 2 = 31px` and §9's ring extends 4px past a
-      // control's box (2px outline at 2px offset), so 35px is the floor; 36px is used because it
-      // is 3 × 12, on this module's own spacing rhythm, rather than the bare floor plus one.
-      style={{ maxHeight: '68vh', overflow: 'auto', borderRadius: '12px', scrollPaddingTop: '36px' }}
-    >
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: FONT }}>
-        <caption
-          style={{
-            position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px',
-            overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
-          }}
+    <>
+      {/* The scroll container, not the page, is what the sticky header sticks inside — and it is
+          focusable with a name because a scrollable region must be reachable by keyboard alone. */}
+      <div
+        className={`vb-table-scroll${scrolled ? ' is-scrolled' : ''}`}
+        role="region"
+        aria-label="Work items table"
+        tabIndex={0}
+        onScroll={e => setScrolled(e.currentTarget.scrollTop > 0)}
+        // `scroll-padding-top` per addendum §15d: tabbing between inline controls scrolls this
+        // container to bring the next one into view, and the sticky header would then sit on top of
+        // it — WCAG 2.2 AA *Focus Not Obscured (Minimum)* forbids persistent UI fully covering the
+        // focused control. The header is 40px and §9's ring extends 4px past a control's box, so
+        // 44px is the floor; 48px leaves the 6px row gap's worth of air.
+        style={{
+          maxHeight: '68vh', overflow: 'auto', borderRadius: 'var(--wb-r-item)', scrollPaddingTop: '48px',
+          // Room for the last row's drop shadow, which the scroll box would otherwise clip.
+          paddingBottom: '6px',
+        }}
+      >
+        <table
+          className={`vb-table${selection.count ? ' has-selection' : ''}`}
+          // Spec §6: separate glass strips with a 6px gap. The negative margin hides the spacing
+          // above the header row, so no row can peek out above the sticky header.
+          style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 6px', marginTop: '-6px', fontFamily: FONT }}
         >
-          {surfaceLabel}
-        </caption>
-        <thead>
-          <tr>
-            {columns.map(col => {
-              // `null` when this column is not the sorted one — which is also what makes
-              // `aria-sort` *absent* rather than `"none"` on the other eleven headers.
-              // `activeSort`, not `sort`: the header must agree with the order actually
-              // applied, so a sort derived away by a context switch shows no caret either.
-              const dir: SortDir | null = activeSort !== null && activeSort.key === col.key ? activeSort.dir : null;
-              return (
-              // `position: sticky` lives on the `<th>`, never on `<thead>` — sticky on a
-              // table section is unreliable across browsers, on the cells it is not.
-              <th
-                key={col.key}
-                scope="col"
-                // Set on the active column only. This attribute — not the caret — is what
-                // makes the sort perceivable to a screen reader; the caret is `aria-hidden`
-                // decoration on top of it. `"none"` on every other header would announce
-                // twelve sort states per row of headers, so the others carry nothing.
-                aria-sort={dir === null ? undefined : dir === 'asc' ? 'ascending' : 'descending'}
-                style={{
-                  position: 'sticky', top: 0, zIndex: 1,
-                  textAlign: col.align === 'right' ? 'right' : 'left',
-                  // Vertical padding moved onto the button so the whole 27px-tall strip is
-                  // the click target (WCAG 2.2 Target Size wants ≥24px) rather than a 13px
-                  // ribbon of text inside a padded cell. 2 + 7 + 7 + 2 keeps the header's
-                  // rendered height exactly where it was.
-                  padding: '2px 12px', whiteSpace: 'nowrap',
-                  background: 'rgba(255,255,255,0.95)',
-                  // An inset shadow, not `borderBottom`: under `border-collapse: collapse`
-                  // the border belongs to the table rather than the cell, so it does not
-                  // travel with a sticky `<th>` — on scroll the background would stick while
-                  // the rule scrolled away, leaving the header sitting on rows undivided.
-                  boxShadow: 'inset 0 -1px 0 rgba(200,210,230,0.55)',
-                }}
-              >
-                {/* A real `<button>`, not an `onClick` on the `<th>`: a click handler on a
-                    cell is not keyboard reachable and is announced as static text, so the
-                    sort would exist only for mouse users. */}
-                <button
-                  type="button"
-                  // Without this the accessible name is the bare column label — and since
-                  // `aria-sort` is correctly absent on inactive headers, a screen-reader user
-                  // tabbing the header row gets no cue that the button sorts at all. The
-                  // visible label is contained in the name, so WCAG 2.5.3 still holds.
-                  aria-label={`Sort by ${col.label}`}
-                  className={dir === null ? 'vb-th-sort' : 'vb-th-sort vb-th-sort-on'}
-                  onClick={() => toggleSort(col.key)}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: '4px',
-                    padding: '7px 0', border: 'none', background: 'none', cursor: 'pointer',
-                    // Typography stated rather than inherited: a `<button>`'s UA style
-                    // overrides the inherited font, so leaving it off would drop the header
-                    // to 13px Arial. §1's micro-label, unchanged from before this task.
-                    fontFamily: DM_FONT, fontSize: '0.68rem', fontWeight: 800,
-                    letterSpacing: '0.04em', textTransform: 'uppercase',
-                    // Colour is deliberately NOT set here — it lives in the styled-jsx rules
-                    // below, because an inline colour would win over `:hover`.
-                  }}
+          <caption
+            style={{
+              position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px',
+              overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
+            }}
+          >
+            {surfaceLabel}
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col" className="vb-th" style={{ ...thStyle, width: 44, padding: '0 0 0 12px' }}>
+                <WbCheckbox
+                  shape="square"
+                  checked={selection.allState}
+                  label="Select all rows"
+                  onChange={on => selection.setAll(on)}
+                />
+              </th>
+              {columns.map(col => {
+                // `null` when this column is not the sorted one — which is also what makes
+                // `aria-sort` *absent* rather than `"none"` on the other eleven headers.
+                // `activeSort`, not `sort`: the header must agree with the order actually
+                // applied, so a sort derived away by a context switch shows no caret either.
+                const dir: SortDir | null = activeSort !== null && activeSort.key === col.key ? activeSort.dir : null;
+                return (
+                // `position: sticky` lives on the `<th>`, never on `<thead>` — sticky on a
+                // table section is unreliable across browsers, on the cells it is not.
+                <th
+                  key={col.key}
+                  scope="col"
+                  // Set on the active column only. This attribute — not the caret — is what
+                  // makes the sort perceivable to a screen reader; the caret is `aria-hidden`
+                  // decoration on top of it. `"none"` on every other header would announce
+                  // twelve sort states per row of headers, so the others carry nothing.
+                  aria-sort={dir === null ? undefined : dir === 'asc' ? 'ascending' : 'descending'}
+                  className="vb-th"
+                  style={{ ...thStyle, textAlign: col.align === 'right' ? 'right' : 'left' }}
                 >
-                  {col.label}
-                  {/* The slot is always rendered, empty when inactive, so toggling a caret
-                      in and out cannot change a column's width and shift the whole table. */}
-                  <span
-                    aria-hidden
+                  {/* A real `<button>`, not an `onClick` on the `<th>`: a click handler on a
+                      cell is not keyboard reachable and is announced as static text, so the
+                      sort would exist only for mouse users. */}
+                  <button
+                    type="button"
+                    // Without this the accessible name is the bare column label — and since
+                    // `aria-sort` is correctly absent on inactive headers, a screen-reader user
+                    // tabbing the header row gets no cue that the button sorts at all. The
+                    // visible label is contained in the name, so WCAG 2.5.3 still holds.
+                    aria-label={`Sort by ${col.label}`}
+                    className={dir === null ? 'vb-th-sort' : 'vb-th-sort vb-th-sort-on'}
+                    onClick={() => toggleSort(col.key)}
                     style={{
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      flex: '0 0 12px', width: '12px', height: '12px',
+                      display: 'inline-flex', alignItems: 'center', gap: '4px',
+                      padding: '7px 0', border: 'none', background: 'none', cursor: 'pointer',
+                      // Typography stated rather than inherited: a `<button>`'s UA style
+                      // overrides the inherited font. Spec 7's header label.
+                      font: '800 var(--wb-fs-11) var(--wb-font-ui)', letterSpacing: '0.06em', textTransform: 'uppercase',
+                      // Colour is deliberately NOT set here — it lives in the styled-jsx rules
+                      // below, because an inline colour would win over `:hover`.
                     }}
                   >
-                    {dir === 'asc'  ? <ChevronUp   size={12} strokeWidth={2.75} /> : null}
-                    {dir === 'desc' ? <ChevronDown size={12} strokeWidth={2.75} /> : null}
-                  </span>
-                </button>
-              </th>
+                    {col.label}
+                    {/* The slot is always rendered, empty when inactive, so toggling a caret
+                        in and out cannot change a column's width and shift the whole table. */}
+                    <span
+                      aria-hidden
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        flex: '0 0 12px', width: '12px', height: '12px',
+                      }}
+                    >
+                      {dir === 'asc'  ? <ChevronUp   size={12} strokeWidth={2.75} /> : null}
+                      {dir === 'desc' ? <ChevronDown size={12} strokeWidth={2.75} /> : null}
+                    </span>
+                  </button>
+                </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {sortedItems.map(item => {
+              const isDone    = item.work_status === 'done';
+              const isOverdue = dueStateOf(item, todayStr) === 'overdue';
+              const key       = itemKey(item);
+              const selected  = selection.isSelected(key);
+              const rowClass  = 'vb-table-row'
+                + (selected ? ' is-selected' : '')
+                + (isOverdue ? ' is-overdue' : '')
+                + (isDone ? ' is-done' : '');
+
+              return (
+                <tr key={key} className={rowClass}>
+                  <td
+                    // Shift-click extends the selection; without this it also selects page text.
+                    onMouseDown={e => { if (e.shiftKey) e.preventDefault(); }}
+                    style={{ padding: '0 0 0 12px', width: 44, verticalAlign: 'middle' }}
+                  >
+                    {/* The row's glass strip (spec §6). A `<tr>` cannot take a radius and a
+                        per-cell background restarts its gradient in every cell, so the strip is
+                        one absolutely positioned layer sized by the row (`.vb-table-row` is its
+                        containing block) and drawn behind the cells. */}
+                    <span aria-hidden className="wb-glass-item vb-row-glass" />
+                    <WbCheckbox
+                      shape="square"
+                      checked={selected}
+                      label={`Select "${item.title}"`}
+                      onChange={(_, e) => selection.toggle(key, e.shiftKey)}
+                      className="vb-row-check"
+                    />
+                  </td>
+                  {columns.map(col => {
+                    const value = cellValue(item, col.key);
+
+                    const base: React.CSSProperties = {
+                      // The row's 52px comes from the `<tr>` (spec §6); this only spaces columns.
+                      padding: '7px 12px',
+                      textAlign: col.align === 'right' ? 'right' : 'left',
+                      verticalAlign: 'middle',
+                      whiteSpace: 'nowrap',
+                      // Spec §6: every cell but Work is 550/13px muted.
+                      fontSize: 'var(--wb-fs-13)',
+                      fontWeight: 550,
+                      // Muted on the overdue wash is ~3.8:1, so overdue rows use body text (8:1).
+                      color: isOverdue ? 'var(--wb-text)' : 'var(--wb-text-muted)',
+                    };
+
+                    // `cellValue` returns a string for every value column and `null` for exactly
+                    // the four that need a component (`work`, `status`, `priority`, `links`).
+                    // Switching on the key rather than on `value === null` is what buys the
+                    // exhaustiveness check below: a thirteenth `ColumnKey` fails the build here
+                    // instead of silently rendering an em dash.
+                    switch (col.key) {
+                      case 'work':
+                        return (
+                          <td key={col.key} style={{ ...base, whiteSpace: 'normal' }}>
+                            {/* Truncation lives on an inner block, not the cell: `max-width` on a
+                                `<td>` under `table-layout: auto` is only a hint, on a block child
+                                it is honoured. That inner block is now the detail drawer's
+                                trigger — the affordance the plan always intended the title to be
+                                (it was pencilled in for Task 22 and landed here with the drawer
+                                itself), and the Table's only route to an item's full field set. */}
+                            <WorkTitleButton
+                              item={item}
+                              isDone={isDone}
+                              style={{ display: 'block', maxWidth: '340px', width: '100%', position: 'relative' }}
+                              onOpenDetail={onOpenDetail}
+                            />
+                          </td>
+                        );
+
+                      case 'status':
+                        // The cell offers the *item's own* context's stages, not this table's —
+                        // five options on an Academic row and three on a Life row even when the
+                        // two sit side by side under My Work. The displayed value has always
+                        // followed the item's own stage (`stageOf`, still the cell's own
+                        // fallback); the editable vocabulary now matches it.
+                        return (
+                          <StatusCell key={col.key} item={item} style={{ ...base, fontWeight: 600 }} onChanged={onChanged} />
+                        );
+
+                      case 'priority':
+                        // High/normal/low, the same three in every context — priority is not a
+                        // per-context vocabulary the way stages are, so unlike `StatusCell` this
+                        // cell needs nothing from the item beyond its current value.
+                        return (
+                          <PriorityCell key={col.key} item={item} style={{ ...base, fontWeight: 600 }} onChanged={onChanged} />
+                        );
+
+                      case 'links':
+                        // The bare count this cell used to render is now only its *unloaded*
+                        // state. `link_count` is all the payload carries — one COUNT subquery per
+                        // item, deliberately, rather than one list query per row — so the cell
+                        // shows "3 links" until that owner's labels are in the shared store, then
+                        // upgrades to "Canvas · GitHub · +1". Nothing about that fetch blocks this
+                        // render: the cell asks for it on pointer-enter or focus, and the popover
+                        // asks for it on open.
+                        return (
+                          <LinksCell key={col.key} item={item} style={base} onChanged={onChanged} />
+                        );
+
+                      case 'deadline':
+                      case 'time':
+                        // Both columns, one component, one editor. The `column` prop is the only
+                        // difference between the two render calls: it decides which value the cell
+                        // shows and which trigger the shared popover anchors to. `cellValue`'s
+                        // string is deliberately unused for these two now — the cell formats from
+                        // the *shown* values (stored, or the optimistic override) through the same
+                        // `formatDeadline`/`formatDeadlineTime` that `cellValue` calls, so an
+                        // in-flight edit moves the date and the time together.
+                        return (
+                          <DeadlineCell
+                            key={col.key}
+                            item={item}
+                            column={col.key}
+                            // The Deadline cell (not Time) carries the overdue label hook; the
+                            // rules below read it only on an `.is-overdue` row.
+                            style={col.key === 'deadline' ? { ...base, ...OVERDUE_LABEL_HOOK } : base}
+                            todayStr={todayStr}
+                            editor={deadlineEditor}
+                          />
+                        );
+
+                      case 'context':
+                      case 'course':
+                      case 'organization':
+                      case 'area':
+                      case 'project':
+                      case 'estimate': {
+                        // `cellValue` already guarantees a non-empty string for all six — the
+                        // `?? DASH` is belt-and-braces against a future signature change, never a
+                        // reachable path today.
+                        const text = value ?? DASH;
+                        // Spec §6: the identity column wears a glow dot. The Course column shows
+                        // the short code ("CS0061L"), with the full section code as its tooltip.
+                        if (col.key !== leadKey || text === DASH) {
+                          return <td key={col.key} style={base}>{text}</td>;
+                        }
+                        const course = col.key === 'course' ? item.course_code : null;
+                        return (
+                          <td key={col.key} style={base}>
+                            <span className="vb-ctx-cell" title={course ?? undefined}>
+                              <span
+                                aria-hidden
+                                className="wb-gdot"
+                                style={{ '--dot': contextDot(item) } as React.CSSProperties}
+                              />
+                              {course ? shortCourseCode(course) : text}
+                            </span>
+                          </td>
+                        );
+                      }
+
+                      default: {
+                        const unhandled: never = col.key;
+                        return <td key={unhandled} style={base}>{DASH}</td>;
+                      }
+                    }
+                  })}
+                </tr>
               );
             })}
-          </tr>
-        </thead>
-        <tbody>
-          {sortedItems.map((item, rowIdx) => {
-            const isLast  = rowIdx === sortedItems.length - 1;
-            const isDone  = item.work_status === 'done';
-            const divider = isLast ? 'none' : DIVIDER;
+          </tbody>
+        </table>
 
-            return (
-              <tr key={itemKey(item)} className="vb-table-row">
-                {columns.map((col, colIdx) => {
-                  const value = cellValue(item, col.key);
-
-                  const base: React.CSSProperties = {
-                    // Denser than Focus's 56px row (§27: tighter than Rituals or Finance) — the
-                    // table has no per-row card and no checkbox column to pad around.
-                    padding: '7px 12px',
-                    borderBottom: divider,
-                    // §4's priority edge, drawn as the first cell's left border rather than an
-                    // absolutely-positioned span: a `<td>` is not a positioning context by
-                    // default, and a border keeps the markup free of decorative elements.
-                    borderLeft: colIdx === 0 ? `3px solid ${EDGE_COLOR[item.priority]}` : undefined,
-                    textAlign: col.align === 'right' ? 'right' : 'left',
-                    verticalAlign: 'middle',
-                    whiteSpace: 'nowrap',
-                    fontSize: '0.8rem',
-                    fontWeight: 500,
-                    color: '#5c6b80',
-                  };
-
-                  // `cellValue` returns a string for every value column and `null` for exactly
-                  // the four that need a component (`work`, `status`, `priority`, `links`).
-                  // Switching on the key rather than on `value === null` is what buys the
-                  // exhaustiveness check below: a thirteenth `ColumnKey` fails the build here
-                  // instead of silently rendering an em dash.
-                  switch (col.key) {
-                    case 'work':
-                      return (
-                        <td key={col.key} style={{ ...base, whiteSpace: 'normal' }}>
-                          {/* Truncation lives on an inner block, not the cell: `max-width` on a
-                              `<td>` under `table-layout: auto` is only a hint, on a block child
-                              it is honoured. That inner block is now the detail drawer's
-                              trigger — the affordance the plan always intended the title to be
-                              (it was pencilled in for Task 22 and landed here with the drawer
-                              itself), and the Table's only route to an item's full field set. */}
-                          <WorkTitleButton
-                            item={item}
-                            isDone={isDone}
-                            style={{ display: 'block', maxWidth: '340px', width: '100%' }}
-                            onOpenDetail={onOpenDetail}
-                          />
-                        </td>
-                      );
-
-                    case 'status':
-                      // The cell offers the *item's own* context's stages, not this table's —
-                      // five options on an Academic row and three on a Life row even when the
-                      // two sit side by side under My Work. The displayed value has always
-                      // followed the item's own stage (`stageOf`, still the cell's own
-                      // fallback); the editable vocabulary now matches it.
-                      return (
-                        <StatusCell key={col.key} item={item} style={{ ...base, fontWeight: 600 }} onChanged={onChanged} />
-                      );
-
-                    case 'priority':
-                      // High/normal/low, the same three in every context — priority is not a
-                      // per-context vocabulary the way stages are, so unlike `StatusCell` this
-                      // cell needs nothing from the item beyond its current value.
-                      return (
-                        <PriorityCell key={col.key} item={item} style={{ ...base, fontWeight: 600 }} onChanged={onChanged} />
-                      );
-
-                    case 'links':
-                      // The bare count this cell used to render is now only its *unloaded*
-                      // state. `link_count` is all the payload carries — one COUNT subquery per
-                      // item, deliberately, rather than one list query per row — so the cell
-                      // shows "3 links" until that owner's labels are in the shared store, then
-                      // upgrades to "Canvas · GitHub · +1". Nothing about that fetch blocks this
-                      // render: the cell asks for it on pointer-enter or focus, and the popover
-                      // asks for it on open.
-                      return (
-                        <LinksCell key={col.key} item={item} style={base} onChanged={onChanged} />
-                      );
-
-                    case 'deadline':
-                    case 'time':
-                      // Both columns, one component, one editor. The `column` prop is the only
-                      // difference between the two render calls: it decides which value the cell
-                      // shows and which trigger the shared popover anchors to. `cellValue`'s
-                      // string is deliberately unused for these two now — the cell formats from
-                      // the *shown* values (stored, or the optimistic override) through the same
-                      // `formatDeadline`/`formatDeadlineTime` that `cellValue` calls, so an
-                      // in-flight edit moves the date and the time together.
-                      return (
-                        <DeadlineCell
-                          key={col.key}
-                          item={item}
-                          column={col.key}
-                          style={base}
-                          todayStr={todayStr}
-                          editor={deadlineEditor}
-                        />
-                      );
-
-                    case 'context':
-                    case 'course':
-                    case 'organization':
-                    case 'area':
-                    case 'project':
-                    case 'estimate':
-                      // `cellValue` already guarantees a non-empty string for all six — the
-                      // `?? DASH` is belt-and-braces against a future signature change, never a
-                      // reachable path today.
-                      return <td key={col.key} style={base}>{value ?? DASH}</td>;
-
-                    default: {
-                      const unhandled: never = col.key;
-                      return <td key={unhandled} style={base}>{DASH}</td>;
-                    }
-                  }
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-
-      <style jsx>{`
-        /* Every rule here targets an element rendered by *this* component — including the
-           header buttons — so they all carry this component's styled-jsx scope hash. A rule
-           for a child component's markup placed here would compile fine and match nothing. */
-        .vb-table-row:hover {
-          background: rgba(255,255,255,0.45);
-        }
-        .vb-table-scroll:focus-visible {
-          outline: 2px solid #2a7fa8;
-          outline-offset: 2px;
-        }
-        /* §8: a column header is load-bearing information, so it takes the AA-passing meta
-           colour, not one of the lighter decorative shades. The sorted column darkens to the
-           body-text shade so the active column reads as active without the caret alone. */
-        .vb-th-sort {
-          color: #5c6b80;
-          transition: color 150ms ease;
-        }
-        .vb-th-sort:hover,
-        .vb-th-sort-on {
-          color: #2d3748;
-        }
-        /* §9's ring, on the darker blue, applied via :focus-visible so a mouse click on a
-           header does not leave a ring nobody asked for. */
-        .vb-th-sort:focus-visible {
-          outline: 2px solid #2a7fa8;
-          outline-offset: 2px;
-          border-radius: 4px;
-        }
-      `}</style>
-    </div>
+        <style jsx>{`
+          /* Every rule here targets an element rendered by *this* component — including the
+             header buttons — so they all carry this component's styled-jsx scope hash. A rule
+             for a child component's markup placed here would compile fine and match nothing. */
+          /* Refine spec §6: each row is a floating glass strip. The row is the containing block
+             and its own stacking context, so the layer sits behind this row's cells only. */
+          .vb-table-row {
+            position: relative;
+            isolation: isolate;
+            height: 52px;
+            transition: transform var(--wb-dur-fast) var(--wb-ease);
+          }
+          .vb-row-glass {
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
+          }
+          .vb-table-row.is-overdue .vb-row-glass {
+            background: ${OVERDUE_WASH};
+          }
+          .vb-table-row.is-selected .vb-row-glass {
+            background: ${SELECTED_WASH};
+            box-shadow: ${SELECTED_RING}, var(--wb-glass-item-shadow);
+          }
+          /* The lift lives on the row, not the layer: the layer takes no pointer events, and the
+             cells must rise with it. Same 1px and hover shadow as .wb-glass-item--hoverable. */
+          @media (hover: hover) and (pointer: fine) {
+            .vb-table-row:hover { transform: translateY(-1px); }
+            .vb-table-row:hover .vb-row-glass { box-shadow: var(--wb-glass-item-shadow-hover); }
+            .vb-table-row.is-selected:hover .vb-row-glass {
+              box-shadow: ${SELECTED_RING}, var(--wb-glass-item-shadow-hover);
+            }
+            .vb-table-row:hover :global(.vb-row-check) { opacity: 1; }
+            .vb-th-sort:hover { color: var(--wb-text); }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .vb-table-row { transition: none; }
+            .vb-table-row:hover { transform: none; }
+          }
+          /* The header has no fill at rest; once rows can slide beneath it, it takes the panel's
+             glass over a near-opaque base so passing text cannot show through the labels. */
+          .vb-table-scroll.is-scrolled .vb-th {
+            background: var(--wb-glass-panel), rgba(255, 255, 255, 0.72);
+            box-shadow: inset 0 -1px 0 var(--wb-hairline);
+          }
+          /* Work is the one 650/14px text (spec §6). WorkTitleButton sets its weight inline, so
+             only !important can raise it from here without touching the shared component. */
+          .vb-table-row :global(.vb-row-title) {
+            font-weight: 650 !important;
+          }
+          /* Spec §6 "title muted": --wb-text-muted keeps AA; subtle would be ~2.4–3.1:1. */
+          .vb-table-row.is-done :global(.vb-row-title-done) {
+            color: var(--wb-text-muted);
+            text-decoration-thickness: 1.5px;
+          }
+          .vb-ctx-cell {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+          }
+          /* "⚠ Overdue · Jul 7": the word goes between DeadlineCell's icon and its date. The
+             alt text after the slash is empty because the cell's visually-hidden suffix already
+             says "(overdue)". Only the Deadline td defines the two properties; on the Time td the
+             content is invalid and computes to none. */
+          .vb-table-row.is-overdue :global(.vb-deadline-trigger) {
+            font-weight: var(--vb-od-weight, 600);
+            color: var(--vb-od-color, var(--wb-text));
+          }
+          /* The cells' own muted/blue-ink text is ~3.7–3.8:1 on the overdue wash; body text is 8:1.
+             High priority keeps its danger red (5.2:1). */
+          .vb-table-row.is-overdue :global(.vb-priority-select:not(.is-high)),
+          .vb-table-row.is-overdue :global(.vb-links-trigger) {
+            color: var(--wb-text);
+          }
+          .vb-table-row.is-overdue :global(.vb-deadline-trigger > svg) {
+            order: -1;
+          }
+          .vb-table-row.is-overdue :global(.vb-deadline-trigger)::before {
+            content: var(--vb-od-label) / '';
+          }
+          /* The row checkbox appears on hover or focus, and stays once anything is selected. */
+          .vb-table-row :global(.vb-row-check) {
+            opacity: 0;
+            transition: opacity var(--wb-dur-fast) var(--wb-ease);
+          }
+          .vb-table-row:focus-within :global(.vb-row-check),
+          .vb-table.has-selection :global(.vb-row-check) {
+            opacity: 1;
+          }
+          @media (hover: none) {
+            .vb-table-row :global(.vb-row-check) { opacity: 1; }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .vb-table-row :global(.vb-row-check) { transition: none; }
+          }
+          .vb-table-scroll:focus-visible {
+            outline: 2px solid var(--wb-blue-strong);
+            outline-offset: 2px;
+          }
+          /* A column header is load-bearing information, so it takes the AA-passing muted colour.
+             The sorted column darkens to the body-text shade so it reads as active without the
+             caret alone. */
+          .vb-th-sort {
+            color: var(--wb-text-muted);
+          }
+          .vb-th-sort-on {
+            color: var(--wb-text);
+          }
+          .vb-th-sort:focus-visible {
+            outline: 2px solid var(--wb-blue-strong);
+            outline-offset: 2px;
+            border-radius: var(--wb-r-sm);
+          }
+        `}</style>
+      </div>
+      {footer}
+      {bulkBar}
+    </>
   );
 }

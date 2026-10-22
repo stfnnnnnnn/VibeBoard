@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import pool from '@/lib/db';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2';
+import { ensureWorkboardSchema } from '@/lib/migrate';
 import { updateScheduleOverride } from '@/lib/workboard/items';
 import { validateOverrideModality } from '@/lib/workboard/dates';
 
@@ -13,6 +14,7 @@ import { validateOverrideModality } from '@/lib/workboard/dates';
 export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  await ensureWorkboardSchema();
   const userId = parseInt(session.user.id);
   const { id } = await props.params;
   const overrideId = parseInt(id);
@@ -30,7 +32,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   if ('error' in validated) return Response.json({ error: validated.error }, { status: 400 });
 
   await updateScheduleOverride(overrideId, {
-    modality: validated.modality, note: body.note || null,
+    modality: validated.modality, note: body.note || null, room: body.room || null,
     movedDate: validated.moved_date, movedStartTime: validated.moved_start_time, movedEndTime: validated.moved_end_time,
   });
   return Response.json({ status: 'success' });

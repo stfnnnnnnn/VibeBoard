@@ -1,0 +1,721 @@
+/* Finance design tokens and classes. Spec: docs/superpowers/specs/2026-10-18-finance-revamp-design.md §4.2.
+   Builds on src/app/workboard/workboard.css (--wb-* tokens), which /finance also imports.
+   Every Finance component styles itself with these global classes. */
+:root {
+  /* Money */
+  --fin-income: #74bcd9;   --fin-income-ink: #22678a;  --fin-income-bg: rgba(116, 188, 217, 0.16);
+  --fin-expense: #e0679d;  --fin-expense-ink: #a53468; --fin-expense-bg: rgba(240, 103, 157, 0.14);
+  --fin-expense-dark: #c65f83;
+  --fin-expense-soft: rgba(224, 103, 157, 0.75); /* pace bars within the per-day budget */
+  --fin-savings: #9b6dd6;  --fin-savings-ink: #6b46b3; --fin-savings-bg: rgba(155, 109, 214, 0.14);
+  /* Tiers */
+  --fin-tier-essential: #2a7fa8; --fin-tier-essential-ink: #22678a; --fin-tier-essential-bg: rgba(116, 188, 217, 0.16);
+  --fin-tier-committed: #9b6dd6; --fin-tier-committed-ink: #6b46b3; --fin-tier-committed-bg: rgba(155, 109, 214, 0.14);
+  --fin-tier-flexible: #64748b;  --fin-tier-flexible-ink: #4f5d72; --fin-tier-flexible-bg: rgba(100, 116, 139, 0.12);
+  /* Surfaces */
+  --fin-hero-wash: linear-gradient(135deg, rgba(242, 167, 192, 0.16), rgba(116, 188, 217, 0.16));
+  --fin-stitch: rgba(116, 188, 217, 0.35);
+  --fin-track: rgba(120, 130, 150, 0.13);
+  --fin-ghost-border: rgba(120, 130, 150, 0.26);
+  --fin-card-solid: rgba(255, 255, 255, 0.62);
+  --fin-ring-track: rgba(120, 130, 150, 0.14);
+  --fin-future-tick: rgba(120, 130, 150, 0.18);
+  /* Primary action fill: the brand pink (#f0679d) only gives white text 2.9:1, this deeper pink 4.9:1. */
+  --fin-primary: #c2407a;
+}
+/* Contrast (spec §12, Task 28 audit): text must reach 4.5:1 on the #eae8f4 glass proxy and inks
+   must hold that on their own 14–16% tints. Workboard's subtle (#8a94a6, 2.5:1) and faint
+   (#9aa4b5, 2.1:1) text tokens don't, so the Finance route re-points them; muted steps darker
+   to keep three levels of hierarchy. Scoped by :has(.fin-page) so it reaches Finance's portals
+   (drawer, popovers, toasts) and nothing outside /finance. */
+html:has(.fin-page) {
+  --wb-text-muted: #4f5d72;  /* 6.1:1 */
+  --wb-text-subtle: #5a697e; /* 4.6:1 */
+  --wb-text-faint: #5a697e;  /* 4.6:1; hierarchy below subtle comes from size and weight */
+}
+
+.fin-page { min-height: 100vh; min-height: 100dvh; color: var(--wb-text); font-family: 'Inter', sans-serif; }
+.fin-wrap { max-width: 1072px; margin: 0 auto; padding: 28px 16px 120px; }
+/* Landscape phones: keep content clear of the notch (viewport-fit=cover, finance/page.tsx). */
+@supports (padding: max(0px)) {
+  .fin-wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+}
+.fin-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fin-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.fin-card {
+  background: var(--wb-glass); border: 1px solid var(--wb-glass-border); border-radius: var(--wb-r-panel);
+  box-shadow: var(--wb-shadow-card); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  padding: 20px 22px; margin-bottom: 14px;
+}
+.fin-card__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.fin-card__title { margin: 0; font-family: 'DM Sans', sans-serif; font-size: var(--wb-fs-16); font-weight: 800; }
+.fin-card__sub { font-size: var(--wb-fs-13); color: var(--wb-text-subtle); font-weight: 600; margin-bottom: 14px; }
+.fin-push { margin-left: auto; }
+
+.fin-btn {
+  font: inherit; font-size: var(--wb-fs-13); font-weight: 700; border-radius: var(--wb-r-lg); padding: 8px 14px;
+  border: 1px solid transparent; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; cursor: pointer;
+  transition: transform var(--wb-dur-fast) var(--wb-ease), opacity var(--wb-dur-fast) var(--wb-ease);
+}
+.fin-btn:active:not(:disabled) { transform: scale(0.97); }
+.fin-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.fin-btn:focus-visible, .fin-chip:focus-visible, .fin-link:focus-visible { outline: 2px solid var(--wb-blue-strong); outline-offset: 2px; }
+.fin-btn--primary { background: var(--fin-primary); color: var(--wb-surface); box-shadow: 0 4px 14px rgba(240, 103, 157, 0.35); }
+.fin-btn--ghost { background: rgba(255, 255, 255, 0.6); border-color: var(--wb-glass-border); color: var(--wb-text-muted); }
+.fin-btn--sm { padding: 5px 10px; font-size: var(--wb-fs-12); }
+.fin-btn--block { width: 100%; justify-content: center; padding: 11px; }
+.fin-kbd { font-family: inherit; font-size: var(--wb-fs-12); font-weight: 700; border-radius: 5px; padding: 0 6px; background: rgba(45, 55, 72, 0.07); color: var(--wb-text-subtle); }
+.fin-btn--primary .fin-kbd { background: rgba(45, 55, 72, 0.22); color: var(--wb-surface); }
+
+.fin-chip {
+  font: inherit; font-size: var(--wb-fs-13); font-weight: 700; padding: 7px 12px; border-radius: var(--wb-r-pill);
+  background: rgba(45, 55, 72, 0.05); color: var(--wb-text-muted); border: 1px solid transparent; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  transition: transform var(--wb-dur-fast) var(--wb-ease);
+}
+.fin-chip:active { transform: scale(0.97); }
+.fin-chip.is-on { background: var(--fin-expense-bg); color: var(--fin-expense-ink); border-color: rgba(240, 103, 157, 0.4); }
+.fin-chip.is-on-blue { background: var(--fin-income-bg); color: var(--fin-income-ink); border-color: rgba(116, 188, 217, 0.5); }
+.fin-chip.is-on-purple { background: var(--fin-savings-bg); color: var(--fin-savings-ink); border-color: rgba(155, 109, 214, 0.45); }
+.fin-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.fin-pill { display: inline-flex; align-items: center; gap: 6px; font-size: var(--wb-fs-12); font-weight: 700; padding: 4px 10px; border-radius: var(--wb-r-pill); white-space: nowrap; }
+.fin-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.fin-pill--success { background: var(--wb-success-bg); color: var(--wb-success); }
+.fin-pill--warn { background: var(--wb-warn-bg); color: var(--wb-warn); }
+.fin-pill--danger { background: var(--wb-danger-bg); color: var(--wb-danger); }
+.fin-pill--purple { background: var(--fin-savings-bg); color: var(--fin-savings-ink); }
+.fin-pill--slate { background: var(--fin-tier-flexible-bg); color: var(--fin-tier-flexible-ink); }
+
+.fin-label { font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--wb-text-subtle); }
+.fin-hint { font-size: var(--wb-fs-12); color: var(--wb-text-faint); font-weight: 600; }
+.fin-link { font: inherit; font-size: var(--wb-fs-13); font-weight: 700; color: var(--wb-blue-ink); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: none; min-height: 24px; }
+button.fin-link { display: inline-flex; align-items: center; }
+@media (max-width: 700px) { button.fin-link { min-height: 40px; } }
+.fin-link--underline { text-decoration: underline; color: inherit; }
+.fin-amount--in { color: var(--fin-income-ink); }
+.fin-amount--out { color: var(--fin-expense-ink); }
+.fin-amount--save { color: var(--fin-savings-ink); }
+
+.fin-track { position: relative; height: 8px; border-radius: var(--wb-r-pill); background: var(--fin-track); overflow: hidden; }
+.fin-track__fill {
+  position: absolute; inset: 0; border-radius: var(--wb-r-pill); transform-origin: left;
+  transition: transform var(--wb-dur-slow) var(--wb-ease);
+  /* Grows once on reveal (spec §11.3). The keyframe has no `to`, so it ends at the inline
+     scaleX; `backwards` fill hands later value changes back to the transition above. */
+  animation: fin-grow-x var(--wb-dur-slow) var(--wb-ease) backwards;
+}
+@keyframes fin-grow-x { from { transform: scaleX(0); } }
+
+.fin-field-label { display: block; font-size: var(--wb-fs-12); font-weight: 700; color: var(--wb-text-subtle); margin: 14px 0 6px; }
+.fin-field {
+  display: flex; align-items: center; gap: 8px; width: 100%; border: 1px solid var(--wb-hairline); border-radius: var(--wb-r-lg);
+  padding: 9px 12px; background: var(--wb-surface); font-size: var(--wb-fs-14); font-weight: 700; color: var(--wb-text);
+}
+.fin-field:focus-within { outline: 2px solid var(--wb-blue-strong); outline-offset: 1px; }
+.fin-field input, .fin-field select { border: 0; outline: none; background: transparent; font: inherit; color: inherit; width: 100%; min-width: 0; }
+.fin-field__prefix { color: var(--wb-text-faint); font-weight: 800; }
+.fin-error { font-size: var(--wb-fs-12); font-weight: 600; color: var(--wb-danger); margin-top: 6px; }
+
+/* Phones: clear the fixed dock by its measured height (--wb-bulkbar-h, published by the shell). */
+@media (max-width: 700px) { .fin-wrap { padding-top: 20px; padding-bottom: calc(var(--wb-bulkbar-h, 150px) + 16px); } }
+
+/* ── Touch platform layer (Task 28, mobile-native) ──
+   Scoped to the Finance route with :has(.fin-page) so other pages keep their behaviour.
+   - No grey tap flash: every control here has its own :active press state instead.
+   - touch-action: manipulation drops the double-tap-zoom wait so taps fire at once.
+   - Control labels never get selected by a long press (content text stays selectable). */
+html:has(.fin-page) { -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+html:has(.fin-page) :is(button, select, [role='tab'], input[type='range']) { touch-action: manipulation; }
+html:has(.fin-page) :is(button, [role='tab']) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+/* Horizontal scrollers (tabs, composer chips) stop at their ends instead of triggering back-swipe. */
+.fin-tabs, .fin-composer__chips { overscroll-behavior-x: contain; }
+/* Touch tablets wider than the phone breakpoint zoom into inputs under 16px too. */
+@media (pointer: coarse) {
+  .fin-field input, .fin-field select, .fin-search input, .fin-wish__add input, .fin-chip--select, .fin-plan-select { font-size: 16px; }
+}
+/* The Log drawer as a phone bottom sheet: scrolling inside it never drags the page behind, its
+   height tracks the visible viewport (88vh overflows while the URL bar shows), and its last
+   button clears the home indicator. */
+.wb-overlay-panel.fin-sheet { overscroll-behavior: contain; }
+@media (max-width: 767px) {
+  .wb-overlay-panel.fin-sheet { max-height: 88dvh; }
+  .fin-sheet .fin-drawer { padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fin-page *, .fin-page *::before, .fin-page *::after,
+  .fin-drawer *, .fin-drawer *::before, .fin-drawer *::after,
+  .fin-dock *, .fin-dock *::before, .fin-dock *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+/* ── Header ── */
+.fin-header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.fin-header__title { margin: 0; font-family: 'DM Sans', sans-serif; font-size: var(--wb-fs-24); font-weight: 800; letter-spacing: -0.01em; }
+.fin-header__today { margin: 2px 0 0; font-size: var(--wb-fs-13); color: var(--wb-text-muted); font-weight: 600; }
+.fin-header__actions { margin-left: auto; display: flex; gap: 8px; }
+
+/* ── Pace hero (spec §5) ── */
+.fin-hero {
+  border-radius: var(--wb-r-panel); border: 1px solid var(--wb-glass-border); background: var(--wb-glass);
+  box-shadow: var(--wb-shadow-card); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  margin-bottom: 16px; overflow: hidden;
+}
+.fin-hero__body { position: relative; display: flex; flex-wrap: wrap; gap: 32px; padding: 28px 32px 24px; background: var(--fin-hero-wash); }
+.fin-hero__body::before {
+  content: ''; position: absolute; inset: 8px 8px 0; pointer-events: none;
+  border: 1.5px dashed var(--fin-stitch); border-bottom: 0; border-radius: 12px 12px 0 0;
+}
+.fin-hero__left { flex: 1.05 1 300px; align-self: center; min-width: 0; }
+.fin-hero__eyebrow { display: flex; align-items: center; gap: 8px; }
+.fin-hero__num { margin: 8px 0 0; font-size: 56px; font-weight: 800; color: var(--wb-blue-strong); line-height: 1; letter-spacing: -0.02em; }
+.fin-hero__cents { font-size: 28px; color: rgba(42, 127, 168, 0.6); letter-spacing: 0; }
+.fin-hero__perday { margin: 10px 0 0; font-size: var(--wb-fs-14); color: var(--wb-text-muted); font-weight: 600; white-space: normal; }
+.fin-hero__after { margin: 6px 0 0; font-size: var(--wb-fs-13); color: var(--wb-text-subtle); font-weight: 600; white-space: normal; }
+.fin-hero__status { margin-top: 12px; }
+.fin-hero__advice {
+  margin: 10px 0 0; max-width: 380px; font-size: var(--wb-fs-13); font-weight: 600; line-height: 1.5;
+  color: var(--wb-warn); background: var(--wb-warn-bg); border-radius: var(--wb-r-lg); padding: 8px 12px;
+}
+.fin-hero__skel { display: grid; gap: 10px; margin-top: 10px; }
+.fin-hero__pace { flex: 1 1 360px; min-width: 0; border-left: 1px solid var(--wb-hairline); padding-left: 30px; }
+.fin-hero__pace-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.fin-hero__pace-sum { margin-left: auto; font-size: var(--wb-fs-13); font-weight: 700; color: var(--wb-text-muted); }
+.fin-hero__pace-sum b { color: var(--wb-text); }
+.fin-hero__pace-sum .is-under { color: var(--wb-success); }
+.fin-hero__pace-sum .is-over { color: var(--wb-warn); }
+.fin-hero__chart { position: relative; }
+
+/* ── Pace chart ── */
+.fin-pace { margin: 14px 0 0; }
+.fin-pace__plot { position: relative; display: grid; gap: 4px; align-items: end; height: 140px; border-bottom: 1px solid var(--wb-hairline); }
+/* The What-if preview stays taller than the hero (160 / 140px on phones). */
+.fin-pace--tall .fin-pace__plot { height: 160px; }
+/* Bars, future ticks and the today dot name their own column and share row 1. */
+.fin-pace__bar, .fin-pace__today, .fin-pace__future { grid-row: 1; }
+/* Future days: a faint tick straddling the baseline, so the right side reads "still to come". */
+.fin-pace__future { align-self: end; height: 4px; margin-bottom: -2px; border-radius: 2px; background: var(--fin-future-tick); pointer-events: none; }
+.fin-pace__today {
+  position: relative; z-index: 2; align-self: end; justify-self: center; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--wb-blue-strong); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9); transform: translateY(50%); pointer-events: none;
+}
+.fin-pace__bar {
+  position: relative; border-radius: 4px 4px 2px 2px; background: var(--fin-expense-soft); outline: none;
+  transform-origin: bottom; animation: fin-grow var(--wb-dur-slow) var(--wb-ease) both;
+}
+.fin-pace__bar.is-over { background: var(--fin-expense-dark); }
+.fin-pace__bar.is-today:not(.is-over) { background: var(--fin-expense); }
+.fin-pace__bar.is-today { box-shadow: 0 0 0 2px var(--wb-surface), 0 0 0 4px var(--wb-blue-strong); }
+.fin-pace__bar:focus-visible { z-index: 3; box-shadow: 0 0 0 2px var(--wb-surface), 0 0 0 4px var(--wb-text); }
+.fin-pace__bar[data-tip]:focus-visible::after { content: attr(data-tip); }
+.fin-pace__bar[data-tip]::after {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 2; pointer-events: none;
+  background: var(--wb-text); color: var(--wb-surface); font-size: var(--wb-fs-12); font-weight: 600;
+  padding: 4px 8px; border-radius: var(--wb-r-sm); white-space: nowrap;
+}
+@media (hover: hover) and (pointer: fine) {
+  .fin-pace__bar:hover { z-index: 3; }
+  .fin-pace__bar[data-tip]:hover::after { content: attr(data-tip); }
+}
+.fin-pace__stripe {
+  position: absolute; left: 0; right: 0; top: 0; border-radius: 4px 4px 0 0;
+  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0 4px, rgba(255, 255, 255, 0.12) 4px 8px);
+}
+.fin-pace__cap { position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); font-size: var(--wb-fs-12); font-weight: 800; color: var(--fin-expense-ink); }
+.fin-pace__line { position: absolute; left: 0; right: 0; border-top: 1.5px dashed var(--wb-blue-strong); pointer-events: none; z-index: 1; }
+.fin-pace__line span {
+  position: absolute; right: 0; top: -20px; font-size: var(--wb-fs-12); font-weight: 800; color: var(--wb-blue-ink);
+  background: rgba(255, 255, 255, 0.85); padding: 0 6px; border-radius: var(--wb-r-sm);
+}
+.fin-pace__line.is-old span { text-decoration: line-through; color: var(--wb-text-faint); }
+.fin-pace__line.is-after { border-top-color: var(--wb-pink); }
+/* Under its line at the right edge, clear of the old per-day label (above its line) and of the
+   today bar, which it used to sit on top of. */
+.fin-pace__line.is-after span { top: 4px; color: var(--fin-expense-ink); }
+.fin-pace__axis { display: grid; gap: 4px; margin-top: 8px; font-size: var(--wb-fs-12); font-weight: 700; color: var(--wb-text-faint); }
+.fin-pace__axis span { white-space: nowrap; overflow: visible; }
+.fin-pace__axis .is-today { color: var(--wb-blue-ink); justify-self: center; text-align: center; }
+.fin-pace__axis .is-end { justify-self: end; text-align: right; }
+/* A small backing pill so the copy reads cleanly over the per-day line. */
+.fin-pace__empty {
+  position: absolute; left: 0; right: 0; top: 72px; width: max-content; max-width: calc(100% - 16px); margin: 0 auto; text-align: center;
+  background: rgba(255, 255, 255, 0.85); padding: 4px 10px; border-radius: var(--wb-r-pill); box-shadow: 0 0 0 1px var(--wb-hairline);
+}
+.fin-pace__legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-size: var(--wb-fs-12); font-weight: 700; color: var(--wb-text-muted); white-space: normal; }
+.fin-pace__legend > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.fin-pace__key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--fin-expense-soft); }
+.fin-pace__key.is-over { background: var(--fin-expense-dark); }
+.fin-pace__key.is-future { height: 4px; border-radius: 2px; background: var(--fin-future-tick); box-shadow: inset 0 0 0 1px var(--fin-future-tick); }
+@keyframes fin-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+
+@media (max-width: 700px) {
+  .fin-hero__body { padding: 22px 20px 18px; gap: 18px; }
+  .fin-hero__num { font-size: 42px; }
+  .fin-hero__cents { font-size: 22px; }
+  .fin-hero__pace { border-left: 0; padding-left: 0; border-top: 1px solid var(--wb-hairline); padding-top: 14px; }
+  .fin-pace__axis .is-mid { visibility: hidden; }
+  .fin-pace__plot { height: 120px; }
+  .fin-pace--tall .fin-pace__plot { height: 140px; }
+  .fin-pace__empty { top: 62px; }
+}
+
+/* ── Tabs attached to the hero (spec §5.4) ── */
+.fin-tabs {
+  display: flex; gap: 4px; padding: 0 24px; background: rgba(255, 255, 255, 0.55); border-top: 1px solid var(--wb-hairline);
+  overflow-x: auto; scrollbar-width: none;
+}
+.fin-tabs::-webkit-scrollbar { display: none; }
+.fin-tabs__tab {
+  font: inherit; font-size: var(--wb-fs-14); font-weight: 700; color: var(--wb-text-muted); background: none; border: 0;
+  border-bottom: 2.5px solid transparent; padding: 13px 14px 11px; min-height: 44px; white-space: nowrap; cursor: pointer;
+}
+.fin-tabs__tab.is-on { color: var(--wb-text); border-bottom-color: var(--wb-pink); }
+.fin-tabs__tab:focus-visible { outline: 2px solid var(--wb-blue-strong); outline-offset: -2px; }
+.fin-tabs__badge { margin-left: 6px; font-size: var(--wb-fs-12); font-weight: 800; background: var(--wb-warn-bg); color: var(--wb-warn); border-radius: var(--wb-r-pill); padding: 0 7px; }
+.fin-panel { animation: fin-fade var(--wb-dur-fast) var(--wb-ease); }
+@keyframes fin-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (max-width: 700px) {
+  .fin-header__actions .fin-btn { min-height: 40px; min-width: 40px; justify-content: center; }
+  .fin-tabs { padding: 0 8px; }
+  .fin-header__lbl, .fin-header__kbd { display: none; }
+}
+
+/* ─── Toaster offset, confirm popover, phone input size (Task 14) ─── */
+/* No .fin-page default for --wb-bulkbar-h: FinanceShell publishes the dock's measured height on
+   <html>, and a default here would shadow it for the toaster (which renders inside .fin-page). */
+.fin-btn--danger { background: var(--wb-danger); color: var(--wb-surface); }
+.fin-confirm { padding: 14px; }
+.fin-confirm__title { margin: 0; font-weight: 800; font-size: var(--wb-fs-14); }
+.fin-confirm__body { margin: 6px 0 0; font-size: var(--wb-fs-13); color: var(--wb-text-muted); font-weight: 600; line-height: 1.45; }
+.fin-confirm__row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+@media (max-width: 700px) { .fin-field input { font-size: 16px; } }
+
+/* ── Composer (spec §7.1) ── */
+.fin-composer-slot { margin-bottom: 14px; }
+.fin-composer { display: block; }
+.fin-composer__row {
+  display: flex; align-items: center; gap: 8px; background: var(--wb-surface); border: 1px solid var(--wb-hairline);
+  border-radius: var(--wb-r-xl); padding: 8px; box-shadow: var(--wb-shadow-pop);
+}
+.fin-composer__amount { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: var(--wb-r-lg); background: rgba(45, 55, 72, 0.05); min-width: 130px; }
+.fin-composer__peso { color: var(--wb-text-faint); font-size: var(--wb-fs-16); font-weight: 800; }
+.fin-composer__amount input { border: 0; outline: none; background: transparent; font: inherit; font-size: var(--wb-fs-20); font-weight: 800; width: 100px; color: var(--wb-text); font-variant-numeric: tabular-nums; }
+.fin-composer__amount:focus-within { box-shadow: 0 0 0 2px var(--wb-blue-strong); }
+/* Sentence bar (Addendum B): "₱ 250 on 🍜 Food · Today". */
+.fin-composer--inline .fin-composer__amount { min-width: 170px; font-family: 'DM Sans', sans-serif; }
+.fin-composer--inline .fin-composer__peso,
+.fin-composer--inline .fin-composer__amount input { font-size: var(--wb-fs-24); }
+.fin-composer--inline .fin-composer__amount input { width: 120px; min-height: 36px; }
+.fin-composer__word { font-size: var(--wb-fs-14); font-weight: 600; color: var(--wb-text-subtle); }
+.fin-composer__chips { display: flex; gap: 6px; overflow-x: auto; flex: 1; min-width: 0; scrollbar-width: none; }
+.fin-composer__chips::-webkit-scrollbar { display: none; }
+.fin-chip--select { appearance: none; -webkit-appearance: none; padding-right: 12px; }
+.fin-composer__under { display: flex; align-items: center; gap: 14px; font-size: var(--wb-fs-12); color: var(--wb-text-subtle); font-weight: 600; padding: 8px 6px 0; white-space: normal; min-height: 26px; }
+.fin-composer__under b { color: var(--wb-text); font-weight: 700; }
+
+/* Category picker (Addendum B). The button reads as one word of the composer sentence. */
+.fin-catpick {
+  font: inherit; font-size: var(--wb-fs-14); font-weight: 700; color: var(--wb-text); cursor: pointer; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: var(--wb-r-lg);
+  background: var(--wb-surface); border: 1px solid var(--wb-hairline);
+  transition: transform var(--wb-dur-fast) var(--wb-ease);
+}
+.fin-catpick:active { transform: scale(0.97); }
+.fin-catpick:focus-visible { outline: 2px solid var(--wb-blue-strong); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) { .fin-catpick:hover { background: var(--wb-hover); } }
+.fin-catpick__caret { font-size: var(--wb-fs-12); color: var(--wb-text-subtle); }
+.fin-chip .fin-catpick__caret { color: inherit; }
+.fin-catpick__pop { padding: 12px; }
+.fin-catpick__filter { padding: 7px 10px; font-size: var(--wb-fs-13); }
+.fin-catpick__list { margin-top: 4px; }
+.fin-catpick__sec { margin: 10px 2px 6px; }
+.fin-catpick__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.fin-catpick__tile {
+  font: inherit; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 0; min-height: 44px;
+  padding: 8px 4px; border: 0; border-radius: var(--wb-r-lg); background: transparent; color: var(--wb-text-muted);
+  font-size: var(--wb-fs-12); font-weight: 700; cursor: pointer;
+}
+.fin-catpick__tile.is-on { background: var(--fin-expense-bg); color: var(--fin-expense-ink); }
+.fin-catpick__tile:focus-visible { outline: 2px solid var(--wb-blue-strong); outline-offset: -2px; }
+@media (hover: hover) and (pointer: fine) { .fin-catpick__tile:not(.is-on):hover { background: var(--wb-hover); } }
+.fin-catpick__emoji { font-size: 18px; line-height: 1.2; }
+.fin-catpick__lbl { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-catpick__none { margin: 12px 2px 4px; }
+@media (pointer: coarse) { .fin-catpick__filter input { font-size: 16px; } }
+@media (max-width: 700px) {
+  .fin-catpick__filter input { font-size: 16px; min-height: 30px; }
+  /* Above the dock the popover may be short on room: the tiles scroll, the filter stays. */
+  .fin-catpick__list { max-height: min(340px, 52dvh); overflow-y: auto; overscroll-behavior: contain; }
+}
+@media (prefers-reduced-motion: reduce) { .fin-catpick:active { transform: none; } }
+.fin-datechoice { display: grid; gap: 4px; padding: 10px; }
+.fin-datechoice__opt { font: inherit; text-align: left; font-size: var(--wb-fs-13); font-weight: 700; border: 0; background: none; padding: 8px 10px; border-radius: var(--wb-r-md); cursor: pointer; color: var(--wb-text); }
+@media (hover: hover) and (pointer: fine) { .fin-datechoice__opt:hover { background: var(--wb-hover); } }
+
+.fin-dock { display: none; }
+@media (max-width: 700px) {
+  .fin-composer-slot { display: none; }
+  .fin-dock {
+    display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 35;
+    background: rgba(255, 255, 255, 0.97); border-top: 1px solid var(--wb-hairline);
+    padding: 10px max(12px, env(safe-area-inset-right, 0px)) calc(14px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  }
+  .fin-composer--dock .fin-composer__chips { margin-bottom: 8px; }
+  .fin-composer--dock .fin-composer__row { box-shadow: none; border: 0; padding: 0; background: transparent; }
+  .fin-composer--dock .fin-composer__amount { flex: 1; min-width: 0; background: rgba(45, 55, 72, 0.05); padding: 0 12px; }
+  /* The input itself is the 40px target (the padded wrapper isn't a label, so taps on it missed). */
+  .fin-composer--dock .fin-composer__amount input { font-size: 16px; width: 100%; min-height: 40px; }
+  .fin-composer--dock .fin-composer__send { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .fin-composer--dock .fin-composer__more { width: 44px; height: 44px; justify-content: center; }
+  .fin-composer--dock .fin-chip { min-height: 40px; }
+}
+
+/* The dock shows at <=700px but Sonner only switches to its mobileOffset (which clears the dock)
+   at <=600px. At 601–700px lift the bottom toaster above the dock's published height too.
+   Scoped by :has(.fin-dock), which only exists while /finance is mounted. */
+@media (min-width: 601px) and (max-width: 700px) {
+  html:has(.fin-dock) [data-sonner-toaster][data-y-position='bottom'] { bottom: calc(var(--wb-bulkbar-h, 104px) + 24px); }
+}
+
+/* ── Drawer (spec §7.2) ── */
+.fin-drawer { padding: 20px; }
+.fin-drawer__head { display: flex; align-items: center; margin-bottom: 6px; }
+.fin-drawer__title { margin: 0; font-family: 'DM Sans', sans-serif; font-size: var(--wb-fs-20); font-weight: 800; }
+.fin-again { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fin-again__tile {
+  font: inherit; display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; cursor: pointer;
+  background: var(--wb-surface); border: 1px solid var(--wb-hairline); border-radius: var(--wb-r-xl);
+  transition: transform var(--wb-dur-fast) var(--wb-ease);
+}
+.fin-again__tile:active:not(:disabled) { transform: scale(0.97); }
+.fin-again__tile:focus-visible { outline: 2px solid var(--wb-blue-strong); outline-offset: 2px; }
+.fin-again__text { display: grid; min-width: 0; }
+.fin-again__name { font-size: var(--wb-fs-13); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-again__amt { font-size: var(--wb-fs-12); color: var(--wb-text-subtle); font-weight: 600; }
+.fin-again__go { margin-left: auto; font-size: var(--wb-fs-12); font-weight: 800; color: var(--fin-expense-ink); background: var(--fin-expense-bg); border-radius: var(--wb-r-sm); padding: 2px 6px; }
+.fin-again__go.is-save { color: var(--fin-savings-ink); background: var(--fin-savings-bg); }
+.fin-drawer__or { display: flex; align-items: center; gap: 10px; margin: 18px 0 0; font-size: var(--wb-fs-12); color: var(--wb-text-faint); font-weight: 600; }
+.fin-drawer__or::before, .fin-drawer__or::after { content: ''; flex: 1; height: 1px; background: var(--wb-hairline); }
+.fin-drawer__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fin-drawer__impact { margin: 12px 0 0; white-space: normal; }
+.fin-drawer .fin-btn--block { margin-top: 16px; }
+.fin-ico { width: 32px; height: 32px; border-radius: var(--wb-r-lg); display: grid; place-items: center; font-size: var(--wb-fs-14); flex: none; }
+.fin-ico--out { background: var(--fin-expense-bg); }
+.fin-ico--save { background: var(--fin-savings-bg); color: var(--fin-savings-ink); }
+.fin-ico--in { background: var(--fin-income-bg); color: var(--fin-income-ink); }
+
+@media (max-width: 700px) {
+  .fin-drawer .fin-chip { min-height: 40px; }
+  .fin-drawer .fin-btn--sm { min-width: 40px; min-height: 40px; justify-content: center; }
+  .fin-field select { font-size: 16px; }
+}
+
+/* ── Feed (spec §9.2) ── */
+.fin-feed__day + .fin-feed__day { margin-top: 4px; }
+.fin-feed__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0; padding: 14px 0 6px; border-bottom: 1px solid var(--wb-hairline); font-size: inherit; font-weight: inherit; }
+.fin-feed__title { font-family: 'DM Sans', sans-serif; font-size: var(--wb-fs-14); font-weight: 800; }
+.fin-feed__sub { font-size: var(--wb-fs-12); color: var(--wb-text-subtle); font-weight: 600; }
+.fin-feed__net { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-self: center; gap: 6px; text-align: right; font-size: var(--wb-fs-13); font-weight: 800; }
+/* Day header chips (Addendum A): labelled In / Out / Saved, whole pesos, tinted by money type.
+   11px is allowed only for uppercase 800 text with tracking, so the whole chip is set that way. */
+.fin-daychip { font-size: 11px; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; border-radius: 7px; padding: 3px 8px; }
+.fin-daychip__lbl { margin-right: 4px; } /* full ink: at .75 opacity the label fell to ~3:1 */
+.fin-daychip--in { background: var(--fin-income-bg); color: var(--fin-income-ink); }
+.fin-daychip--out { background: var(--fin-expense-bg); color: var(--fin-expense-ink); }
+.fin-daychip--save { background: var(--fin-savings-bg); color: var(--fin-savings-ink); }
+.fin-feed__list { list-style: none; margin: 0; padding: 0; }
+.fin-row { position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 6px; margin: 0 -6px; border-radius: var(--wb-r-lg); }
+.fin-row::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: var(--fin-expense-bg); opacity: 0; pointer-events: none; }
+.fin-row.is-fresh { animation: fin-fade var(--wb-dur) var(--wb-ease) both; }
+.fin-row.is-fresh::before { animation: fin-fresh 600ms var(--wb-ease) both; }
+@keyframes fin-fresh { from { opacity: 1; } to { opacity: 0; } }
+/* Planned rows fade their content, not the row, so the delete button keeps full contrast. */
+.fin-row.is-planned > :not(.fin-row__del) { opacity: 0.75; }
+.fin-row__text { display: grid; min-width: 0; }
+.fin-row__title { font-size: var(--wb-fs-14); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-row__sub { font-size: var(--wb-fs-12); color: var(--wb-text-subtle); font-weight: 600; }
+.fin-row__amt {
+  margin-left: auto; flex: none; display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 130px;
+  font-weight: 800; font-size: var(--wb-fs-14); color: var(--wb-text);
+}
+/* Ledger column (Addendum A): the badge carries the direction, the number stays dark. */
+/* The number keeps a fixed-width box (from 701px) so the badges line up in their own column
+   instead of hugging numbers of different lengths. */
+@media (min-width: 701px) { .fin-row__val { min-width: 10ch; text-align: right; } }
+.fin-dir { width: 20px; height: 20px; flex: none; border-radius: 6px; display: grid; place-items: center; font-size: var(--wb-fs-12); font-weight: 900; line-height: 1; }
+.fin-dir--out { background: var(--fin-expense-bg); color: var(--fin-expense-ink); }
+.fin-dir--in { background: var(--fin-income-bg); color: var(--fin-income-ink); }
+.fin-dir--save { background: var(--fin-savings-bg); color: var(--fin-savings-ink); }
+.fin-recent-more {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding-top: 12px;
+  border-top: 1px dashed var(--wb-hairline); font-size: var(--wb-fs-12); font-weight: 600; color: var(--wb-text-subtle);
+}
+@media (max-width: 700px) {
+  .fin-recent-more .fin-link { display: inline-flex; align-items: center; min-height: 40px; }
+  /* Phones: the amount column gives up its 130px floor so titles keep room; sub-lines truncate. */
+  .fin-row__amt { min-width: 0; }
+  .fin-row__sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+.fin-row__del {
+  flex: none; border: 0; background: none; color: var(--wb-text-faint); width: 32px; height: 32px; border-radius: var(--wb-r-md);
+  display: grid; place-items: center; cursor: pointer; opacity: 0; transition: opacity var(--wb-dur-fast) var(--wb-ease);
+}
+.fin-row__del:focus-visible { opacity: 1; outline: 2px solid var(--wb-blue-strong); }
+@media (hover: hover) and (pointer: fine) {
+  .fin-row:hover .fin-row__del { opacity: 1; }
+  .fin-row__del:hover { color: var(--wb-danger); background: var(--wb-danger-bg); }
+}
+@media not ((hover: hover) and (pointer: fine)) { .fin-row__del { opacity: 1; width: 40px; height: 40px; } }
+/* Rows end in the delete button (32px + 12px gap; 40px on touch), so the day total reserves the
+   same gutter and the amounts line up under it. */
+.fin-feed--del .fin-feed__net { padding-right: 44px; }
+@media not ((hover: hover) and (pointer: fine)) { .fin-feed--del .fin-feed__net { padding-right: 52px; } }
+
+/* ── Envelopes (spec §8.2) ── */
+.fin-envs { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+/* Phones: two envelopes per row so a seven-envelope plan isn't a seven-screen scroll. */
+@media (max-width: 520px) { .fin-envs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .fin-envs .fin-env { padding: 12px 12px 14px; } .fin-envs .fin-env__head { flex-direction: column; align-items: flex-start; gap: 4px; } }
+.fin-env {
+  position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 2px; text-align: left; cursor: pointer; font: inherit; color: var(--wb-text);
+  background: var(--fin-card-solid); border: 1px solid var(--wb-glass-border); border-radius: var(--wb-r-xl); padding: 14px 16px 16px;
+  transition: transform var(--wb-dur-fast) var(--wb-ease);
+}
+/* Press is the only motion; the hover shadow switches without a transition (transform/opacity
+   only, spec §11.1). No tier stripe or chip (Addenda A–B): the group heading and bar colour
+   carry the tier. */
+.fin-env:active { transform: scale(0.97); }
+.fin-env:focus-visible { outline: 2px solid var(--wb-blue-strong); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) { .fin-env:hover { box-shadow: var(--wb-shadow-pop); } }
+.fin-env__head { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: var(--wb-fs-14); }
+.fin-env__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-env__left { font-family: 'DM Sans', sans-serif; font-size: var(--wb-fs-24); font-weight: 800; margin-top: 8px; }
+.fin-env.is-over .fin-env__left { color: var(--wb-danger); }
+.fin-env__of { font-size: var(--wb-fs-12); color: var(--wb-text-subtle); font-weight: 600; margin-bottom: 10px; }
+.fin-env__track { overflow: visible; }
+.fin-env__tick { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 2px; background: rgba(45, 55, 72, 0.4); }
+.fin-env__flags { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.fin-env__warn { font-size: var(--wb-fs-12); font-weight: 700; color: var(--wb-warn); }
+.fin-env-add {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font: inherit; border: 1.5px dashed var(--fin-ghost-border); background: transparent; border-radius: var(--wb-r-xl);
+  color: var(--wb-text-subtle); font-weight: 700; font-size: var(--wb-fs-13); min-height: 120px; cursor: pointer;
+}
+/* Tier group heading above each envelope grid (Addendum B). */
+.fin-envgroup { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin: 18px 2px 8px; font-size: inherit; font-weight: inherit; }
+.fin-envgroup__tot { font-size: var(--wb-fs-12); font-weight: 700; color: var(--wb-text-subtle); }
+.fin-adjust { padding: 14px; }
+.fin-adjust__title { margin: 0; font-weight: 800; font-family: 'DM Sans', sans-serif; font-size: var(--wb-fs-16); }
+.fin-adjust__plan { margin: 10px 0 0; white-space: normal; }
+.fin-adjust__row { display: flex; gap: 8px; margin-top: 12px; }
+
+/* ── Plan tab (spec §8) ── */
+.fin-plan-select {
+  appearance: none; -webkit-appearance: none; font: inherit; font-size: var(--wb-fs-13); font-weight: 700; cursor: pointer;
+  color: var(--fin-savings-ink); background: var(--fin-savings-bg); border: 1px solid rgba(155, 109, 214, 0.3);
+  border-radius: var(--wb-r-pill); padding: 5px 26px 5px 12px; max-width: 100%; min-width: 0; text-overflow: ellipsis;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%; background-size: 5px 5px; background-repeat: no-repeat;
+}
+.fin-plan-select:focus-visible { outline: 2px solid var(--wb-blue-strong); outline-offset: 2px; }
+.fin-plan-actions { display: flex; gap: 6px; }
+/* Summary tiles (Addendum B): 3 across, 2 + 1 full-width on phones. */
+.fin-plan-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+.fin-plan-stat { min-width: 0; padding: 12px 14px; border-radius: var(--wb-r-xl); background: rgba(255, 255, 255, 0.55); }
+.fin-plan-stat__v { margin-top: 4px; font-family: 'DM Sans', sans-serif; font-size: 22px; font-weight: 800; }
+.fin-plan-stat__s { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 2px; font-size: var(--wb-fs-12); font-weight: 600; color: var(--wb-text-subtle); }
+.fin-plan-stat.is-done .fin-plan-stat__v { color: var(--wb-success); }
+.fin-plan-stat.is-warn .fin-plan-stat__v { color: var(--wb-warn); }
+.fin-plan-stat__btn { padding: 3px 10px; }
+@media (max-width: 640px) {
+  .fin-plan-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fin-plan-stat:last-child { grid-column: 1 / -1; }
+}
+/* New-cycle banner: one line that wraps; on phones the buttons take their own full-width row. */
+.fin-banner {
+  display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; margin: 0 0 16px; padding: 10px 12px 10px 14px;
+  border-radius: var(--wb-r-xl); background: var(--fin-income-bg); border: 1px solid rgba(116, 188, 217, 0.35); color: var(--wb-blue-ink);
+}
+.fin-banner__icon { flex: none; }
+.fin-banner__text { flex: 1 1 200px; min-width: 0; margin: 0; font-size: var(--wb-fs-13); font-weight: 700; color: var(--wb-text); }
+.fin-banner__sub { font-weight: 600; color: var(--wb-text-muted); white-space: normal; }
+.fin-banner__actions { margin-left: auto; display: flex; gap: 8px; }
+.fin-editor { margin-top: 12px; padding: 16px; border-radius: var(--wb-r-xl); background: var(--fin-card-solid); border: 1px solid var(--wb-glass-border); }
+.fin-editor__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 12px; }
+.fin-editor__note { margin: 8px 0 12px; }
+.fin-editor__rows { display: grid; gap: 8px; margin-bottom: 8px; }
+.fin-editor__row { display: grid; grid-template-columns: 1.3fr 1fr 1fr 0.8fr auto; gap: 6px; align-items: center; }
+.fin-editor__row--head span { font-size: 11px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--wb-text-subtle); }
+.fin-editor__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.fin-empty { display: grid; justify-items: center; gap: 12px; padding: 18px 0; text-align: center; color: var(--wb-text-muted); font-weight: 600; }
+.fin-empty p { margin: 0; }
+@media (max-width: 700px) {
+  .fin-editor__row { grid-template-columns: 1fr 1fr; }
+  .fin-editor__row--head { display: none; }
+  .fin-banner__actions { margin-left: 0; flex-basis: 100%; }
+  .fin-banner__actions .fin-btn { flex: 1; justify-content: center; }
+}
+/* Reduced motion: presses give no scale at all (an instant snap is still movement). */
+@media (prefers-reduced-motion: reduce) {
+  .fin-env:active, .fin-btn:active:not(:disabled), .fin-chip:active, .fin-again__tile:active:not(:disabled) { transform: none; }
+}
+@media (max-width: 700px) {
+  .fin-card .fin-btn--sm, .fin-adjust .fin-btn--sm, .fin-plan-select { min-height: 40px; }
+  .fin-goalmenu .fin-datechoice__opt { min-height: 40px; }
+  .fin-card .fin-btn--icon { min-width: 40px; justify-content: center; }
+  .fin-plan-select { font-size: 16px; }
+}
+
+/* ── Activity (spec §9) ── */
+.fin-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.fin-search { flex: 1 1 200px; display: flex; align-items: center; gap: 8px; background: rgba(255, 255, 255, 0.7); border: 1px solid var(--wb-hairline); border-radius: var(--wb-r-lg); padding: 0 12px; color: var(--wb-text-faint); }
+.fin-search:focus-within { outline: 2px solid var(--wb-blue-strong); outline-offset: 1px; }
+.fin-search input { border: 0; outline: none; background: transparent; font: inherit; font-size: var(--wb-fs-13); padding: 9px 0; width: 100%; color: var(--wb-text); }
+.fin-totals { margin: 12px 0 2px; font-size: var(--wb-fs-13); font-weight: 600; color: var(--wb-text-muted); line-height: 1.6; white-space: normal; }
+.fin-totals b { white-space: nowrap; }
+.fin-totals__cmp.is-up { color: var(--fin-expense-ink); font-weight: 700; }
+.fin-totals__cmp.is-down { color: var(--fin-income-ink); font-weight: 700; }
+.fin-recur { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 10px 0 2px; }
+.fin-recur__chip {
+  display: inline-flex; align-items: center; gap: 6px; font-size: var(--wb-fs-12); font-weight: 700; color: var(--wb-text-muted);
+  background: rgba(255, 255, 255, 0.65); border: 1px solid var(--wb-glass-border); border-radius: var(--wb-r-lg); padding: 5px 6px 5px 10px;
+}
+.fin-recur__chip { max-width: 100%; min-width: 0; }
+.fin-recur__body { display: flex; flex-wrap: wrap; column-gap: 6px; min-width: 0; }
+.fin-recur__chip b { color: var(--wb-text); }
+/* On a narrow screen the amount + cadence wrap under the name rather than squeezing it; only a
+   name longer than the whole chip truncates. The icon, amount, cadence and stop button never shrink. */
+.fin-recur__ico, .fin-recur__x { flex: none; }
+.fin-recur__what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-recur__meta { flex: none; white-space: nowrap; }
+.fin-recur__x { border: 0; background: none; color: var(--wb-text-faint); width: 28px; height: 28px; border-radius: var(--wb-r-sm); display: grid; place-items: center; cursor: pointer; }
+.fin-recur__x:focus-visible { outline: 2px solid var(--wb-blue-strong); }
+@media (hover: hover) and (pointer: fine) { .fin-recur__x:hover { color: var(--wb-danger); background: var(--wb-danger-bg); } }
+.fin-upcoming { background: rgba(255, 255, 255, 0.4); border: 1px dashed var(--fin-ghost-border); border-radius: var(--wb-r-xl); padding: 2px 14px 6px; margin: 12px 0; }
+.fin-upcoming .fin-feed__head { border-bottom: 0; padding-bottom: 0; }
+.fin-more { display: flex; justify-content: center; margin-top: 12px; }
+.fin-clear { display: inline-flex; align-items: center; justify-content: center; min-height: 24px; padding: 0 8px; }
+@media (max-width: 700px) {
+  .fin-toolbar > * { flex-basis: 100%; }
+  /* Four type options are ~4px wider than a 390px card at the default 12px padding. */
+  .fin-toolbar .wb-seg .wb-seg__btn { flex: 1 1 auto; padding: 0 8px; min-height: 40px; min-width: 40px; }
+  .fin-search input { font-size: 16px; min-height: 40px; }
+  .fin-recur__x { width: 40px; height: 40px; }
+  .fin-more .fin-btn { min-height: 40px; }
+  .fin-clear { min-height: 40px; }
+}
+
+/* ── Goals (spec §10.1, Addendum A) ── */
+/* Slim dot strip. --fin-tl-rows (0–2, set inline) pushes everything down to make room for
+   stacked label rows; each label lifts by its own --fin-tl-row. */
+.fin-tl-wrap { margin: 10px 0 6px; }
+.fin-tl { --fin-tl-base: calc(6px + var(--fin-tl-rows, 0) * 14px); position: relative; height: calc(var(--fin-tl-base) + 50px); margin: 0 12px; }
+.fin-tl__axis { position: absolute; left: 0; right: 0; top: calc(var(--fin-tl-base) + 24px); height: 2px; border-radius: 2px; background: rgba(45, 55, 72, 0.12); }
+.fin-tl__tick { position: absolute; top: calc(var(--fin-tl-base) + 34px); transform: translateX(-50%); font-size: var(--wb-fs-12); font-weight: 700; color: var(--wb-text-faint); white-space: nowrap; }
+.fin-tl__now { position: absolute; top: calc(var(--fin-tl-base) + 14px); height: 18px; width: 2px; background: var(--wb-pink); }
+.fin-tl__now span { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: var(--wb-fs-12); font-weight: 800; line-height: 14px; color: var(--fin-expense-ink); white-space: nowrap; }
+.fin-tl__dot {
+  position: absolute; top: calc(var(--fin-tl-base) + 18px); width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%;
+  transform: translateX(-50%); border: 3px solid var(--wb-surface); box-shadow: 0 1px 4px rgba(31, 38, 68, 0.25);
+}
+.fin-tl__lbl {
+  position: absolute; top: calc(var(--fin-tl-base) - var(--fin-tl-row, 0) * 14px); transform: translateX(-50%); max-width: 180px;
+  font-size: var(--wb-fs-12); font-weight: 800; line-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fin-tl__lbl.is-start { transform: translateX(-7px); }
+.fin-tl__lbl.is-end { transform: translateX(calc(-100% + 7px)); }
+@media (max-width: 640px) { .fin-tl-wrap { margin: 0; } .fin-tl-wrap .fin-tl { display: none; } }
+
+/* Ring cards: 2 columns from 900px. */
+.fin-gnotes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 8px; }
+@media (min-width: 900px) { .fin-gnotes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.fin-gnote {
+  display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px 16px; align-items: center;
+  background: var(--fin-card-solid); border: 1px solid var(--wb-glass-border); border-radius: 18px; padding: 18px;
+}
+.fin-ring { position: relative; width: 96px; height: 96px; }
+.fin-ring svg { display: block; }
+.fin-ring__track { fill: none; stroke: var(--fin-ring-track); stroke-width: 10; }
+.fin-ring__arc { fill: none; stroke-width: 10; stroke-linecap: round; }
+.fin-ring__pct { position: absolute; inset: 0; display: grid; place-items: center; font-family: 'DM Sans', sans-serif; font-size: 18px; font-weight: 800; }
+.fin-gnote__body { min-width: 0; }
+.fin-gnote__head { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 6px 8px; }
+.fin-gnote__head .fin-pill { flex: none; }
+/* Goal names identify the goal, so they wrap (two lines max, then ellipsis + title) instead of
+   cutting to a dozen characters beside the status pill. */
+.fin-gnote__name {
+  margin: 0; min-width: 0; font-family: 'DM Sans', sans-serif; font-size: 17px; font-weight: 800; line-height: 1.3;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;
+}
+.fin-gnote__big { margin: 6px 0 0; font-size: 22px; font-weight: 800; line-height: 1.25; }
+.fin-gnote__of { font-size: var(--wb-fs-13); font-weight: 700; color: var(--wb-text-subtle); }
+.fin-gnote__facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 12px; margin: 10px 0 0; font-size: var(--wb-fs-12); font-weight: 600; color: var(--wb-text-muted); }
+.fin-gnote__fact { display: contents; }
+.fin-gnote__facts dt, .fin-gnote__facts dd { margin: 0; }
+.fin-gnote__facts dd { color: var(--wb-text); font-weight: 700; }
+.fin-gnote__msg { grid-column: 1 / -1; margin: 0; font-size: var(--wb-fs-13); font-weight: 600; line-height: 1.45; border-radius: var(--wb-r-lg); padding: 9px 12px; }
+.fin-gnote__msg.is-warn { background: var(--wb-warn-bg); color: var(--wb-warn); }
+.fin-gnote__msg.is-info { background: var(--fin-income-bg); color: var(--fin-income-ink); }
+.fin-gnote__msg.is-success { background: var(--wb-success-bg); color: var(--wb-success); }
+.fin-gnote__actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.fin-btn--savings { background: var(--fin-savings-ink); color: var(--wb-surface); }
+.fin-goalmenu { padding: 10px; display: grid; gap: 4px; }
+.fin-goalmenu__danger { color: var(--wb-danger); }
+
+/* ── Wishlist (spec §10.2) ── */
+.fin-wish__list { list-style: none; margin: 0; padding: 0; }
+.fin-wish__list.is-done { opacity: 0.7; }
+.fin-wish__row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto auto; gap: 14px; align-items: center; padding: 12px 0; border-top: 1px solid var(--wb-hairline); }
+.fin-wish__row:first-child { border-top: 0; }
+.fin-wish__acts { display: flex; gap: 6px; justify-content: flex-end; }
+.fin-wish__empty { margin: 4px 0 8px; }
+.fin-wish__add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; padding: 8px; border: 1.5px dashed var(--fin-ghost-border); border-radius: var(--wb-r-xl); color: var(--wb-text-faint); }
+.fin-wish__add input { border: 0; background: rgba(255, 255, 255, 0.7); border-radius: var(--wb-r-md); padding: 8px 10px; font: inherit; font-size: var(--wb-fs-13); outline: none; color: var(--wb-text); }
+.fin-wish__add input:focus-visible { outline: 2px solid var(--wb-blue-strong); }
+.fin-wish__name { flex: 1 1 180px; }
+.fin-wish__amt { width: 110px; }
+.fin-wish__toggle { margin-top: 10px; }
+@media (max-width: 700px) {
+  .fin-wish__row { grid-template-columns: 36px minmax(0, 1fr); }
+  .fin-wish__row .fin-pill, .fin-wish__acts { grid-column: 2; justify-content: flex-start; justify-self: start; }
+}
+
+/* ── What-if (spec §10.3) ── */
+/* "₱" and the number read as one right-aligned unit: the input shares a grid cell with a hidden
+   copy of its own text, so it is exactly as wide as what is typed (no gap after the peso sign). */
+.fin-whatif__amount { display: flex; align-items: center; justify-content: flex-end; gap: 2px; color: var(--fin-expense-ink); font-size: var(--wb-fs-24); font-weight: 800; cursor: text; }
+.fin-whatif__sizer { display: inline-grid; max-width: 11ch; }
+.fin-whatif__sizer::after { content: attr(data-value); grid-area: 1 / 1; visibility: hidden; white-space: pre; font-variant-numeric: tabular-nums; padding-right: 1px; }
+.fin-whatif__amount input { grid-area: 1 / 1; width: 0; min-width: 100%; border: 0; background: transparent; font: inherit; color: inherit; padding: 0; text-align: right; outline: none; font-variant-numeric: tabular-nums; }
+.fin-whatif__amount:focus-within { box-shadow: 0 2px 0 var(--wb-blue-strong); }
+.fin-slider {
+  width: 100%; margin: 12px 0 10px; -webkit-appearance: none; appearance: none; height: 6px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--wb-success) 0 var(--fin-z1), var(--wb-warn) var(--fin-z1) var(--fin-z2), var(--wb-danger) var(--fin-z2));
+}
+.fin-slider:focus-visible { outline: 2px solid var(--wb-blue-strong); outline-offset: 6px; }
+.fin-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; border-radius: 50%; background: var(--wb-surface); border: 3px solid var(--wb-pink); box-shadow: var(--wb-shadow-pop); cursor: grab; }
+.fin-slider::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--wb-surface); border: 3px solid var(--wb-pink); cursor: grab; }
+.fin-slider__zones { display: flex; justify-content: space-between; font-size: var(--wb-fs-12); font-weight: 700; color: var(--wb-text-faint); margin-bottom: 18px; }
+/* A lone surviving zone (decision D3) covers the whole track, so its label centres under it. */
+.fin-slider__zones > :only-child { margin: 0 auto; }
+.fin-whatif__verdict { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+.fin-whatif__line { font-size: var(--wb-fs-13); white-space: normal; }
+.fin-whatif__risk { color: var(--wb-danger); }
+.fin-whatif__acts { display: flex; gap: 8px; }
+
+/* ── Goals / Wishlist / What-if: phone touch targets and input sizes (Tasks 23–25) ── */
+@media (max-width: 700px) {
+  .fin-gnote__actions .fin-btn--sm { min-height: 40px; min-width: 40px; justify-content: center; }
+  .fin-goalmenu .fin-datechoice__opt, .fin-goalmenu .fin-btn--sm { min-height: 40px; }
+  .fin-wish__acts .fin-btn--sm, .fin-wish__add .fin-btn--sm { min-height: 40px; min-width: 40px; justify-content: center; }
+  .fin-wish__add input, .fin-wish__add .fin-chip--select { font-size: 16px; min-height: 40px; }
+  .fin-wish__toggle { display: inline-flex; align-items: center; min-height: 40px; }
+  .fin-whatif__amount input { min-height: 40px; }
+  .fin-whatif .fin-chip--select { font-size: 16px; min-height: 40px; }
+  .fin-whatif__acts .fin-btn--sm { min-height: 40px; }
+  /* 40px touch target. The track is the input itself (not ::-webkit-slider-runnable-track), so both engines centre the thumb on it. */
+  .fin-slider::-webkit-slider-thumb { width: 40px; height: 40px; border-width: 4px; box-sizing: border-box; }
+  .fin-slider::-moz-range-thumb { width: 40px; height: 40px; border-width: 4px; box-sizing: border-box; }
+  /* The 40px thumb overhangs the 6px track by 17px each side; keep it clear of the head and zone labels. */
+  .fin-slider { margin: 17px 0; }
+}

@@ -5,25 +5,36 @@ import { X } from 'lucide-react';
 // Types only — `workItems.ts` imports `@/lib/db` (mysql2) at module scope, so a runtime
 // import from it here would drag mysql2 into this client component's bundle (the landmine
 // that broke `/workboard` twice before; see WorkItemRow.tsx's own note on the same rule).
-// `WorkContext`/`WORK_CONTEXTS`/`CONTEXT_LABELS` come from the pool-free `workContexts.ts`
-// instead (zero imports of its own, so pulling values from it is safe here).
-import type { WorkItem, WorkPriority, WorkStatus, WorkSource, ProjectSummary } from '@/lib/workboard/workItems';
+// `WorkContext`/`LifeArea` come from the pool-free `workContexts.ts` instead.
+import type { WorkItem, WorkPriority, WorkStatus, ProjectSummary } from '@/lib/workboard/workItems';
 // Same rule, same reason: `organizations.ts` imports `@/lib/db` at module scope, so this
 // stays `import type` — erased at compile time, so no mysql2 reaches the client bundle.
 import type { OrganizationSummary } from '@/lib/workboard/organizations';
+import type { WorkContext, LifeArea } from '@/lib/workboard/workContexts';
+import WbOverlay from './ui/WbOverlay';
+import type {
+  AcademicSourcePath, LegacyTarget, LinkableItem, GradingPeriod, SubjectGrading, SubjectOption,
+  FormError, FormErrorField,
+} from './dialog/dialogTypes';
+import { FIELD_GROUP } from './dialog/dialogStyles';
 import {
-  WORK_CONTEXTS, CONTEXT_LABELS, LIFE_AREAS, LIFE_AREA_LABELS,
-  type WorkContext, type LifeArea,
-} from '@/lib/workboard/workContexts';
-
-const FONT = "'Inter','DM Sans','Segoe UI',sans-serif";
-const HEADER_FONT = "'DM Sans','Segoe UI',sans-serif";
+  AcademicEditFields, TitleContextFields, OrganizationFields, ProjectFields, LifeFields, ScheduleFields,
+} from './dialog/SharedFields';
+import { AcademicSourceStep, AcademicCourseField } from './dialog/TypeStep';
+import AcademicLinkExisting from './dialog/AcademicLinkExisting';
+import AcademicNewGraded from './dialog/AcademicNewGraded';
+import AcademicIndependent from './dialog/AcademicIndependent';
 
 export type DialogTarget =
-  | { mode: 'create' }
+  /** `initialTitle` pre-fills the title (the Ctrl+K palette's "New task …"). */
+  | { mode: 'create'; initialTitle?: string }
   | { mode: 'edit'; item: WorkItem };
 
 export interface WorkItemDialogProps {
+  /** false while the shell's `usePresence` keeps the dialog mounted for its exit transition. */
+  open:              boolean;
+  /** Opened from the keyboard: no enter animation (spec 4.3). */
+  instant?:          boolean;
   target:            DialogTarget;
   /** `work.projects` from the shell — kept in sync locally via `onProjectCreated` so an
    *  inline-created project shows up in the select without waiting for a full refetch.
@@ -37,249 +48,16 @@ export interface WorkItemDialogProps {
   onProjectCreated:  (project: ProjectSummary) => void;
 }
 
-interface SubjectOption {
-  user_subject_id: number;
-  course_code:     string;
-  subject_name:    string;
-}
-
-const STATUS_LABEL: Record<WorkStatus, string> = {
-  todo:        'To Do',
-  in_progress: 'In Progress',
-  done:        'Done',
+const BANNER_STYLE: React.CSSProperties = {
+  margin: 0, padding: '10px 12px', borderRadius: 'var(--wb-r-md)',
+  background: 'var(--wb-danger-bg)', color: 'var(--wb-danger)', font: '600 var(--wb-fs-13) var(--wb-font-ui)',
 };
 
-const PRIORITY_LABEL: Record<WorkPriority, string> = {
-  high:   'High',
-  normal: 'Normal',
-  low:    'Low',
-};
-
-/**
- * The three ways an Academic item can come into being. They are genuinely different
- * operations, not three spellings of "create":
- *
- *   'link'        writes NOTHING. Study Pulse already put the item on the board; this path
- *                 only lets the user find it and see that it is there.
- *   'graded'      writes a real Study Pulse row via POST /api/workboard/academic/create.
- *                 Task 27 wires its target picker and its submission; this task only shows
- *                 that the path is selected and requires a Course.
- *   'independent' writes an owned `workboard_work_items` row through the same POST/PATCH
- *                 the Projects/Organization/Life contexts use. The only path of the three
- *                 whose row has a `project_id` column, which is why Academic Project is
- *                 offered here and nowhere else.
- */
-type AcademicSourcePath = 'link' | 'graded' | 'independent';
-
-const ACADEMIC_SOURCE_OPTIONS: { value: AcademicSourcePath; label: string; blurb: string }[] = [
-  {
-    value: 'link',
-    label: 'Link an existing item',
-    blurb: 'Study Pulse already put it on your board. Find it here to confirm — nothing is created.',
-  },
-  {
-    value: 'graded',
-    label: 'New graded work',
-    blurb: 'Writes a real entry in Study Pulse, so it counts toward your grade.',
-  },
-  {
-    value: 'independent',
-    label: 'New independent activity',
-    blurb: 'Revision, reading, practice — study work that only lives on Workboard.',
-  },
-];
-
-/** How each row in the "Link an existing item" picker announces where it came from, so two
- *  similarly-titled entries stay tellable apart. `owned` is in the list because the picker
- *  filters by *context*, not by source: an independent activity added here is on the board
- *  for that course too, and "this is already here" is just as true of it. */
-const WORK_SOURCE_LABEL: Record<WorkSource, string> = {
-  owned:         'Independent',
-  activities:    'Activity',
-  quizzes:       'Quiz',
-  exams:         'Exam',
-  grade_entries: 'Graded item',
-};
-
-/** The three targets a legacy-mode subject offers, in the order Study Pulse's own pickers
- *  offer them. Labels come from `WORK_SOURCE_LABEL` so a target reads as the same word here
- *  as it does in the "Link an existing item" list one field above. */
-const LEGACY_TARGETS = ['activities', 'quizzes', 'exams'] as const;
-type LegacyTarget = typeof LEGACY_TARGETS[number];
-
-/** One row of the "Link an existing item" picker — the handful of `WorkItem` fields the
- *  picker actually renders, kept narrow so the cache does not pin whole payloads. `key`
- *  exists because ids repeat across the four Study Pulse tables: `activities` #5 and
- *  `exams` #5 are different items, so source and id together are the only unique handle. */
-interface LinkableItem {
-  key:    string;
-  source: WorkSource;
-  id:     number;
-  title:  string;
-  due_at: string | null;
-}
-
-interface GradingCategory { cat_id: number; name: string }
-interface GradingPeriod   { period_id: number; name: string; categories: GradingCategory[] }
-
-/**
- * What the "New graded work" path needs out of `GET /api/studypulse/subjects/[id]/grading`.
- *
- * `mode` is the whole point: a legacy subject is graded as Activity/Quiz/Exam, a custom one
- * as a category inside a grading period, and the create route 400s if the body describes the
- * wrong one. It is derived exactly as `CanvasAnnouncementBank` derives it — a *real* preset
- * means custom — which is also how the route's own `getSubjectMode` decides (it JOINs
- * `grading_presets`, so a `subject_grading` row pointing at a missing preset is legacy on
- * both sides). Deriving it from `config !== null` instead would disagree with the server on
- * exactly that row and strand the user on a picker whose every submission is rejected.
- */
-interface SubjectGrading {
-  mode:    'legacy' | 'custom';
-  periods: GradingPeriod[];
-}
-
-const HINT_TEXT_STYLE: React.CSSProperties = {
-  margin: '0 0 16px', fontFamily: FONT, fontSize: '0.74rem', color: '#8a94a6',
-};
-
-const INFO_CARD_STYLE: React.CSSProperties = {
-  marginBottom: '16px', padding: '12px 14px', borderRadius: '12px',
-  background: 'rgba(77,171,245,0.08)', border: '1px solid rgba(77,171,245,0.2)',
-};
-
-/** Sentinel value for the project select's inline "＋ New project…" option, read by the
- *  Project picker in `renderProjectFields` — the Projects branch of `renderContextFields`,
- *  and the only picker in this dialog that offers inline project creation. */
-const NEW_PROJECT_SENTINEL = '__new__';
-
-/** The Organization select's own inline "＋ New organization…" option, and deliberately a
- *  *different* string from `NEW_PROJECT_SENTINEL`: the two pickers can end up side by side
- *  in one branch, and a shared sentinel would make "new project" and "new organization"
- *  indistinguishable to whichever `onChange` read it. */
-const NEW_ORG_SENTINEL = '__new_org__';
-
-const LABEL_STYLE: React.CSSProperties = {
-  display: 'block', fontFamily: FONT, fontSize: '0.78rem', fontWeight: 700,
-  color: '#5c6b80', marginBottom: '6px',
-};
-
-const CONTROL_STYLE: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box', minHeight: '40px', borderRadius: '10px',
-  padding: '8px 12px', background: 'rgba(255,255,255,0.6)',
-  border: '1px solid rgba(200,210,230,0.6)', fontFamily: FONT, fontSize: '0.85rem',
-  fontWeight: 500, color: '#2d3748',
-};
-
-function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
-  return (
-    <div style={{ marginBottom: '16px' }}>
-      <label style={LABEL_STYLE}>{label}</label>
-      {children}
-      {hint && <p style={{ margin: '6px 0 0', fontFamily: FONT, fontSize: '0.72rem', color: '#8a94a6' }}>{hint}</p>}
-    </div>
-  );
-}
-
-/** Only fields this endpoint accepts: PATCH /api/workboard/academic/[source]/[id] rejects
- *  any other field's source. It cannot rename an academic item, so no title input is
- *  rendered for one — the direction/brief are explicit that a title field that silently
- *  fails to save must not exist. */
-function AcademicFieldSet({
-  item, workStatus, setWorkStatus, dueAt, setDueAt, deadlineTime, setDeadlineTime,
-  priority, setPriority,
-  estimatedHours, setEstimatedHours, startDate, setStartDate, firstFieldRef,
-}: {
-  item: WorkItem;
-  workStatus: WorkStatus; setWorkStatus: (v: WorkStatus) => void;
-  dueAt: string; setDueAt: (v: string) => void;
-  deadlineTime: string; setDeadlineTime: (v: string) => void;
-  priority: WorkPriority; setPriority: (v: WorkPriority) => void;
-  estimatedHours: string; setEstimatedHours: (v: string) => void;
-  startDate: string; setStartDate: (v: string) => void;
-  firstFieldRef: React.RefObject<HTMLSelectElement | null>;
-}) {
-  return (
-    <>
-      <div style={{
-        marginBottom: '18px', padding: '12px 14px', borderRadius: '12px',
-        background: 'rgba(77,171,245,0.08)', border: '1px solid rgba(77,171,245,0.2)',
-      }}>
-        <p style={{ margin: '0 0 4px', fontFamily: HEADER_FONT, fontSize: '0.92rem', fontWeight: 700, color: '#2d3748' }}>
-          {item.title}
-        </p>
-        <p style={{ margin: 0, fontFamily: FONT, fontSize: '0.76rem', color: '#5c6b80' }}>
-          Title and scores are managed in Study Pulse — this dialog only edits how it shows up on Workboard.
-        </p>
-        {item.user_subject_id !== null && (
-          <a
-            href={`/studypulse/${item.user_subject_id}`}
-            className="vb-dialog-link"
-            style={{ display: 'inline-block', marginTop: '8px', fontFamily: FONT, fontSize: '0.78rem', fontWeight: 700, color: '#256f92' }}
-          >
-            Open in Study Pulse →
-          </a>
-        )}
-      </div>
-
-      <Field label="Status">
-        <select
-          ref={firstFieldRef}
-          className="vb-dialog-control"
-          style={CONTROL_STYLE}
-          value={workStatus}
-          onChange={e => setWorkStatus(e.target.value as WorkStatus)}
-        >
-          {(Object.keys(STATUS_LABEL) as WorkStatus[]).map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-        </select>
-      </Field>
-
-      <div style={{ display: 'flex', gap: '12px' }}>
-        <div style={{ flex: 1 }}>
-          <Field label="Due date">
-            <input type="date" className="vb-dialog-control" style={CONTROL_STYLE} value={dueAt} onChange={e => setDueAt(e.target.value)} />
-          </Field>
-        </div>
-        {/* Beside Due date, not under it: the two are one deadline split across two columns
-            (spec §16's DEADLINE | TIME). Left blank it stays blank — the submit body sends
-            null rather than the "00:00" an empty time input would otherwise imply. */}
-        <div style={{ flex: 1 }}>
-          <Field label="Deadline time" hint="Optional. Blank means any time that day.">
-            <input type="time" className="vb-dialog-control" style={CONTROL_STYLE} value={deadlineTime} onChange={e => setDeadlineTime(e.target.value)} />
-          </Field>
-        </div>
-        <div style={{ flex: 1 }}>
-          <Field label="Start date" hint="Adds a bar on the Timeline view.">
-            <input type="date" className="vb-dialog-control" style={CONTROL_STYLE} value={startDate} onChange={e => setStartDate(e.target.value)} />
-          </Field>
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: '12px' }}>
-        <div style={{ flex: 1 }}>
-          <Field label="Priority">
-            <select className="vb-dialog-control" style={CONTROL_STYLE} value={priority} onChange={e => setPriority(e.target.value as WorkPriority)}>
-              {(Object.keys(PRIORITY_LABEL) as WorkPriority[]).map(p => <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>)}
-            </select>
-          </Field>
-        </div>
-        <div style={{ flex: 1 }}>
-          <Field label="Estimated hours">
-            <input
-              type="number" min="0" step="0.25" className="vb-dialog-control" style={CONTROL_STYLE}
-              value={estimatedHours} onChange={e => setEstimatedHours(e.target.value)} placeholder="e.g. 2"
-            />
-          </Field>
-        </div>
-      </div>
-    </>
-  );
-}
-
-export default function WorkItemDialog({ target, projects, onClose, onSaved, onProjectCreated }: WorkItemDialogProps) {
+export default function WorkItemDialog({ open, instant = false, target, projects, onClose, onSaved, onProjectCreated }: WorkItemDialogProps) {
   const editingItem = target.mode === 'edit' ? target.item : null;
   const isAcademicEdit = editingItem !== null && editingItem.source !== 'owned';
 
-  const [title, setTitle]                     = useState(editingItem?.title ?? '');
+  const [title, setTitle]                     = useState(target.mode === 'create' ? target.initialTitle ?? '' : target.item.title);
   // Create mode starts with NO context selected — the per-context section renders nothing
   // until one is picked, so the modal opens short and grows (progressive disclosure). An
   // item being edited always has a context already, so edit mode pre-fills from it.
@@ -371,12 +149,26 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   const [lifeArea, setLifeArea]               = useState<LifeArea | ''>(editingItem?.life_area ?? '');
 
   const [submitting, setSubmitting]           = useState(false);
-  const [formError, setFormError]             = useState<string | null>(null);
+  const [formError, setFormError]             = useState<FormError | null>(null);
 
-  const dialogRef = useRef<HTMLDivElement>(null);
   const firstFieldRef = useRef<HTMLInputElement & HTMLSelectElement>(null);
 
   useEffect(() => { contextRef.current = context; }, [context]);
+
+  // A new error can land below the fold of a scrolled panel: focus the invalid control when
+  // there is one, otherwise bring the message (or the network banner) into view.
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    const form = formRef.current;
+    if (!formError || !form) return;
+    const msg = form.querySelector<HTMLElement>('[data-field-error]') ?? form.querySelector<HTMLElement>('[role="alert"]');
+    if (!msg) return;
+    const control = formError.field === 'form' ? null : msg.parentElement?.querySelector<HTMLElement>(
+      'input:not([disabled]),select:not([disabled]),textarea:not([disabled])',
+    );
+    if (control) control.focus();
+    else msg.scrollIntoView({ block: 'nearest' });
+  }, [formError]);
 
   // The Course list, fetched only when it can actually be shown. Task 25 removed the field
   // this fed and left the request firing unconditionally on mount for every context; now
@@ -517,52 +309,6 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     return () => { cancelled = true; };
   }, [context, organizations]);
 
-  useEffect(() => {
-    // Restore focus to whatever opened this dialog (a row's "Edit" menu item, or — since
-    // `NewItemTypeChooser` now sits between a "New Item" button and this dialog — whichever
-    // element the chooser itself restored focus to, moments earlier) once it closes; otherwise
-    // a keyboard user lands back on `document.body` and has to re-tab from the top of the page.
-    const opener = document.activeElement as HTMLElement | null;
-    firstFieldRef.current?.focus();
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      // The opener can be gone by the time this runs (e.g. the row it belonged to was
-      // filtered out by a search change while the dialog was open) — guard with `isConnected`
-      // rather than letting a stale-element `.focus()` throw.
-      if (opener?.isConnected) opener.focus();
-    };
-  }, []);
-
-  function handleBackdropMouseDown(e: React.MouseEvent<HTMLDivElement>) {
-    if (e.target === e.currentTarget) onClose();
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    if (e.key === 'Escape') {
-      e.stopPropagation();
-      onClose();
-      return;
-    }
-    if (e.key !== 'Tab') return;
-    const root = dialogRef.current;
-    if (!root) return;
-    const focusables = Array.from(
-      root.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'),
-    ).filter(el => el.offsetParent !== null);
-    if (!focusables.length) return;
-    const first = focusables[0];
-    const last  = focusables[focusables.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }
-
   /**
    * The single seam where switching context clears the outgoing context's fields.
    *
@@ -678,11 +424,14 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     setGradingCatId('');
   }
 
+  /** The message for one field, or null — validation errors render under their field. */
+  function fieldError(field: FormErrorField): string | null {
+    return formError?.field === field ? formError.message : null;
+  }
+
   /**
-   * The Academic branch. NO HOOKS — see `renderContextFields`'s note; this is reached only
-   * when the user has picked Academic, so a hook here would change the hook order between
-   * renders and blow up at runtime. Everything it needs is already state at the top of the
-   * component or a prop.
+   * The Academic branch: the path step, the shared Course select, then the chosen path.
+   * NO HOOKS — see `renderContextFields`'s note.
    */
   function renderAcademicFields(): React.ReactNode {
     const path            = academicSource;
@@ -691,296 +440,65 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
     const loadingRows     = chosenCourseId !== null && linkableLoading === chosenCourseId;
     const pickedItem      = (courseRows ?? []).find(r => r.key === linkedItemKey) ?? null;
     // Once an item is chosen the course is no longer a choice — it is a fact about that
-    // item. Clearing the item in the picker below unlocks it again.
+    // item. Clearing the item in the picker unlocks it again.
     const courseLocked    = path === 'link' && pickedItem !== null;
-    // Path 2's picker data. `undefined` means "not loaded" — never "legacy": the two are
-    // told apart by `gradingError`, which the branch below checks first.
     const courseGrading   = chosenCourseId === null ? undefined : subjectGrading[chosenCourseId];
-    // The nested period→category shape `CanvasAnnouncementBank` uses: categories are read
-    // off the selected period, so no period means no categories to choose from.
-    const periodCategories = courseGrading?.periods.find(p => p.period_id === gradingPeriodId)?.categories ?? [];
-    // The whole reason `ProjectSummary` carries `context` and `user_subject_id`: without
-    // both, this list would show one course's projects while another course is selected.
-    const academicProjects = chosenCourseId === null
-      ? []
-      : projects.filter(p => p.context === 'academic' && p.user_subject_id === chosenCourseId);
 
     return (
       <>
         {target.mode === 'create' && (
-          <fieldset style={{ border: 'none', margin: '0 0 16px', padding: 0 }}>
-            <legend style={{ ...LABEL_STYLE, marginBottom: '4px', padding: 0 }}>Where does this come from?</legend>
-            <p style={{ margin: '0 0 10px', fontFamily: FONT, fontSize: '0.74rem', color: '#8a94a6' }}>
-              Graded work appears in Study Pulse and counts toward your grade. An independent
-              activity is study work that only lives here.
-            </p>
-            <div style={{ display: 'grid', gap: '8px' }}>
-              {ACADEMIC_SOURCE_OPTIONS.map(opt => {
-                const active = path === opt.value;
-                return (
-                  <label
-                    key={opt.value}
-                    style={{
-                      display: 'flex', gap: '10px', alignItems: 'flex-start', cursor: 'pointer',
-                      padding: '10px 12px', borderRadius: '12px',
-                      background: active ? 'rgba(77,171,245,0.08)' : 'rgba(255,255,255,0.6)',
-                      border: `1px solid ${active ? 'rgba(77,171,245,0.45)' : 'rgba(200,210,230,0.6)'}`,
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      className="vb-dialog-control"
-                      name="academicSource"
-                      value={opt.value}
-                      checked={active}
-                      onChange={() => handleAcademicSourceChange(opt.value)}
-                      style={{ marginTop: '3px', accentColor: '#2a7fa8', flexShrink: 0 }}
-                    />
-                    <span>
-                      <span style={{ display: 'block', fontFamily: HEADER_FONT, fontSize: '0.85rem', fontWeight: 700, color: '#2d3748' }}>
-                        {opt.label}
-                      </span>
-                      <span style={{ display: 'block', marginTop: '2px', fontFamily: FONT, fontSize: '0.74rem', color: '#5c6b80' }}>
-                        {opt.blurb}
-                      </span>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          </fieldset>
+          <AcademicSourceStep path={path} onChange={handleAcademicSourceChange} error={fieldError('academicSource')} />
         )}
 
         {path !== '' && (
           <>
-            <Field
-              label="Course"
-              hint={courseLocked ? 'Set by the item you picked — clear the item to change it.' : undefined}
-            >
-              <select
-                className="vb-dialog-control"
-                style={CONTROL_STYLE}
-                value={subjectId === '' ? '' : String(subjectId)}
-                disabled={courseLocked || subjectsLoading}
-                onChange={e => handleSubjectChange(e.target.value === '' ? '' : Number(e.target.value))}
-              >
-                <option value="">{subjectsLoading ? 'Loading courses…' : 'Choose a course…'}</option>
-                {(subjects ?? []).map(s => (
-                  <option key={s.user_subject_id} value={s.user_subject_id}>
-                    {s.course_code} — {s.subject_name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            {subjectsError && (
-              <p style={{ ...HINT_TEXT_STYLE, color: '#922e48', fontWeight: 600 }}>{subjectsError}</p>
-            )}
+            <AcademicCourseField
+              subjectId={subjectId}
+              subjects={subjects}
+              subjectsLoading={subjectsLoading}
+              subjectsError={subjectsError}
+              courseLocked={courseLocked}
+              onSubjectChange={handleSubjectChange}
+              error={fieldError('course')}
+            />
 
             {path === 'link' && (
-              chosenCourseId === null ? (
-                <p style={HINT_TEXT_STYLE}>Pick a course to see what it already has on your board.</p>
-              ) : (
-                <>
-                  <Field label="Item" hint="Picking one changes nothing — it is already on your board.">
-                    <select
-                      className="vb-dialog-control"
-                      style={CONTROL_STYLE}
-                      value={linkedItemKey}
-                      disabled={loadingRows || linkableError !== null || (courseRows?.length ?? 0) === 0}
-                      onChange={e => setLinkedItemKey(e.target.value)}
-                    >
-                      <option value="">
-                        {loadingRows
-                          ? 'Loading…'
-                          // A failed load leaves `courseRows` undefined too, which must not
-                          // read as "this course truly has nothing" — that is a real, false
-                          // answer to the one question this picker exists to answer honestly.
-                          : linkableError !== null
-                            ? 'Could not load'
-                            : (courseRows?.length ?? 0) === 0
-                              ? 'Nothing on your board for this course yet'
-                              : 'Choose an item…'}
-                      </option>
-                      {(courseRows ?? []).map(r => (
-                        <option key={r.key} value={r.key}>
-                          {WORK_SOURCE_LABEL[r.source]} · {r.title}
-                          {r.due_at ? ` · due ${r.due_at.slice(0, 10)}` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-
-                  {linkableError && (
-                    <p style={{ ...HINT_TEXT_STYLE, margin: '-10px 0 16px', color: '#922e48', fontWeight: 600 }}>
-                      {linkableError}{' '}
-                      <button
-                        type="button"
-                        className="vb-dialog-link"
-                        onClick={() => loadLinkableItems(chosenCourseId)}
-                        style={{
-                          background: 'none', border: 'none', padding: 0, font: 'inherit',
-                          color: 'inherit', textDecoration: 'underline', cursor: 'pointer',
-                        }}
-                      >
-                        Try again
-                      </button>
-                    </p>
-                  )}
-
-                  {pickedItem && (
-                    <div style={INFO_CARD_STYLE}>
-                      <p style={{ margin: '0 0 4px', fontFamily: HEADER_FONT, fontSize: '0.92rem', fontWeight: 700, color: '#2d3748' }}>
-                        {pickedItem.title}
-                      </p>
-                      <p style={{ margin: 0, fontFamily: FONT, fontSize: '0.76rem', color: '#5c6b80' }}>
-                        {pickedItem.source === 'owned'
-                          ? 'Already here — an independent activity you added to Workboard. There is nothing to create.'
-                          : 'Already here — Study Pulse puts this on your board automatically. There is nothing to create.'}
-                      </p>
-                      <a
-                        href={`/studypulse/${chosenCourseId}`}
-                        className="vb-dialog-link"
-                        style={{ display: 'inline-block', marginTop: '8px', fontFamily: FONT, fontSize: '0.78rem', fontWeight: 700, color: '#256f92' }}
-                      >
-                        Open in Study Pulse →
-                      </a>
-                    </div>
-                  )}
-                </>
-              )
+              <AcademicLinkExisting
+                chosenCourseId={chosenCourseId}
+                courseRows={courseRows}
+                loadingRows={loadingRows}
+                linkableError={linkableError}
+                linkedItemKey={linkedItemKey}
+                setLinkedItemKey={setLinkedItemKey}
+                pickedItem={pickedItem}
+                onRetry={courseId => loadLinkableItems(courseId)}
+              />
             )}
 
             {path === 'graded' && (
-              chosenCourseId === null ? (
-                <p style={HINT_TEXT_STYLE}>Pick a course to choose what this counts toward.</p>
-              ) : gradingError !== null ? (
-                // Checked before the empty-cache branch below, and before anything reads a
-                // mode: a failed load leaves the cache empty too, and an empty cache must
-                // never fall through to the legacy picker — that would quietly offer
-                // Activity/Quiz/Exam for a custom-mode course and have the route reject
-                // every submission made through it.
-                <p style={{ ...HINT_TEXT_STYLE, color: '#922e48', fontWeight: 600 }}>
-                  {gradingError}{' '}
-                  <button
-                    type="button"
-                    className="vb-dialog-link"
-                    onClick={() => loadSubjectGrading(chosenCourseId)}
-                    style={{
-                      background: 'none', border: 'none', padding: 0, font: 'inherit',
-                      color: 'inherit', textDecoration: 'underline', cursor: 'pointer',
-                    }}
-                  >
-                    Try again
-                  </button>
-                </p>
-              ) : courseGrading === undefined ? (
-                // Not in the cache and not failed, so it is in flight — or about to be: the
-                // effect that starts the fetch runs *after* the paint that follows picking a
-                // course, which is why this derives "loading" from the cache miss instead of
-                // from a flag that effect would have to set first.
-                <p style={HINT_TEXT_STYLE}>Loading this course’s grading setup…</p>
-              ) : courseGrading.mode === 'legacy' ? (
-                <Field label="Counts as" hint="This course is graded on the standard Activity / Quiz / Exam categories.">
-                  <select
-                    className="vb-dialog-control"
-                    style={CONTROL_STYLE}
-                    value={gradingTarget}
-                    onChange={e => setGradingTarget(e.target.value as LegacyTarget)}
-                  >
-                    {LEGACY_TARGETS.map(t => <option key={t} value={t}>{WORK_SOURCE_LABEL[t]}</option>)}
-                  </select>
-                </Field>
-              ) : (
-                <>
-                  <Field
-                    label="Grading period"
-                    hint={courseGrading.periods.length === 0
-                      ? 'This course’s grading preset has no periods set up — add them in Study Pulse first.'
-                      : undefined}
-                  >
-                    <select
-                      className="vb-dialog-control"
-                      style={CONTROL_STYLE}
-                      value={gradingPeriodId === '' ? '' : String(gradingPeriodId)}
-                      disabled={courseGrading.periods.length === 0}
-                      onChange={e => handleGradingPeriodChange(e.target.value === '' ? '' : Number(e.target.value))}
-                    >
-                      <option value="">Choose a period…</option>
-                      {courseGrading.periods.map(p => (
-                        <option key={p.period_id} value={p.period_id}>{p.name}</option>
-                      ))}
-                    </select>
-                  </Field>
-
-                  <Field
-                    label="Category"
-                    hint={gradingPeriodId === '' ? 'Choose a grading period first.' : undefined}
-                  >
-                    <select
-                      className="vb-dialog-control"
-                      style={CONTROL_STYLE}
-                      value={gradingCatId === '' ? '' : String(gradingCatId)}
-                      disabled={gradingPeriodId === '' || periodCategories.length === 0}
-                      onChange={e => setGradingCatId(e.target.value === '' ? '' : Number(e.target.value))}
-                    >
-                      <option value="">
-                        {gradingPeriodId !== '' && periodCategories.length === 0
-                          ? 'This period has no categories'
-                          : 'Choose a category…'}
-                      </option>
-                      {periodCategories.map(c => (
-                        <option key={c.cat_id} value={c.cat_id}>{c.name}</option>
-                      ))}
-                    </select>
-                  </Field>
-                </>
-              )
+              <AcademicNewGraded
+                chosenCourseId={chosenCourseId}
+                gradingError={gradingError}
+                courseGrading={courseGrading}
+                gradingTarget={gradingTarget}
+                setGradingTarget={setGradingTarget}
+                gradingPeriodId={gradingPeriodId}
+                onGradingPeriodChange={handleGradingPeriodChange}
+                gradingCatId={gradingCatId}
+                setGradingCatId={setGradingCatId}
+                onRetry={courseId => loadSubjectGrading(courseId)}
+                error={fieldError('grading')}
+              />
             )}
 
-            {path === 'independent' && (() => {
-              // An item being edited can carry a `project_id` the current filter would
-              // never have offered — a project from a different course, or created before
-              // this filter existed. A `<select value>` that matches no `<option>` falls
-              // back to displaying the *first* one ("No project"), which would misreport a
-              // real, still-submitted value as cleared and — worse — leave it uneditable
-              // once `academicProjects` is empty and the control disables. Surfacing it as
-              // its own disabled option keeps what is about to be saved visible, and "No
-              // project" stays one real click away to actually clear it.
-              const outOfScope = projectId !== '' && !academicProjects.some(p => p.id === projectId)
-                ? projects.find(p => p.id === projectId)
-                : undefined;
-              return (
-                <Field
-                  label="Academic project"
-                  hint={
-                    outOfScope
-                      ? 'This project isn’t part of the chosen course. Pick “No project” to clear it.'
-                      : chosenCourseId === null
-                        ? 'Optional. Choose a course first — projects are listed per course.'
-                        : academicProjects.length === 0
-                          ? 'Optional. This course has no projects yet.'
-                          : 'Optional. Only this course’s projects are listed.'
-                  }
-                >
-                  <select
-                    className="vb-dialog-control"
-                    style={CONTROL_STYLE}
-                    value={projectId === '' ? '' : String(projectId)}
-                    disabled={chosenCourseId === null || (academicProjects.length === 0 && !outOfScope)}
-                    onChange={e => setProjectId(e.target.value === '' ? '' : Number(e.target.value))}
-                  >
-                    <option value="">No project</option>
-                    {outOfScope && (
-                      <option value={outOfScope.id} disabled>{outOfScope.name} (not in this course)</option>
-                    )}
-                    {academicProjects.map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </Field>
-              );
-            })()}
+            {path === 'independent' && (
+              <AcademicIndependent
+                chosenCourseId={chosenCourseId}
+                projects={projects}
+                projectId={projectId}
+                setProjectId={setProjectId}
+              />
+            )}
           </>
         )}
       </>
@@ -988,337 +506,57 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   }
 
   /**
-   * The per-context section. Tasks 28 (organization), 29 (projects) and 30 (life) each add
-   * exactly one branch here, one task at a time; Task 26 added Academic. Declared inside
-   * the component so those branches close over the existing form state (`projectId`,
-   * `subjectId`, `projects`, the subject list) without any prop threading.
-   *
-   * Called conditionally (`context !== '' && renderContextFields(context)`), so this
-   * function — and everything it calls, `renderAcademicFields` included — must never
-   * contain a hook. Declare new per-context state with the other `useState` calls at the
-   * top of the component instead, and reset it in `handleContextChange` above — a hook
-   * written in here would typecheck cleanly (there is no ESLint config in this repo to
-   * catch it) and only fail at runtime, the moment a user picks the context whose branch
-   * introduced it.
+   * The per-context section. Called conditionally (`context !== '' && renderContextFields(context)`),
+   * so this function — and `renderAcademicFields` — must never contain a hook. Declare new
+   * per-context state with the other `useState` calls at the top of the component instead, and
+   * reset it in `handleContextChange` above — a hook written in here would typecheck cleanly
+   * (there is no ESLint config in this repo to catch it) and only fail at runtime.
    */
-  /**
-   * The Organization branch. NO HOOKS, for exactly the reason `renderAcademicFields` has
-   * none — see `renderContextFields`'s note directly below.
-   *
-   * Course is not merely hidden here, it is absent: nothing in this function reads or writes
-   * `subjectId`, `subjects`, or any course-derived value (spec §13 — an organization item
-   * hangs off an organization, never off a course, and offering both would invite a row
-   * claiming to be two things at once).
-   */
-  function renderOrganizationFields(): React.ReactNode {
-    const chosenOrgId = organizationId === '' ? null : organizationId;
-    // The organization-scoped twin of `academicProjects`, and the second reason
-    // `ProjectSummary` carries `context` and both parent ids: without them this list would
-    // offer another organization's initiatives — or a personal project — under this one.
-    const orgProjects = chosenOrgId === null
-      ? []
-      : projects.filter(p => p.context === 'organization' && p.organization_id === chosenOrgId);
-    // The same hazard the academic project picker guards, for the same reason: an item being
-    // edited can hold a `project_id` this filter would never offer (another organization's
-    // initiative, or one created before the filter existed). A `<select value>` matching no
-    // `<option>` displays the *first* one — "No project" — which would misreport a value
-    // that is still about to be submitted, and strand it once an empty list disables the
-    // control. Surfaced as its own disabled option instead, with "No project" one click away.
-    const outOfScope = projectId !== '' && !orgProjects.some(p => p.id === projectId)
-      ? projects.find(p => p.id === projectId)
-      : undefined;
-
-    return (
-      <>
-        <Field
-          label="Organization"
-          hint={showNewOrg ? undefined : 'Optional. The club, org, or team this belongs to.'}
-        >
-          {!showNewOrg ? (
-            <select
-              className="vb-dialog-control"
-              style={CONTROL_STYLE}
-              value={organizationId === '' ? '' : String(organizationId)}
-              disabled={orgsLoading}
-              onChange={e => {
-                if (e.target.value === NEW_ORG_SENTINEL) { setShowNewOrg(true); return; }
-                handleOrganizationChange(e.target.value === '' ? '' : Number(e.target.value));
-              }}
-            >
-              {/* Optional, so the empty state is a real choice ("No organization") rather
-                  than an unfillable placeholder — unlike Academic's required Course. */}
-              <option value="">{orgsLoading ? 'Loading organizations…' : 'No organization'}</option>
-              {(organizations ?? []).map(o => (
-                <option key={o.id} value={o.id}>
-                  {o.name}{o.status === 'archived' ? ' (archived)' : ''}
-                </option>
-              ))}
-              <option value={NEW_ORG_SENTINEL}>＋ New organization…</option>
-            </select>
-          ) : (
-            <div>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <input
-                  type="text"
-                  className="vb-dialog-control"
-                  style={CONTROL_STYLE}
-                  value={newOrgName}
-                  onChange={e => setNewOrgName(e.target.value)}
-                  // Enter inside a form fires the form's submit button, which here is
-                  // "Create" — so without this, finishing the organization name the obvious
-                  // way would submit the whole work item instead, with no organization set.
-                  onKeyDown={e => {
-                    if (e.key !== 'Enter') return;
-                    e.preventDefault();
-                    if (!creatingOrg && newOrgName.trim()) handleCreateOrganization();
-                  }}
-                  placeholder="Organization name"
-                  autoFocus
-                />
-                <button
-                  type="button"
-                  className="vb-dialog-control"
-                  onClick={handleCreateOrganization}
-                  disabled={creatingOrg || !newOrgName.trim()}
-                  style={{
-                    width: 'auto', padding: '8px 14px', background: '#256f92', color: '#fff',
-                    border: 'none', fontWeight: 700, cursor: 'pointer',
-                  }}
-                >
-                  {creatingOrg ? 'Adding…' : 'Add'}
-                </button>
-                <button
-                  type="button"
-                  className="vb-dialog-control"
-                  onClick={() => { setShowNewOrg(false); setNewOrgName(''); setOrgError(null); }}
-                  style={{
-                    width: 'auto', padding: '8px 14px', background: 'transparent', color: '#5c6b80',
-                    border: '1px solid rgba(200,210,230,0.6)', cursor: 'pointer',
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-              {/* Whatever the route said, verbatim — "You already have an organization with
-                  that name" is already the sentence a user needs, so `parseErrorMessage`
-                  passes it straight through rather than any branch special-casing it. */}
-              {orgError && (
-                <p style={{ margin: '6px 0 0', fontFamily: FONT, fontSize: '0.76rem', color: '#922e48' }}>
-                  {orgError}
-                </p>
-              )}
-            </div>
-          )}
-        </Field>
-
-        {orgsError && (
-          <p style={{ ...HINT_TEXT_STYLE, margin: '-10px 0 16px', color: '#922e48', fontWeight: 600 }}>
-            {orgsError}
-          </p>
-        )}
-
-        <Field
-          label="Project / Initiative"
-          hint={
-            outOfScope
-              ? 'This project isn’t part of the chosen organization. Pick “No project” to clear it.'
-              : chosenOrgId === null
-                ? 'Optional. Choose an organization first — initiatives are listed per organization.'
-                : orgProjects.length === 0
-                  ? 'Optional. This organization has no initiatives yet.'
-                  : 'Optional. Only this organization’s initiatives are listed.'
-          }
-        >
-          <select
-            className="vb-dialog-control"
-            style={CONTROL_STYLE}
-            value={projectId === '' ? '' : String(projectId)}
-            disabled={chosenOrgId === null || (orgProjects.length === 0 && !outOfScope)}
-            onChange={e => setProjectId(e.target.value === '' ? '' : Number(e.target.value))}
-          >
-            <option value="">No project</option>
-            {outOfScope && (
-              <option value={outOfScope.id} disabled>{outOfScope.name} (not in this organization)</option>
-            )}
-            {orgProjects.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        </Field>
-      </>
-    );
-  }
-
-  /**
-   * The Projects branch. NO HOOKS, for exactly the reason the two branches above have none
-   * — see `renderContextFields`'s note directly below.
-   *
-   * The one branch whose per-context field is genuinely REQUIRED. Spec §14: independent
-   * one-off work with no project belongs in Life, so `Context = Projects, Project = No
-   * project` — a pairing v2 allowed, and which nothing downstream could tell apart from a
-   * deliberate choice — stops being producible here. It stops being producible by
-   * *construction*: there is no "No project" option to produce it with. The placeholder
-   * below is a prompt, not an answer (hence `disabled` once a real project is picked, the
-   * same reasoning the Context select's own placeholder carries), and `requiresProject` in
-   * `handleSubmit` is what stops the never-picked case reaching a fetch.
-   *
-   * Neither Course nor Organization is read here, and that is the rule rather than an
-   * omission: `validateProjectParent` forbids a `context: 'project'` project BOTH parents,
-   * so there is no parent to scope this list by — filtering on the context alone is exact,
-   * where the Academic and Organization branches must additionally filter by their parent.
-   */
-  function renderProjectFields(): React.ReactNode {
-    const standaloneProjects = projects.filter(p => p.context === 'project');
-    // The mount-time shape of the hazard the two branches above guard live: an item being
-    // edited can hold a `project_id` this filter does not offer, because the project it
-    // names was re-parented onto a course or an organization after the item was linked to
-    // it. A `<select value>` matching no `<option>` displays the *first* one — here the
-    // placeholder — so the field would read as unfilled while a real id sat in state,
-    // waiting to be silently re-submitted by a Save that the required-field guard happily
-    // waves through. Surfaced as its own disabled option instead, so what is about to be
-    // saved stays visible; unlike the sibling branches there is no "No project" escape, so
-    // the fix is to pick a real project (or move the item to Life).
-    const outOfScope = projectId !== '' && !standaloneProjects.some(p => p.id === projectId)
-      ? projects.find(p => p.id === projectId)
-      : undefined;
-
-    return (
-      <Field
-        label="Project"
-        hint={
-          showNewProject
-            ? undefined
-            : outOfScope
-              ? 'This project now belongs to a course or organization. Choose one of your projects instead.'
-              : standaloneProjects.length === 0
-                // Step 2 of the brief: a required field with nothing to choose is a dead
-                // end, so the empty state names both ways out — create one right here, or
-                // take the work to the context that wants no project at all.
-                ? 'No projects yet — add one with “＋ New project…”, or switch to Life if this is one-off work.'
-                : 'Required. One-off work with no project belongs in Life.'
-        }
-      >
-        {!showNewProject ? (
-          <select
-            className="vb-dialog-control"
-            style={CONTROL_STYLE}
-            value={projectId === '' ? '' : String(projectId)}
-            onChange={e => {
-              if (e.target.value === NEW_PROJECT_SENTINEL) { setShowNewProject(true); return; }
-              setProjectId(e.target.value === '' ? '' : Number(e.target.value));
-            }}
-          >
-            {/* Disabled once a real project is picked, exactly as the Context select's
-                placeholder is and for the same reason: it is reachable as the *initial*
-                state, never as a way back out of a valid choice. Organization's
-                placeholder stays selectable because "No organization" is a legitimate
-                final answer there — "no project" is not one here. */}
-            <option value="" disabled={projectId !== ''}>Choose a project…</option>
-            {outOfScope && (
-              <option value={outOfScope.id} disabled>{outOfScope.name} (no longer a standalone project)</option>
-            )}
-            {standaloneProjects.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-            {/* Never disabled and never hidden: with no projects yet this is the only thing
-                in the list that can get the user out of a required field. */}
-            <option value={NEW_PROJECT_SENTINEL}>＋ New project…</option>
-          </select>
-        ) : (
-          <div>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <input
-                type="text"
-                className="vb-dialog-control"
-                style={CONTROL_STYLE}
-                value={newProjectName}
-                onChange={e => setNewProjectName(e.target.value)}
-                // Same reason the organization form below binds Enter: inside a form,
-                // Enter fires the submit button — "Create" — so finishing the project name
-                // the obvious way would otherwise submit the whole work item, and with no
-                // project set it would bounce straight off the guard in `handleSubmit`.
-                onKeyDown={e => {
-                  if (e.key !== 'Enter') return;
-                  e.preventDefault();
-                  if (!creatingProject && newProjectName.trim()) handleCreateProject();
-                }}
-                placeholder="Project name"
-                autoFocus
-              />
-              <button
-                type="button"
-                className="vb-dialog-control"
-                onClick={handleCreateProject}
-                disabled={creatingProject || !newProjectName.trim()}
-                style={{
-                  width: 'auto', padding: '8px 14px', background: '#256f92', color: '#fff',
-                  border: 'none', fontWeight: 700, cursor: 'pointer',
-                }}
-              >
-                {creatingProject ? 'Adding…' : 'Add'}
-              </button>
-              <button
-                type="button"
-                className="vb-dialog-control"
-                onClick={() => { setShowNewProject(false); setNewProjectName(''); setProjectError(null); }}
-                style={{
-                  width: 'auto', padding: '8px 14px', background: 'transparent', color: '#5c6b80',
-                  border: '1px solid rgba(200,210,230,0.6)', cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-            {projectError && (
-              <p style={{ margin: '6px 0 0', fontFamily: FONT, fontSize: '0.76rem', color: '#922e48' }}>
-                {projectError}
-              </p>
-            )}
-          </div>
-        )}
-      </Field>
-    );
-  }
-
-  /**
-   * The Life branch. NO HOOKS, for exactly the reason the three branches above have none —
-   * see `renderContextFields`'s note directly below.
-   *
-   * The whole branch is one optional select, and that is the design rather than an
-   * unfinished start: spec §15 keeps Life deliberately lightweight, so there is no project
-   * field here (the one context that offers none), no course, no organization, and no
-   * inline creation of anything. `LIFE_AREAS` is a static constant, so unlike every other
-   * branch this one reads no fetched list and needs no loading, error or retry state.
-   *
-   * Area is optional and its placeholder stays selectable — "No area" is a legitimate final
-   * answer (the Table renders an em dash for it), so this follows the Organization select's
-   * always-reselectable placeholder rather than the Projects branch's, which is disabled
-   * once set because "no project" is not an answer that branch accepts.
-   */
-  function renderLifeFields(): React.ReactNode {
-    return (
-      <Field label="Area" hint="Optional. Groups personal work so it reads at a glance in the Table.">
-        <select
-          className="vb-dialog-control"
-          style={CONTROL_STYLE}
-          value={lifeArea}
-          onChange={e => setLifeArea(e.target.value as LifeArea | '')}
-        >
-          <option value="">No area</option>
-          {LIFE_AREAS.map(a => <option key={a} value={a}>{LIFE_AREA_LABELS[a]}</option>)}
-        </select>
-      </Field>
-    );
-  }
-
   function renderContextFields(context: WorkContext): React.ReactNode {
-    if (context === 'academic')     return renderAcademicFields();
-    if (context === 'organization') return renderOrganizationFields();
-    if (context === 'project')      return renderProjectFields();
-    if (context === 'life')         return renderLifeFields();
+    if (context === 'academic') return renderAcademicFields();
+    if (context === 'organization') {
+      return (
+        <OrganizationFields
+          projects={projects}
+          projectId={projectId}
+          setProjectId={setProjectId}
+          organizationId={organizationId}
+          organizations={organizations}
+          orgsLoading={orgsLoading}
+          orgsError={orgsError}
+          onOrganizationChange={handleOrganizationChange}
+          showNewOrg={showNewOrg}
+          setShowNewOrg={setShowNewOrg}
+          newOrgName={newOrgName}
+          setNewOrgName={setNewOrgName}
+          creatingOrg={creatingOrg}
+          orgError={orgError}
+          onCreateOrganization={handleCreateOrganization}
+          onCancelNewOrg={() => { setShowNewOrg(false); setNewOrgName(''); setOrgError(null); }}
+        />
+      );
+    }
+    if (context === 'project') {
+      return (
+        <ProjectFields
+          projects={projects}
+          projectId={projectId}
+          setProjectId={setProjectId}
+          showNewProject={showNewProject}
+          setShowNewProject={setShowNewProject}
+          newProjectName={newProjectName}
+          setNewProjectName={setNewProjectName}
+          creatingProject={creatingProject}
+          projectError={projectError}
+          onCreateProject={handleCreateProject}
+          onCancelNewProject={() => { setShowNewProject(false); setNewProjectName(''); setProjectError(null); }}
+          error={fieldError('project')}
+        />
+      );
+    }
+    if (context === 'life') return <LifeFields lifeArea={lifeArea} setLifeArea={setLifeArea} />;
     return null;
   }
-
   async function parseErrorMessage(res: Response): Promise<string> {
     try {
       const data = await res.json();
@@ -1457,8 +695,11 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
    *  enforcement, which is also why it is stated as a guard and not as a disabled button. */
   const requiresProject = context === 'project';
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(e?: React.FormEvent) {
+    e?.preventDefault();
+    // Closed means cancelled and mid-exit: an implicit Enter-submit or a Save click in the
+    // 120ms exit window must not post.
+    if (!open) return;
     // Path 1's only exit. Pressing Enter in the Title field submits the form, so this guard
     // is what stops an implicit submit from POSTing an owned item the user never asked for;
     // the "Done" button routes through the same close so the two can never diverge. No
@@ -1485,26 +726,26 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
       // The academic-edit branch renders neither a Title nor a Context input (its context
       // is fixed by its Study Pulse source), so neither is validated for it.
       if (!title.trim()) {
-        setFormError('Title is required.');
+        setFormError({ field: 'title', message: 'Title is required.' });
         return;
       }
       if (context === '') {
         // Create mode deliberately starts with no context selected, so an unpicked context
         // has to fail here rather than POST `category: ''` to the server.
-        setFormError('Please choose a context.');
+        setFormError({ field: 'context', message: 'Please choose a context.' });
         return;
       }
       if (requiresProject && !projects.some(p => p.id === projectId && p.context === 'project')) {
         // Not just `projectId === ''`: an edit-mode item can hold the id of a project that
         // was standalone when it was linked and has since been re-parented onto a course or
-        // organization (`renderProjectFields`'s `outOfScope` disables it in the select for
+        // organization (`ProjectFields`'s `outOfScope` disables it in the select for
         // exactly this reason). `projectId === ''` alone would miss that case and let Save
         // silently re-write a link the hint right above the select says to change. This is
         // only reachable by leaving the placeholder untouched or by that stale-link case —
         // never by a deliberate, still-valid choice. Placed before the academic guards
         // purely to keep that block contiguous; the contexts are mutually exclusive, so no
         // two of these guards can ever both be live.
-        setFormError('Please choose a project.');
+        setFormError({ field: 'project', message: 'Please choose a project.' });
         return;
       }
       if (context === 'academic' && academicSource === '') {
@@ -1512,18 +753,18 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
         // the Course field does not even render until one is picked. Without this, Save
         // with Academic selected and nothing else touched POSTs an owned academic row the
         // user never chose the shape of.
-        setFormError('Please choose where this comes from.');
+        setFormError({ field: 'academicSource', message: 'Please choose where this comes from.' });
         return;
       }
       if (requiresCourse && subjectId === '') {
-        setFormError('Please choose a course.');
+        setFormError({ field: 'course', message: 'Please choose a course.' });
         return;
       }
       if (isNewGradedPath) {
         // Re-stated rather than inferred from `requiresCourse` above: this is what narrows
         // `subjectId` to a number for the config lookup and the body.
         if (subjectId === '') {
-          setFormError('Please choose a course.');
+          setFormError({ field: 'course', message: 'Please choose a course.' });
           return;
         }
         const grading = subjectGrading[subjectId];
@@ -1532,14 +773,14 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
           // the load is still in flight, or it failed and the user pressed Create on the
           // error. Submitting anyway would have to guess the mode, and a wrong guess writes
           // the wrong kind of Study Pulse row.
-          setFormError(gradingError ?? 'This course’s grading setup hasn’t loaded yet.');
+          setFormError({ field: 'grading', message: gradingError ?? 'This course’s grading setup hasn’t loaded yet.' });
           return;
         }
         // The common section's Due date doubles as this path's deadline, and the create
         // route requires one (it 400s on a missing or malformed `deadline`). Caught here so
         // the message names the field the user can see rather than the wire key.
         if (!dueAt) {
-          setFormError('A deadline is required for graded work.');
+          setFormError({ field: 'dueAt', message: 'A deadline is required for graded work.' });
           return;
         }
         if (grading.mode === 'custom') {
@@ -1548,11 +789,11 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
             // neither can be chosen — the select is disabled precisely because there is
             // nothing in it — points at an action the user has no way to perform. The
             // period select's own hint already explains where to fix it.
-            setFormError('This course’s grading preset has no periods set up yet.');
+            setFormError({ field: 'grading', message: 'This course’s grading preset has no periods set up yet.' });
             return;
           }
           if (gradingPeriodId === '' || gradingCatId === '') {
-            setFormError('Choose a grading period and category.');
+            setFormError({ field: 'grading', message: 'Choose a grading period and category.' });
             return;
           }
           gradedBody = {
@@ -1660,7 +901,7 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
       }
 
       if (!res.ok) {
-        setFormError(await parseErrorMessage(res));
+        setFormError({ field: 'form', message: await parseErrorMessage(res) });
         return;
       }
       await onSaved();
@@ -1671,230 +912,112 @@ export default function WorkItemDialog({ target, projects, onClose, onSaved, onP
   }
 
   const heading = target.mode === 'create' ? 'New Work Item' : isAcademicEdit ? 'Edit Academic Item' : 'Edit Work Item';
+  const bannerError = formError?.field === 'form' ? formError.message : null;
 
   return (
-    <div
-      className="vb-dialog-backdrop"
-      onMouseDown={handleBackdropMouseDown}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(20,24,38,0.45)', zIndex: 1000,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
-      }}
+    <WbOverlay
+      open={open}
+      instant={instant}
+      onClose={onClose}
+      variant="modal"
+      labelledBy="vb-item-dialog-title"
+      initialFocusRef={firstFieldRef}
+      panelClassName="wb-item-dialog"
+      panelStyle={{ width: 'min(600px, calc(100vw - 32px))', padding: 20 }}
     >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="workItemDialogHeading"
-        onKeyDown={handleKeyDown}
-        style={{
-          width: 'min(560px, 100%)', maxHeight: '88vh', overflowY: 'auto', boxSizing: 'border-box',
-          background: '#fbfbfd', borderRadius: '20px', border: '1px solid rgba(200,210,230,0.6)',
-          boxShadow: '0 20px 60px rgba(31,38,68,0.35)', padding: '24px', position: 'relative',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '18px' }}>
-          <h2 id="workItemDialogHeading" style={{ margin: 0, fontFamily: HEADER_FONT, fontSize: '1.1rem', fontWeight: 800, color: '#2d3748' }}>
-            {heading}
-          </h2>
-          <button
-            type="button"
-            className="vb-dialog-control vb-dialog-close"
-            aria-label="Close dialog"
-            onClick={onClose}
-            style={{
-              width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'transparent', border: 'none', borderRadius: '8px', color: '#5c6b80', cursor: 'pointer',
-            }}
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          {isAcademicEdit && editingItem ? (
-            <AcademicFieldSet
-              item={editingItem}
-              workStatus={workStatus} setWorkStatus={setWorkStatus}
-              dueAt={dueAt} setDueAt={setDueAt}
-              deadlineTime={deadlineTime} setDeadlineTime={setDeadlineTime}
-              priority={priority} setPriority={setPriority}
-              estimatedHours={estimatedHours} setEstimatedHours={setEstimatedHours}
-              startDate={startDate} setStartDate={setStartDate}
-              firstFieldRef={firstFieldRef}
-            />
-          ) : (
-            <>
-              <Field label="Title">
-                <input
-                  ref={firstFieldRef}
-                  type="text"
-                  className="vb-dialog-control"
-                  style={CONTROL_STYLE}
-                  value={title}
-                  onChange={e => setTitle(e.target.value)}
-                  placeholder="What needs doing?"
-                  // Not required on path 1: nothing here is submitted (the item already
-                  // exists), so native constraint validation would block the "Done" button
-                  // on an empty Title the form never reads — the one path that needs no
-                  // title would be the one path whose primary button silently refuses to fire.
-                  required={!isLinkExistingPath}
-                />
-              </Field>
-
-              <Field label="Context" hint="Pick a context to see the fields that only apply to it.">
-                <select
-                  className="vb-dialog-control"
-                  style={CONTROL_STYLE}
-                  value={context}
-                  onChange={e => handleContextChange(e.target.value as WorkContext | '')}
-                >
-                  {/* An explicit placeholder so "no context yet" is a visible, selectable
-                      state rather than an invisible default that silently means Projects.
-                      Disabled once a real context is set: re-selecting it would run
-                      `handleContextChange('')`, silently clearing `projectId`/`subjectId`
-                      on an item that already had a perfectly good context, with no undo
-                      short of cancelling the whole dialog. It only needs to be reachable
-                      as the *initial* state, never as a way back out of a real choice. */}
-                  <option value="" disabled={context !== ''}>Choose a context…</option>
-                  {WORK_CONTEXTS.map(c => <option key={c} value={c}>{CONTEXT_LABELS[c]}</option>)}
-                </select>
-              </Field>
-
-              {/* The per-context section — nothing until a context is picked. */}
-              {context !== '' && renderContextFields(context)}
-
-              {/* POST /api/workboard/academic/create takes only { title, target_type,
-                  cat_id?, period_id?, deadline, priority } — Deadline time, Start date,
-                  Estimated hours and Note have no column on that path, so a user who fills
-                  them in for graded work would otherwise lose them with no signal at all.
-                  Due date and Priority are unaffected — both map onto fields the route
-                  does accept. */}
-              {isNewGradedPath && (
-                <p style={{ ...HINT_TEXT_STYLE, margin: '-4px 0 16px' }}>
-                  Study Pulse doesn’t have a place for Deadline time, Start date, Estimated
-                  hours, or Note yet — only Due date and Priority are saved for graded work.
-                </p>
-              )}
-
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div style={{ flex: 1 }}>
-                  <Field label="Due date">
-                    <input type="date" className="vb-dialog-control" style={CONTROL_STYLE} value={dueAt} onChange={e => setDueAt(e.target.value)} />
-                  </Field>
-                </div>
-                {/* The same pairing `AcademicFieldSet` renders, for the owned row: one
-                    deadline split into date and time (spec §16), the time optional and
-                    sent as null when blank rather than as a midnight nobody chose.
-                    POST /api/workboard/academic/create takes a `deadline` DATE and no
-                    time, so it joins Start date/Estimated hours/Note in the graded-path
-                    advisory above and disables the same way. */}
-                <div style={{ flex: 1 }}>
-                  <Field label="Deadline time" hint="Optional. Blank means any time that day.">
-                    <input
-                      type="time" className="vb-dialog-control" style={CONTROL_STYLE}
-                      value={deadlineTime} onChange={e => setDeadlineTime(e.target.value)}
-                      disabled={isNewGradedPath}
-                    />
-                  </Field>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <Field label="Start date" hint="Adds a bar on the Timeline view.">
-                    <input
-                      type="date" className="vb-dialog-control" style={CONTROL_STYLE}
-                      value={startDate} onChange={e => setStartDate(e.target.value)} disabled={isNewGradedPath}
-                    />
-                  </Field>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div style={{ flex: 1 }}>
-                  <Field label="Priority">
-                    <select className="vb-dialog-control" style={CONTROL_STYLE} value={priority} onChange={e => setPriority(e.target.value as WorkPriority)}>
-                      {(Object.keys(PRIORITY_LABEL) as WorkPriority[]).map(p => <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>)}
-                    </select>
-                  </Field>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <Field label="Estimated hours">
-                    <input
-                      type="number" min="0" step="0.25" className="vb-dialog-control" style={CONTROL_STYLE}
-                      value={estimatedHours} onChange={e => setEstimatedHours(e.target.value)}
-                      placeholder="e.g. 2" disabled={isNewGradedPath}
-                    />
-                  </Field>
-                </div>
-              </div>
-
-              {target.mode === 'edit' && (
-                <Field label="Status">
-                  <select className="vb-dialog-control" style={CONTROL_STYLE} value={workStatus} onChange={e => setWorkStatus(e.target.value as WorkStatus)}>
-                    {(Object.keys(STATUS_LABEL) as WorkStatus[]).map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-                  </select>
-                </Field>
-              )}
-
-              <Field label="Note">
-                <textarea
-                  className="vb-dialog-control"
-                  style={{ ...CONTROL_STYLE, minHeight: '72px', resize: 'vertical', fontFamily: FONT }}
-                  value={note}
-                  onChange={e => setNote(e.target.value)}
-                  placeholder="Optional details…"
-                  disabled={isNewGradedPath}
-                />
-              </Field>
-            </>
-          )}
-
-          {formError && (
-            <p style={{ margin: '0 0 14px', fontFamily: FONT, fontSize: '0.82rem', fontWeight: 600, color: '#922e48' }}>
-              {formError}
-            </p>
-          )}
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
-            <button
-              type="button"
-              className="vb-btn-ghost vb-dialog-control"
-              onClick={onClose}
-              style={{ width: 'auto', padding: '10px 20px' }}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="vb-btn-pink vb-dialog-control"
-              disabled={submitting}
-              style={{ width: 'auto', padding: '10px 20px' }}
-            >
-              {/* Path 1 creates nothing, so it must not offer to "Create" — the button
-                  acknowledges what the user just confirmed and closes. `submitting` is
-                  never true on that path (it has no fetch), so the order is moot there. */}
-              {submitting ? 'Saving…' : isLinkExistingPath ? 'Done' : target.mode === 'create' ? 'Create' : 'Save changes'}
-            </button>
-          </div>
-        </form>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+        <h2 id="vb-item-dialog-title" style={{ margin: 0, font: '800 var(--wb-fs-20) var(--wb-font-head)', color: 'var(--wb-text)' }}>
+          {heading}
+        </h2>
+        <button
+          type="button"
+          className="wb-focus-ring wb-pressable wb-dialog-close"
+          aria-label="Close dialog"
+          onClick={onClose}
+          style={{
+            width: 32, height: 32, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: 'none', borderRadius: 'var(--wb-r-md)', cursor: 'pointer',
+          }}
+        >
+          <X size={18} />
+        </button>
       </div>
 
-      <style jsx>{`
-        .vb-dialog-control:focus-visible,
-        .vb-dialog-link:focus-visible {
-          outline: 2px solid #2a7fa8;
-          outline-offset: 2px;
-          border-radius: inherit;
-        }
-        .vb-dialog-close:hover {
-          background: rgba(200,210,230,0.3);
-        }
-        .vb-dialog-link {
-          text-decoration: none;
-        }
-        .vb-dialog-link:hover {
-          text-decoration: underline;
-        }
-      `}</style>
-    </div>
+      <form
+        ref={formRef}
+        onSubmit={handleSubmit}
+        onKeyDown={e => {
+          // Ctrl/Cmd+Enter saves from any field. An inline "new project/organization" input
+          // has already claimed Enter (preventDefault) for its own Add, so that one wins.
+          // Closed (the exit window) means cancelled: never submit then.
+          if (!open) return;
+          if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.defaultPrevented) {
+            e.preventDefault();
+            if (!submitting) void handleSubmit();
+          }
+        }}
+        style={FIELD_GROUP}
+      >
+        {bannerError && <p role="alert" style={BANNER_STYLE}>{bannerError}</p>}
+        {/* Item-dialog link, close-button and disabled-control rules: `.wb-item-dialog` in workboard.css. */}
+
+        {isAcademicEdit && editingItem ? (
+          <AcademicEditFields
+            item={editingItem}
+            workStatus={workStatus} setWorkStatus={setWorkStatus}
+            dueAt={dueAt} setDueAt={setDueAt}
+            deadlineTime={deadlineTime} setDeadlineTime={setDeadlineTime}
+            priority={priority} setPriority={setPriority}
+            estimatedHours={estimatedHours} setEstimatedHours={setEstimatedHours}
+            startDate={startDate} setStartDate={setStartDate}
+            firstFieldRef={firstFieldRef}
+          />
+        ) : (
+          <>
+            <TitleContextFields
+              title={title} setTitle={setTitle}
+              titleRequired={!isLinkExistingPath}
+              titleError={fieldError('title')}
+              context={context} onContextChange={handleContextChange}
+              contextError={fieldError('context')}
+              firstFieldRef={firstFieldRef}
+            />
+
+            {/* The per-context section — nothing until a context is picked. */}
+            {context !== '' && renderContextFields(context)}
+
+            <ScheduleFields
+              isNewGradedPath={isNewGradedPath}
+              showStatus={target.mode === 'edit'}
+              dueAt={dueAt} setDueAt={setDueAt} dueError={fieldError('dueAt')}
+              deadlineTime={deadlineTime} setDeadlineTime={setDeadlineTime}
+              startDate={startDate} setStartDate={setStartDate}
+              priority={priority} setPriority={setPriority}
+              estimatedHours={estimatedHours} setEstimatedHours={setEstimatedHours}
+              workStatus={workStatus} setWorkStatus={setWorkStatus}
+              note={note} setNote={setNote}
+            />
+          </>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginTop: 4 }}>
+          <button type="button" className="wb-add-trigger wb-focus-ring" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="vb-btn-pink wb-pressable wb-focus-ring"
+            disabled={submitting}
+            aria-busy={submitting || undefined}
+            style={{ width: 'auto', padding: '10px 20px' }}
+          >
+            {/* Path 1 creates nothing, so it must not offer to "Create" — the button
+                acknowledges what the user just confirmed and closes. `submitting` is
+                never true on that path (it has no fetch), so the order is moot there. */}
+            {submitting ? 'Saving…' : isLinkExistingPath ? 'Done' : target.mode === 'create' ? 'Create' : 'Save changes'}
+          </button>
+        </div>
+      </form>
+    </WbOverlay>
   );
 }

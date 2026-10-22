@@ -25,6 +25,18 @@ export function addDays(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Whole days between two "YYYY-MM-DD" (or "YYYY-MM-DD HH:MM:SS", only the date portion
+ *  matters) strings, `to` minus `from` — 0 if `to` is earlier. UTC-parsed on both sides purely
+ *  to get calendar subtraction right; neither string is a UTC instant, so no timezone
+ *  conversion actually happens. Shared by the Board's "Waiting Nd" badge and Focus's own
+ *  Waiting section (§18) — both count the same `blocked_since` against `today` and must never
+ *  answer that question two different ways. */
+export function daysSince(from: string, to: string): number {
+  const start = new Date(`${from.slice(0, 10)}T00:00:00Z`).getTime();
+  const end   = new Date(`${to.slice(0, 10)}T00:00:00Z`).getTime();
+  return Math.max(0, Math.round((end - start) / 86_400_000));
+}
+
 /** The Monday ("YYYY-MM-DD") of the ISO week containing `dateStr`, computed in UTC — same
  *  convention as `addDays`, and the same Monday-start `aggregate.ts`'s own (pool-importing,
  *  so unreachable from a client bundle) `mondayOf()` uses for the whole-board week. Kept here,
