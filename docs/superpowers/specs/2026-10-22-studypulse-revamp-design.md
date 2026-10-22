@@ -221,13 +221,14 @@ The panel header shows the scale chip ("4.0 scale", plus "transmuted" when on) a
 
 ## 7. Motion (`emil-design-eng` / `animate` rules)
 
-Easing is `--sp-ease` (`cubic-bezier(.23,1,.32,1)`). Only transform, opacity, width and left are animated.
+Easing is `--sp-ease` (`cubic-bezier(.23,1,.32,1)`). Only transform, opacity, color and background are animated, plus grid-template-rows for collapses. This is required by `scripts/wb-style-gate.mjs`'s `layout-transition` rule, which this work also runs.
 
 | Element | Motion |
 |---|---|
-| Period tab indicator | `left` and `width`, 320ms |
+| Period tab indicator | `transform: translateX()` 320ms. Its width is set from the active tab with no transition. |
 | Planner open/close | grid-rows 0fr→1fr, 280ms, plus content fade with a 90ms delay. Same as today's form shell. |
-| GradeBar fill, range, plan ring | `width`/`left`, 300ms, on value change |
+| GradeBar fill and range band | full-width elements, `transform: scaleX()` with `transform-origin: left`, 300ms. The range band is a wrapper `translateX` plus an inner `scaleX`. |
+| Plan ring, current tag, target pin | positioned by `left`, which is not transitioned; the ring alone animates via `transform: translateX()` on a full-width track layer, 300ms |
 | Headline / outcome numbers | No count-up tween; the value changes instantly. The tint transitions 300ms. Numbers being dragged must never lag. |
 | Category collapse | grid-rows, 240ms. The chevron rotates 180°. |
 | Row actions | opacity 150ms on hover or focus-within |
