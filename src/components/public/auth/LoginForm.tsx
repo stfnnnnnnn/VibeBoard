@@ -26,10 +26,13 @@ export default function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(urlError ? URL_ERRORS[urlError] ?? URL_ERRORS.AccessDenied : null);
+  const [fieldErr, setFieldErr] = useState<{ email?: string; password?: string }>({});
   const [lockedUntil, setLockedUntil] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
   const pwRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -45,7 +48,10 @@ export default function LoginForm() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (busy || lockedUntil) return;
+    if (busy || googleBusy || lockedUntil) return;
+    if (!email.trim()) { setFieldErr({ email: 'Enter your email.' }); emailRef.current?.focus(); return; }
+    if (!password) { setFieldErr({ password: 'Enter your password.' }); pwRef.current?.focus(); return; }
+    setFieldErr({});
     setBusy(true); setError(null);
     const r = await signIn('credentials', { email, password, redirect: false });
     setBusy(false);
@@ -58,44 +64,59 @@ export default function LoginForm() {
   }
 
   async function onGoogleCredential(credential: string) {
+    if (googleBusy) return;
+    setGoogleBusy(true);
     setError(null);
-    const res = await fetch('/api/auth/google-onetap', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential }),
-    });
-    const data = (await res.json().catch(() => ({}))) as { status?: string; code?: string };
-    if (data.status === 'new') { router.push('/signup/finish'); return; }
-    if (data.status === 'existing') {
-      const r = await signIn('google-idtoken', { credential, redirect: false });
-      if (r?.ok && !r.error) return succeed();
+    try {
+      const res = await fetch('/api/auth/google-onetap', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { status?: string; code?: string };
+      if (data.status === 'new') { router.push('/signup/finish'); return; }
+      if (data.status === 'existing') {
+        const r = await signIn('google-idtoken', { credential, redirect: false });
+        if (r?.ok && !r.error) { succeed(); return; }
+      }
+      setError(URL_ERRORS[data.code ?? ''] ?? URL_ERRORS.AccessDenied);
+    } catch {
+      setError(URL_ERRORS.AccessDenied);
     }
-    setError(URL_ERRORS[data.code ?? ''] ?? URL_ERRORS.AccessDenied);
+    setGoogleBusy(false);
   }
 
   const secsLeft = lockedUntil ? Math.max(0, Math.ceil((lockedUntil - now) / 1000)) : 0;
-  const lockText = secsLeft >= 60 ? `${Math.ceil(secsLeft / 60)} minutes` : `${secsLeft} seconds`;
+  const mins = Math.ceil(secsLeft / 60);
+  const lockText = secsLeft >= 60 ? `${mins} ${mins === 1 ? 'minute' : 'minutes'}` : `${secsLeft} ${secsLeft === 1 ? 'second' : 'seconds'}`;
 
   return (
     <>
       <DaypartGreeting page="login" />
       {error && <FormAlert tone="error">{error}</FormAlert>}
-      {lockedUntil && <FormAlert tone="warn">Too many attempts. Try again in <b>{lockText}</b>, or continue with Google.</FormAlert>}
+      {lockedUntil && (
+        <FormAlert tone="warn">
+          <span className="pub-sr">Too many attempts. Try again in a few minutes, or continue with Google.</span>
+          <span aria-hidden="true">Too many attempts. Try again in <b>{lockText}</b>, or continue with Google.</span>
+        </FormAlert>
+      )}
 
       <GooglePersonalized onCredential={onGoogleCredential} />
       <p className="auth-center"><UseAnother /></p>
 
       <div className="auth-or">or log in with email</div>
       <form onSubmit={onSubmit} noValidate>
-        <Field id="email" label="Email" icon={Mail} type="email" value={email} onChange={setEmail}
+        <Field id="email" label="Email" icon={Mail} type="email" value={email}
+          onChange={v => { setEmail(v); if (fieldErr.email) setFieldErr({}); }} error={fieldErr.email} inputRef={emailRef}
           autoComplete="email" inputMode="email" placeholder="you@school.edu.ph" required />
-        <PasswordField id="password" label="Password" value={password} onChange={setPassword} autoComplete="current-password"
-          inputRef={pwRef}
+        <PasswordField id="password" label="Password" value={password}
+          onChange={v => { setPassword(v); if (fieldErr.password) setFieldErr({}); }} error={fieldErr.password}
+          autoComplete="current-password" inputRef={pwRef}
           labelAside={
             <Link href="/forgot-password" className="auth-link"
               onClick={() => { try { sessionStorage.setItem('vb-forgot-email', email); } catch { /* storage blocked */ } }}>
               Forgot password?
             </Link>
           } />
-        <button type="submit" className="auth-btn" disabled={busy || !!lockedUntil || done}>
+        <button type="submit" className="auth-btn" disabled={busy || googleBusy || !!lockedUntil || done}>
           {done ? <><Check size={18} aria-hidden="true" /> Logged in</> : busy ? 'Logging in…' : 'Log in'}
         </button>
       </form>

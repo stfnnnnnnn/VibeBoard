@@ -79,6 +79,7 @@ html[data-daypart="evening"] .dp > [data-dp="evening"], html[data-daypart="night
 
 .auth-when { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; font-size: 12px; font-weight: 700; padding: 3px 10px;
   border-radius: 999px; margin-bottom: 12px; background: var(--pub-blue-soft); color: var(--pub-blue); }
+.auth-when svg { display: inline-block; }
 html[data-daypart="morning"] .auth-when { background: #ffeadf; color: #b65a2c; }
 html[data-daypart="evening"] .auth-when { background: var(--pub-lav-soft); color: #6f5db0; }
 html[data-daypart="night"] .auth-when { background: rgba(242, 167, 192, .14); color: #f2a7c0; }
