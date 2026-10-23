@@ -292,3 +292,47 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
   .lp-cta__google { min-width: 0; width: 100%; }
   .lp-cta__buttons .lp-btn { width: 100%; }
 }
+
+/* ── Motion (spec §8). transform/opacity only; all of it is removed under reduced motion. ── */
+@keyframes pub-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes pub-pop { from { opacity: 0; transform: scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes pub-grow { from { transform: scaleY(0); } to { transform: none; } }
+@keyframes pub-chip-in { from { opacity: 0; transform: translateY(8px) scale(.96); } to { opacity: 1; transform: none; } }
+/* Drift uses the independent `translate` property and starts/ends at rest, so it composes with pub-chip-in's
+   `transform` instead of overriding it, and the hand-off from entrance to drift never jumps 4px. */
+@keyframes pub-drift { 0%, 100% { translate: 0 0; } 25% { translate: 0 -4px; } 75% { translate: 0 4px; } }
+@keyframes pub-glow-drift { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(24px, -16px, 0); } }
+/* Spec §8: error text slides in 4px (pub-rise's 10px is for page-level entrances). */
+@keyframes pub-hint-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: no-preference) {
+  .lp [data-reveal] { animation: pub-rise .5s var(--pub-ease) both; }
+  .lp .lp-hero__copy [data-reveal]:nth-child(2) { animation-delay: 60ms; }
+  .lp .lp-hero__copy [data-reveal]:nth-child(3) { animation-delay: 120ms; }
+  .lp [data-reveal="card"] { animation: pub-pop .55s var(--pub-ease) 140ms both; }
+  .lp .lp-bars i { animation: pub-grow .6s var(--pub-ease) both; }
+  .lp .lp-bars div:nth-child(1) i { animation-delay: 260ms; } .lp .lp-bars div:nth-child(2) i { animation-delay: 300ms; }
+  .lp .lp-bars div:nth-child(3) i { animation-delay: 340ms; } .lp .lp-bars div:nth-child(4) i { animation-delay: 380ms; }
+  .lp .lp-bars div:nth-child(5) i { animation-delay: 420ms; }
+  .lp .lp-chip--float { animation: pub-chip-in .45s var(--pub-ease) both, pub-drift 7s ease-in-out infinite; }
+  .lp .lp-hero-visual .lp-chip--float:nth-of-type(1) { animation-delay: 560ms, 1s; }
+  .lp .lp-hero-visual .lp-chip--float:nth-of-type(2) { animation-delay: 640ms, 1.6s; animation-duration: .45s, 8s; }
+  .lp .lp-hero-visual .lp-chip--float:nth-of-type(3) { animation-delay: 720ms, 2.2s; animation-duration: .45s, 6s; }
+  .lp-xchips .lp-x { transition: transform .6s var(--pub-ease), opacity .6s var(--pub-ease); }
+  .lp-xchips.is-in .lp-x { opacity: .6; }
+  .lp-xchips.is-in .lp-x:nth-child(odd) { transform: translateX(12px); }
+  .lp-xchips.is-in .lp-x:nth-child(even) { transform: translateX(-12px); }
+  .auth-glow--a, .auth-glow--b { animation: pub-glow-drift 30s ease-in-out infinite alternate; }
+  html.pub-hidden .auth-glow--a, html.pub-hidden .auth-glow--b, html.pub-hidden .lp-chip--float { animation-play-state: paused; }
+  .auth-card { animation: pub-pop .35s var(--pub-ease) both; }
+  .auth-hint.is-error { animation: pub-hint-in .2s var(--pub-ease) both; }
+}
+/* The arc only exists above 880px; below it the sun is hidden and moments are a plain list, so they must never be dimmed there (R23). */
+@media (prefers-reduced-motion: no-preference) and (min-width: 881px) {
+  .lp-moment { transition: opacity .5s var(--pub-ease), transform .5s var(--pub-ease); }
+  .lp-arc:not(.is-lit-1) .lp-moment:nth-child(1), .lp-arc:not(.is-lit-2) .lp-moment:nth-child(2),
+  .lp-arc:not(.is-lit-3) .lp-moment:nth-child(3), .lp-arc:not(.is-lit-4) .lp-moment:nth-child(4) { opacity: .45; transform: translateY(6px); }
+  /* offset-anchor (the box centre) already lands the dot on the path, so the static -9px centring margin is dropped. */
+  .lp-arc__sun { margin: 0; opacity: 1; offset-path: path('M0,180 C90,20 310,20 400,180'); offset-rotate: 0deg; offset-distance: var(--sun, 0%); transition: offset-distance .2s linear; }
+  .lp-arc[style*="--sun-path"] .lp-arc__sun { offset-path: var(--sun-path); }
+}

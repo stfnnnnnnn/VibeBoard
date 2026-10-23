@@ -14,7 +14,10 @@ export default function DaypartGreeting({ page }: { page: 'login' | 'signup' }) 
     const tick = () => setWhen(formatWhen(new Date()));
     tick();
     const t = setInterval(tick, 30_000);
-    return () => clearInterval(t);
+    // Pause the sky glows' drift while the tab is hidden (public.css: html.pub-hidden).
+    const vis = () => document.documentElement.classList.toggle('pub-hidden', document.hidden);
+    document.addEventListener('visibilitychange', vis);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis); };
   }, []);
   return (
     <>

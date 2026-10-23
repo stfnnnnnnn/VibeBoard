@@ -5,6 +5,7 @@ import ProblemCta from '@/components/public/landing/ProblemCta';
 import DayArc from '@/components/public/landing/DayArc';
 import StudyPulseSection from '@/components/public/landing/StudyPulseSection';
 import LandingFooter from '@/components/public/landing/LandingFooter';
+import LandingMotion from '@/components/public/landing/LandingMotion';
 
 export const metadata: Metadata = {
   title: 'VibeBoard · Ace the semester. Keep the rest in check.',
@@ -24,6 +25,7 @@ export default function LandingPage() {
         <StudyPulseSection />
       </main>
       <LandingFooter />
+      <LandingMotion />
     </div>
   );
 }
