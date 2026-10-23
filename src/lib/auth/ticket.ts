@@ -48,7 +48,13 @@ export function ticketFromCookieHeader(header: string | null): string | null {
   if (!header) return null;
   for (const part of header.split(';')) {
     const [k, ...v] = part.trim().split('=');
-    if (k === TICKET_COOKIE) return decodeURIComponent(v.join('='));
+    if (k === TICKET_COOKIE) {
+      try {
+        return decodeURIComponent(v.join('='));
+      } catch {
+        return null; // malformed percent-encoding
+      }
+    }
   }
   return null;
 }

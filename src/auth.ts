@@ -23,7 +23,8 @@ class AuthCodeError extends CredentialsSignin {
   }
 }
 
-const SV_RECHECK_MS = Number(process.env.AUTH_SV_RECHECK_MS ?? 5 * 60 * 1000);
+const svRecheckEnv = Number(process.env.AUTH_SV_RECHECK_MS);
+const SV_RECHECK_MS = Number.isFinite(svRecheckEnv) && svRecheckEnv >= 0 ? svRecheckEnv : 5 * 60 * 1000;
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 const asUser = (u: AuthUser) => ({ id: String(u.user_id), name: u.first_name, email: u.email });
 
@@ -87,7 +88,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (nameError(first, 'first name') || nameError(last, 'last name')) throw new AuthCodeError('name');
         const identity = { ...ticket, email_verified: true };
         const out = await resolveGoogle(identity);
-        if (out.kind === 'user') return asUser(out.user);
+        // A leftover ticket (e.g. on a shared PC) must never sign someone into an existing account without Google.
         if (out.kind !== 'new') throw new AuthCodeError('ticket');
         try {
           const id = await createUser({
@@ -154,12 +155,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return token;
       }
       if (!token.sub) return token;
+      // Tokens issued before session_version existed carry no sv: they were issued at the column default 0,
+      // and are checked immediately so a reset or password-clear since then still ends them.
+      const tokenSv = typeof token.sv === 'number' ? token.sv : 0;
       const due = typeof token.sv !== 'number' || Date.now() - (token.svAt ?? 0) > SV_RECHECK_MS;
       if (due) {
         const sv = await getSessionVersion(Number(token.sub));
-        if (sv === null) return null; // account deleted
-        if (typeof token.sv === 'number' && sv !== token.sv) return null; // password reset elsewhere
-        token.sv = sv; // tokens issued before session_version existed adopt the current value once
+        if (sv === null || sv !== tokenSv) return null; // account deleted, or password reset/cleared elsewhere
+        token.sv = sv;
         token.svAt = Date.now();
       }
       return token;
