@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { BookOpen, GraduationCap, Home, Plus } from 'lucide-react';
 import type { SubjectCardData } from '@/lib/studypulse/types';
 import SubjectCard from './subjects/SubjectCard';
-import SubjectForm, { BLANK_FORM, type SubjectFormValues } from './subjects/SubjectForm';
+import SubjectForm, { BLANK_FORM, YEAR_LEVELS, type SubjectFormValues } from './subjects/SubjectForm';
 
 export type SubjectCard = SubjectCardData;
 
@@ -16,19 +16,24 @@ const mode = (xs: string[]) => {
   return [...c.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
 };
 
-export default function SubjectsGrid({ initialSubjects }: { initialSubjects: SubjectCardData[] }) {
+export default function SubjectsGrid({ initialSubjects, defaultYear = null }: { initialSubjects: SubjectCardData[]; defaultYear?: string | null }) {
+  // Spec §7.5: pre-fill the year chosen at sign-up (subjects only allow 1st–4th Year).
+  const blank = useMemo<SubjectFormValues>(
+    () => ({ ...BLANK_FORM, year_level: defaultYear && YEAR_LEVELS.includes(defaultYear) ? defaultYear : '' }),
+    [defaultYear],
+  );
   const router = useRouter();
   const [subjects, setSubjects] = useState(initialSubjects);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
-  const [form, setForm] = useState<SubjectFormValues>(BLANK_FORM);
+  const [form, setForm] = useState<SubjectFormValues>(blank);
   const toggleRef = useRef<HTMLButtonElement>(null);
 
   const set = (k: keyof SubjectFormValues, v: string) => setForm(p => ({ ...p, [k]: v }));
-  const closeForm = useCallback(() => { setShowForm(false); setEditingId(null); setForm(BLANK_FORM); setMessage(''); }, []);
-  const openForCreate = () => { setEditingId(null); setForm(BLANK_FORM); setMessage(''); setShowForm(true); };
+  const closeForm = useCallback(() => { setShowForm(false); setEditingId(null); setForm(blank); setMessage(''); }, [blank]);
+  const openForCreate = () => { setEditingId(null); setForm(blank); setMessage(''); setShowForm(true); };
   const openForEdit = (sub: SubjectCardData) => {
     setEditingId(sub.user_subject_id);
     setForm({ course_code: sub.course_code, section: sub.section ?? '', subject_name: sub.subject_name, year_level: sub.year_level, term: '', semester: sub.trimester, units: String(sub.units) });

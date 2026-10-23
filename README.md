@@ -114,6 +114,20 @@ npm run dev
 ```
 Open http://localhost:3000, create an account, and you're in.
 
+## Google sign-in and email setup
+
+1. **Google OAuth client** ([console](https://console.cloud.google.com/apis/credentials)):
+   - Authorized JavaScript origins: `http://localhost:3000` (and your production URL later).
+   - Authorized redirect URIs: `http://localhost:3000/api/auth/callback/google`.
+   - Put the client ID in both `GOOGLE_CLIENT_ID` and `NEXT_PUBLIC_GOOGLE_CLIENT_ID`.
+   - The OAuth consent screen needs a privacy policy URL (`/privacy`) before publishing beyond "Testing".
+2. **Email** (password reset and verification) is sent from a Gmail account with an App Password:
+   - Turn on 2-Step Verification for that account.
+   - Create an App Password at https://myaccount.google.com/apppasswords.
+   - Set `GMAIL_USER` and `GMAIL_APP_PASSWORD`.
+   - With these unset in development, emails (including reset links) are printed to the dev-server console.
+3. The `/privacy` and `/terms` pages are drafts. Review them before deploying.
+
 ---
 
 ## Deploying to Vercel

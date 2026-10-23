@@ -344,3 +344,7 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
   .lp-arc.is-armed .lp-arc__sun { opacity: 1; }
   .lp-arc[style*="--sun-path"] .lp-arc__sun { offset-path: var(--sun-path); }
 }
+
+.lp-legal__body { max-width: 720px; margin: 0 auto; padding: 24px 24px 72px; font-size: 16px; line-height: 1.65; }
+.lp-legal__body h2 { font-size: 20px; letter-spacing: -.02em; margin: 32px 0 8px; }
+.lp-legal__body ul { padding-left: 20px; list-style: disc; }

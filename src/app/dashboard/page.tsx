@@ -5,6 +5,8 @@ import { LayoutDashboard } from 'lucide-react';
 import { auth, signOut } from '@/auth';
 import QuoteWidget  from '@/components/dashboard/QuoteWidget';
 import WeatherWidget from '@/components/dashboard/WeatherWidget';
+import VerifyEmailBanner from '@/components/dashboard/VerifyEmailBanner';
+import { findById } from '@/lib/auth/users';
 
 const MODULES = [
   { href: '/studypulse',  kind: 'image' as const, src: '/studypulse.png',     alt: 'Study Pulse'     },
@@ -18,6 +20,7 @@ export default async function DashboardPage() {
   if (!session?.user) redirect('/login');
 
   const firstName = session.user.name?.split(' ')[0] ?? 'Student';
+  const me = await findById(Number(session.user.id));
 
   async function handleSignOut() {
     'use server';
@@ -34,6 +37,8 @@ export default async function DashboardPage() {
         overflowX: 'hidden',
       }}
     >
+      {me && !me.email_verified_at && <VerifyEmailBanner />}
+
       {/* ── Header row ─────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '20px', flexWrap: 'wrap' }}>
         <h1
