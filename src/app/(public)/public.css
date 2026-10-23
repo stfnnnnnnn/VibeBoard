@@ -142,7 +142,7 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
 .auth-fine { font-size: 12.5px; line-height: 1.5; color: var(--pub-mute); text-align: center; margin: 14px 0 0; }
 .auth-fine a { color: var(--pub-ink); font-weight: 600; text-decoration: none; }
 .auth-center { text-align: center; margin-top: 10px; }
-.pub-gis { display: flex; justify-content: center; min-height: 44px; }
+.pub-gis { display: flex; justify-content: center; min-height: 44px; position: relative; z-index: 1; }
 
 /* ── Alerts, identity card, steps, year picker, badge icon ── */
 .auth-alert { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.45; border-radius: 12px; padding: 11px 12px; margin-bottom: 16px; }
@@ -160,7 +160,7 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
 .auth-steps i { width: 24px; height: 4px; border-radius: 9px; background: var(--pub-line); }
 .auth-steps i.on { background: var(--pub-pink); }
 .auth-years { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
-.auth-years button { min-height: 44px; border: 1.5px solid var(--pub-field); border-radius: 11px; background: var(--pub-card); color: var(--pub-mute);
+.auth-years button { position: relative; z-index: 1; min-height: 44px; border: 1.5px solid var(--pub-field); border-radius: 11px; background: var(--pub-card); color: var(--pub-mute);
   font: 700 14px var(--font-dm-sans), sans-serif; cursor: pointer; transition: transform .12s var(--pub-ease); }
 .auth-years button[aria-checked="true"] { border-color: var(--pub-pink); background: var(--pub-pink-soft); color: var(--pub-pink); }
 .auth-years button:active { transform: scale(.96); }
