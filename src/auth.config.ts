@@ -1,7 +1,7 @@
 import type { NextAuthConfig } from 'next-auth';
 
-const PROTECTED  = ['/dashboard', '/studypulse', '/finance', '/habits'];
-const AUTH_PAGES = ['/', '/login', '/signup'];
+const PROTECTED  = ['/dashboard', '/studypulse', '/finance', '/habits', '/workboard'];
+const AUTH_PAGES = ['/', '/login', '/signup', '/signup/finish', '/forgot-password'];
 
 export const authConfig: NextAuthConfig = {
   providers: [],

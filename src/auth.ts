@@ -1,109 +1,121 @@
-import NextAuth from 'next-auth';
+import NextAuth, { CredentialsSignin } from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import Google from 'next-auth/providers/google';
 import bcrypt from 'bcryptjs';
-import pool from '@/lib/db';
 import { authConfig } from '@/auth.config';
-import type { RowDataPacket } from 'mysql2';
+import {
+  findByEmail, findByGoogleSub, findById, createUser, recordFailedLogin, clearFailedLogins,
+  getSessionVersion, type AuthUser,
+} from '@/lib/auth/users';
+import { resolveGoogle } from '@/lib/auth/resolveGoogle';
+import { verifyGoogleIdToken } from '@/lib/auth/googleIdToken';
+import { sealTicket, openTicket, ticketFromCookieHeader } from '@/lib/auth/ticket';
+import { resetPassword } from '@/lib/auth/authTokens';
+import { cleanEmail, cleanName, nameError, passwordError, yearLevelFor } from '@/lib/auth/validate';
+import { lockSecondsLeft, MAX_ATTEMPTS, LOCK_SECONDS } from '@/lib/auth/lockout';
 
-/* ── DB row types ─────────────────────────────────────────── */
+/* ── Errors: the code reaches the client as SignInResponse.code (redirect: false) ── */
 
-interface AuthRow extends RowDataPacket {
-  user_id:         number;
-  password:        string;
-  first_name:      string;
-  failed_attempts: number;
-  last_attempt:    string | null;
-}
-
-interface LookupRow extends RowDataPacket {
-  user_id:    number;
-  first_name: string;
-}
-
-/* ── Helpers ──────────────────────────────────────────────── */
-
-/**
- * Looks up an existing user by email for Google sign-in.
- * Returns { id, name } if found, null if this is a first-time Google user
- * (in which case the signIn callback redirects them to /signup to enter
- * their own details instead of auto-creating a placeholder record).
- */
-async function findGoogleUser(
-  email: string,
-): Promise<{ id: string; name: string } | null> {
-  try {
-    const [rows] = await pool.execute<LookupRow[]>(
-      'SELECT user_id, first_name FROM user_login WHERE email = ?',
-      [email],
-    );
-    if (rows.length === 0) return null;
-    return { id: String(rows[0].user_id), name: rows[0].first_name };
-  } catch (err) {
-    console.error('[auth] findGoogleUser error:', err);
-    return null;
+class AuthCodeError extends CredentialsSignin {
+  constructor(code: string) {
+    super();
+    this.code = code;
   }
 }
 
-/* ── Main auth config ─────────────────────────────────────── */
+const SV_RECHECK_MS = Number(process.env.AUTH_SV_RECHECK_MS ?? 5 * 60 * 1000);
+const str = (v: unknown) => (typeof v === 'string' ? v : '');
+const asUser = (u: AuthUser) => ({ id: String(u.user_id), name: u.first_name, email: u.email });
+
+// Compared against when the email is unknown, so both paths cost one bcrypt compare (no timing oracle).
+let dummyHash: Promise<string> | null = null;
+const getDummyHash = () => (dummyHash ??= bcrypt.hash('vibeboard-timing-equalizer', 12));
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
 
   providers: [
     Google({
-      clientId:     process.env.GOOGLE_CLIENT_ID,
+      clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     }),
 
     Credentials({
-      credentials: {
-        email:    { label: 'Email',    type: 'email' },
-        password: { label: 'Password', type: 'password' },
-      },
-      async authorize(credentials) {
-        const email    = typeof credentials?.email    === 'string' ? credentials.email.trim().toLowerCase()    : '';
-        const password = typeof credentials?.password === 'string' ? credentials.password : '';
-
-        if (!email || !password) return null;
-
-        try {
-          const [rows] = await pool.execute<AuthRow[]>(
-            `SELECT user_id, password, first_name, failed_attempts, last_attempt
-               FROM user_login WHERE email = ?`,
-            [email],
-          );
-          if (rows.length === 0) return null;
-
-          const user = rows[0];
-
-          // 5-attempt lock for 10 minutes
-          if (user.failed_attempts >= 5 && user.last_attempt) {
-            const elapsed = Date.now() - new Date(user.last_attempt).getTime();
-            if (elapsed < 10 * 60 * 1000) return null;
-          }
-
-          const valid = await bcrypt.compare(password, user.password);
-          if (!valid) {
-            await pool.execute(
-              `UPDATE user_login
-                  SET failed_attempts = failed_attempts + 1, last_attempt = NOW()
-                WHERE user_id = ?`,
-              [user.user_id],
-            );
-            return null;
-          }
-
-          await pool.execute(
-            `UPDATE user_login SET failed_attempts = 0, last_attempt = NULL WHERE user_id = ?`,
-            [user.user_id],
-          );
-
-          return { id: String(user.user_id), name: user.first_name, email };
-        } catch (err) {
-          console.error('[auth] credentials authorize error:', err);
-          return null;
+      id: 'credentials',
+      credentials: { email: {}, password: {} },
+      async authorize(c) {
+        const email = cleanEmail(c?.email);
+        const password = str(c?.password);
+        if (!email || !password) throw new AuthCodeError('invalid');
+        const u = await findByEmail(email);
+        if (!u || !u.password) {
+          await bcrypt.compare(password, await getDummyHash());
+          throw new AuthCodeError('invalid');
         }
+        const left = lockSecondsLeft(u.failed_attempts, u.since_last_attempt);
+        if (left > 0) throw new AuthCodeError(`locked:${left}`);
+        if (!(await bcrypt.compare(password, u.password))) {
+          await recordFailedLogin(u.user_id);
+          if (u.failed_attempts + 1 >= MAX_ATTEMPTS) throw new AuthCodeError(`locked:${LOCK_SECONDS}`);
+          throw new AuthCodeError('invalid');
+        }
+        await clearFailedLogins(u.user_id);
+        return asUser(u);
+      },
+    }),
+
+    Credentials({
+      id: 'google-idtoken',
+      credentials: { credential: {} },
+      async authorize(c) {
+        const id = await verifyGoogleIdToken(str(c?.credential));
+        if (!id) throw new AuthCodeError('google');
+        const out = await resolveGoogle(id);
+        if (out.kind === 'user') return asUser(out.user);
+        throw new AuthCodeError(out.kind === 'new' ? 'needs-finish' : out.kind === 'conflict' ? 'google-conflict' : 'google-unverified');
+      },
+    }),
+
+    Credentials({
+      id: 'google-finish',
+      credentials: { first_name: {}, last_name: {}, year: {} },
+      async authorize(c, request) {
+        const ticket = await openTicket(ticketFromCookieHeader(request.headers.get('cookie')));
+        if (!ticket) throw new AuthCodeError('ticket');
+        const first = cleanName(c?.first_name);
+        const last = cleanName(c?.last_name);
+        if (nameError(first, 'first name') || nameError(last, 'last name')) throw new AuthCodeError('name');
+        const identity = { ...ticket, email_verified: true };
+        const out = await resolveGoogle(identity);
+        if (out.kind === 'user') return asUser(out.user);
+        if (out.kind !== 'new') throw new AuthCodeError('ticket');
+        try {
+          const id = await createUser({
+            first_name: first, surname: last, email: ticket.email, password_hash: null,
+            google_sub: ticket.sub, email_verified: true, year_level: yearLevelFor(c?.year),
+          });
+          return { id: String(id), name: first, email: ticket.email };
+        } catch (err) {
+          if ((err as { code?: string }).code === 'ER_DUP_ENTRY') {
+            const again = await resolveGoogle(identity); // a parallel submit won the race
+            if (again.kind === 'user') return asUser(again.user);
+          }
+          throw err;
+        }
+      },
+    }),
+
+    Credentials({
+      id: 'password-reset',
+      credentials: { token: {}, password: {} },
+      async authorize(c) {
+        const password = str(c?.password);
+        if (passwordError(password)) throw new AuthCodeError('weak');
+        const userId = await resetPassword(str(c?.token), await bcrypt.hash(password, 12));
+        if (!userId) throw new AuthCodeError('reset-invalid');
+        const u = await findById(userId);
+        if (!u) throw new AuthCodeError('reset-invalid');
+        return asUser(u);
       },
     }),
   ],
@@ -111,44 +123,50 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     ...authConfig.callbacks,
 
-    async signIn({ user, account }) {
-      if (account?.provider === 'google') {
-        if (!user.email) return false;
-
-        const existing = await findGoogleUser(user.email.toLowerCase());
-        if (!existing) {
-          // No account for this Google email — send them to the signup
-          // form to enter their own details instead of creating one for them.
-          const params = new URLSearchParams({
-            google: '1',
-            email:  user.email.toLowerCase(),
-            name:   user.name ?? '',
-          });
-          return `/signup?${params.toString()}`;
-        }
-      }
-      return true;
+    async signIn({ account, profile }) {
+      if (account?.provider !== 'google') return true;
+      const p = (profile ?? {}) as Record<string, unknown>;
+      if (typeof p.sub !== 'string' || typeof p.email !== 'string') return '/login?e=google-unverified';
+      const out = await resolveGoogle({
+        sub: p.sub,
+        email: p.email.toLowerCase(),
+        email_verified: p.email_verified === true,
+        given_name: str(p.given_name),
+        family_name: str(p.family_name),
+        picture: typeof p.picture === 'string' ? p.picture : null,
+      });
+      if (out.kind === 'user') return true;
+      if (out.kind === 'new') return `/api/auth/signup-ticket?t=${encodeURIComponent(await sealTicket(out.ticket))}`;
+      return `/login?e=${out.kind === 'conflict' ? 'google-conflict' : 'google-unverified'}`;
     },
 
     async jwt({ token, user, account }) {
-      if (account?.provider === 'credentials' && user) {
-        // user.id comes from authorize(); store as JWT subject
-        token.sub  = user.id!;
-        token.name = user.name ?? undefined;
-      } else if (account?.provider === 'google' && user?.email) {
-        // account is only present on first sign-in — this DB call runs once per login.
-        // The signIn callback above already guarantees the user exists at this point.
-        const dbUser = await findGoogleUser(user.email.toLowerCase());
-        if (dbUser) {
-          token.sub  = dbUser.id;   // our DB user_id, not Google's subject
-          token.name = dbUser.name;
-        }
+      if (account && user) {
+        const dbUser = account.provider === 'google'
+          ? await findByGoogleSub(account.providerAccountId)
+          : await findById(Number(user.id));
+        if (!dbUser) return null;
+        token.sub = String(dbUser.user_id);
+        token.name = dbUser.first_name;
+        token.email = dbUser.email;
+        token.sv = dbUser.session_version;
+        token.svAt = Date.now();
+        return token;
+      }
+      if (!token.sub) return token;
+      const due = typeof token.sv !== 'number' || Date.now() - (token.svAt ?? 0) > SV_RECHECK_MS;
+      if (due) {
+        const sv = await getSessionVersion(Number(token.sub));
+        if (sv === null) return null; // account deleted
+        if (typeof token.sv === 'number' && sv !== token.sv) return null; // password reset elsewhere
+        token.sv = sv; // tokens issued before session_version existed adopt the current value once
+        token.svAt = Date.now();
       }
       return token;
     },
 
     session({ session, token }) {
-      if (token.sub)  session.user.id   = token.sub;
+      if (token.sub) session.user.id = token.sub;
       if (token.name) session.user.name = token.name;
       return session;
     },
