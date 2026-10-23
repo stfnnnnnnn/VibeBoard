@@ -886,25 +886,42 @@ CREATE TABLE IF NOT EXISTS `trimesters` (
 CREATE TABLE IF NOT EXISTS `user_login` (
   `user_id` int(11) NOT NULL AUTO_INCREMENT,
   `first_name` varchar(100) NOT NULL,
-  `middle_name` varchar(100) NOT NULL,
+  `middle_name` varchar(100) DEFAULT NULL,
   `surname` varchar(100) NOT NULL,
   `dateofbirth` date DEFAULT NULL,
   `email` varchar(100) NOT NULL,
-  `year_level` enum('1st Year','2nd Year','3rd Year','4th Year') NOT NULL,
-  `status` enum('Regular','Irregular') NOT NULL,
-  `program` int(11) NOT NULL,
+  `year_level` enum('1st Year','2nd Year','3rd Year','4th Year','5th Year') DEFAULT NULL,
+  `status` enum('Regular','Irregular') DEFAULT NULL,
+  `program` int(11) DEFAULT NULL,
   `specialization` int(11) DEFAULT NULL,
-  `password` varchar(255) NOT NULL,
+  `password` varchar(255) DEFAULT NULL,
   `reset_token` varchar(255) DEFAULT NULL,
   `reset_token_expiry` datetime DEFAULT NULL,
   `failed_attempts` int(11) NOT NULL DEFAULT 0,
   `last_attempt` datetime DEFAULT NULL,
+  `google_sub` varchar(255) DEFAULT NULL,
+  `email_verified_at` datetime DEFAULT NULL,
+  `session_version` int(11) NOT NULL DEFAULT 0,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`user_id`),
   UNIQUE KEY `email_unique` (`email`),
+  UNIQUE KEY `google_sub_unique` (`google_sub`),
   KEY `program` (`program`),
   KEY `specialization` (`specialization`),
   CONSTRAINT `user_login_ibfk_1` FOREIGN KEY (`program`) REFERENCES `programs` (`program_id`),
   CONSTRAINT `user_login_ibfk_2` FOREIGN KEY (`specialization`) REFERENCES `specializations` (`specialization_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  token_id   INT AUTO_INCREMENT PRIMARY KEY,
+  user_id    INT NOT NULL,
+  purpose    ENUM('reset','verify') NOT NULL,
+  token_hash CHAR(64) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  used_at    DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY token_hash_unique (token_hash),
+  KEY user_purpose (user_id, purpose, created_at),
+  CONSTRAINT auth_tokens_user FOREIGN KEY (user_id) REFERENCES user_login(user_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;

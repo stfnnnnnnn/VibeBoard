@@ -17,6 +17,7 @@ let _ranWorkboardV3 = false;
 let _ranWorkboardV4 = false;
 let _ranFinanceWishlist = false;
 let _ranProjectionPrefs = false;
+let _ranAuthV2 = false;
 
 /** Add accomplished_at column to entry tables if not already present. */
 export async function ensureAccomplishedAt(): Promise<void> {
@@ -925,4 +926,46 @@ export async function ensureProjectionPrefsSchema(): Promise<void> {
       PRIMARY KEY (user_subject_id, pref_key)
     )`);
   _ranProjectionPrefs = true;
+}
+
+/** Auth v2 (public pages + auth revamp spec §3.5): optional legacy profile columns, Google subject,
+ *  email verification, session revocation, created_at, and the auth_tokens table. Idempotent. */
+export async function ensureAuthV2Schema(): Promise<void> {
+  if (_ranAuthV2) return;
+  // MODIFY is safe to repeat: it only relaxes NOT NULL and widens the year enum.
+  await pool.query(`ALTER TABLE user_login
+      MODIFY middle_name VARCHAR(100) NULL,
+      MODIFY year_level  ENUM('1st Year','2nd Year','3rd Year','4th Year','5th Year') NULL,
+      MODIFY status      ENUM('Regular','Irregular') NULL,
+      MODIFY program     INT(11) NULL,
+      MODIFY password    VARCHAR(255) NULL`);
+  const add = async (sql: string): Promise<boolean> => {
+    try { await pool.query(sql); return true; } catch (err: unknown) {
+      const code = (err as { code?: string }).code;
+      if (code === 'ER_DUP_FIELDNAME' || code === 'ER_DUP_KEYNAME') return false;
+      throw err;
+    }
+  };
+  await add(`ALTER TABLE user_login ADD COLUMN google_sub VARCHAR(255) NULL`);
+  if (await add(`ALTER TABLE user_login ADD COLUMN email_verified_at DATETIME NULL`)) {
+    // Accounts created before verification existed are treated as verified, so linking Google
+    // never wipes their passwords (spec §3.5). Runs only in the call that adds the column.
+    await pool.query(`UPDATE user_login SET email_verified_at = NOW() WHERE email_verified_at IS NULL`);
+  }
+  await add(`ALTER TABLE user_login ADD COLUMN session_version INT NOT NULL DEFAULT 0`);
+  await add(`ALTER TABLE user_login ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`);
+  await add(`ALTER TABLE user_login ADD UNIQUE KEY google_sub_unique (google_sub)`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS auth_tokens (
+      token_id   INT AUTO_INCREMENT PRIMARY KEY,
+      user_id    INT NOT NULL,
+      purpose    ENUM('reset','verify') NOT NULL,
+      token_hash CHAR(64) NOT NULL,
+      expires_at DATETIME NOT NULL,
+      used_at    DATETIME NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY token_hash_unique (token_hash),
+      KEY user_purpose (user_id, purpose, created_at),
+      CONSTRAINT auth_tokens_user FOREIGN KEY (user_id) REFERENCES user_login(user_id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+  _ranAuthV2 = true;
 }
