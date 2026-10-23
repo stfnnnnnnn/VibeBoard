@@ -47,7 +47,8 @@ html[data-daypart="evening"] .auth-glow--a { left: -120px; right: auto; top: aut
 html[data-daypart="evening"] .auth-glow--b { left: auto; right: 6%; top: 16%; width: 240px; height: 240px; border-radius: 50%; filter: none;
   background: radial-gradient(closest-side, rgba(169, 154, 216, .35), transparent); }
 html[data-daypart="evening"] .auth-glow--c { display: none; }
-html[data-daypart="night"] .pub-root { --pub-ink: #f4f1fb; --pub-mute: #b4accb; --pub-soft: #8c84a6; --pub-field: rgba(255, 255, 255, .16);
+/* :not(.lp): the landing is one light page at every hour; only the auth pages go dark at night. */
+html[data-daypart="night"] .pub-root:not(.lp) { --pub-ink: #f4f1fb; --pub-mute: #b4accb; --pub-soft: #8c84a6; --pub-field: rgba(255, 255, 255, .16);
   --pub-field-bg: #1b172e; --pub-line: rgba(255, 255, 255, .1); --pub-card: #221d38; --pub-logo-a: #f2a7c0; --pub-logo-b: #91cbe6; }
 html[data-daypart="night"] .auth-shell { background: linear-gradient(180deg, #1d1934 0%, #28224a 55%, #3a2f5e 100%); color-scheme: dark; }
 html[data-daypart="night"] .auth-glow--a { left: -80px; right: auto; top: auto; bottom: -110px; width: 420px; height: 320px;
@@ -189,9 +190,6 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
 .lp-glow--pink { right: -14%; top: 10px; width: 62%; height: 560px; background: radial-gradient(closest-side, rgba(242, 167, 192, .45), transparent); }
 /* :not(.lp-glow): a bare `.lp > *` ties .lp-glow on specificity and, coming later, would turn the glows into 600px in-flow blocks. */
 .lp > :not(.lp-glow) { position: relative; }
-/* The landing is one light page at every hour: undo the night token swap (html[data-daypart="night"] .pub-root, 0,2,1). */
-html[data-daypart] .pub-root.lp { --pub-ink: #1f1b2b; --pub-mute: #6b6478; --pub-soft: #8f879c; --pub-field: #d9d3e2; --pub-field-bg: #fbfafc;
-  --pub-line: rgba(31, 27, 43, .08); --pub-card: #ffffff; --pub-logo-a: var(--pub-pink); --pub-logo-b: var(--pub-blue); }
 .lp-nav { display: flex; align-items: center; justify-content: space-between; max-width: 1120px; margin: 0 auto; padding: 18px 24px; }
 .lp-nav__actions { display: flex; gap: 8px; }
 .lp-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 20px; border-radius: 999px;
@@ -216,7 +214,7 @@ html[data-daypart] .pub-root.lp { --pub-ink: #1f1b2b; --pub-mute: #6b6478; --pub
 .lp-big { font-size: 44px; font-weight: 700; letter-spacing: -.03em; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .lp-mute { color: var(--pub-mute); font-size: 14px; line-height: 1.55; margin: 0; }
 .lp-mute--lg { font-size: 17px; margin-top: 6px; }
-.lp-bars { display: flex; align-items: flex-end; gap: 9px; height: 96px; margin-top: 14px; }
+.lp-bars { display: flex; align-items: flex-end; gap: 9px; height: 96px; margin-top: 14px; margin-bottom: 6px; }
 .lp-bars div { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; }
 .lp-bars i { width: 100%; border-radius: 7px 7px 3px 3px; background: var(--pub-blue-soft); transform-origin: bottom; }
 .lp-bars i.is-best { background: linear-gradient(var(--pub-pink), #f2a7c0); }
@@ -232,6 +230,10 @@ html[data-daypart] .pub-root.lp { --pub-ink: #1f1b2b; --pub-mute: #6b6478; --pub
 .lp-chip { position: absolute; display: inline-flex; align-items: center; gap: 7px; background: #fff; border-radius: 999px; padding: 8px 14px;
   font-size: 14px; font-weight: 600; white-space: nowrap; box-shadow: 0 10px 24px -12px rgba(31, 27, 43, .35); }
 .lp-chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+/* Floating hero chips: the money chip sits over the decorative (aria-hidden) bars, never over the .lp-row claim text. */
+.lp-chip--quiz { right: 0; top: -10px; }
+.lp-chip--money { left: -18px; bottom: 120px; }
+.lp-chip--habit { right: 8px; bottom: -2px; }
 .lp-problem { max-width: 900px; margin: 0 auto; padding: 56px 24px 24px; text-align: center; }
 .lp-eyebrow { font-size: 12.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--pub-pink); margin: 0 0 6px; }
 .lp-eyebrow--mute { color: var(--pub-mute); }
@@ -285,6 +287,8 @@ html[data-daypart] .pub-root.lp { --pub-ink: #1f1b2b; --pub-mute: #6b6478; --pub
   .lp-hero, .lp-problem, .lp-day, .lp-sp, .lp-foot { padding-left: 16px; padding-right: 16px; }
   .lp-hero-visual { padding: 14px 8px 20px 8px; }
   .lp-chip { font-size: 12.5px; padding: 7px 11px; }
+  .lp-chip--money { left: 0; bottom: 128px; }
+  .lp-chip--quiz, .lp-chip--habit { right: 0; }
   .lp-cta__google { min-width: 0; width: 100%; }
   .lp-cta__buttons .lp-btn { width: 100%; }
 }
