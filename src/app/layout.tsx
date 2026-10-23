@@ -11,7 +11,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    /* suppressHydrationWarning: (public)/layout sets data-daypart before hydration. */
+    <html lang="en" suppressHydrationWarning>
       <head>
         {/* The latin subsets next/font used to preload. */}
         <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
