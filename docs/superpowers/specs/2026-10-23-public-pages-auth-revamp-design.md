@@ -172,7 +172,9 @@ The `ensure*` version runs each `ADD COLUMN` separately and ignores `ER_DUP_FIEL
    - **OAuth (provider 1):** the `signIn` callback returns `'/signup/finish'`.
    - **GIS (provider 3):** `authorize` throws a `CredentialsSignin` subclass with `code = 'needs-finish'`, and the client navigates to `/signup/finish`.
 
-Writing the cookie uses `cookies()` from `next/headers` inside the Auth.js route handler. **Implementation must verify this works in next-auth 5.0.0-beta.31 before building on it.** The fallback is a small `/api/auth/signup-ticket` route that the `signIn` callback redirects through, carrying a short-lived signed parameter.
+The cookie is written **only by our own route handlers**, never from inside Auth.js callbacks, where cookie writes aren't guaranteed in next-auth beta:
+- **OAuth:** the `signIn` callback redirects to `/api/auth/signup-ticket?t=<sealed ticket>`. That route sets the cookie and redirects to `/signup/finish`. The sealed value is encrypted (JWE) and expires after 15 minutes.
+- **GIS:** the client first POSTs the credential to `/api/auth/google-onetap`. That route sets the cookie for new users and responds `{status:'new'}`.
 
 The `jwt` callback stores `token.sub = user_id`, `token.name = first_name`, `token.sv = session_version` and `token.svAt = now`.
 
