@@ -31,10 +31,10 @@ export default function Field(p: FieldProps) {
   const Icon = p.icon;
   return (
     <div className="auth-field">
-      <label className="auth-label" htmlFor={p.id}>
-        <span>{p.label}</span>
+      <div className="auth-label">
+        <label htmlFor={p.id}>{p.label}</label>
         {p.labelAside}
-      </label>
+      </div>
       <div className={`auth-control ${state} ${p.readOnly ? 'is-readonly' : ''}`}>
         {Icon && <Icon size={17} aria-hidden="true" />}
         <input

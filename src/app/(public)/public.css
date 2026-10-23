@@ -15,7 +15,8 @@
 }
 .pub-root *, .pub-root *::before, .pub-root *::after { box-sizing: border-box; }
 .pub-root a { color: inherit; }
-.pub-root :focus-visible { outline: 2.5px solid var(--pub-pink); outline-offset: 2px; border-radius: 8px; }
+/* :where() keeps this at 0,1,0 so component rules win; no border-radius so focused buttons keep their shape. */
+:where(.pub-root) :focus-visible { outline: 2.5px solid var(--pub-pink); outline-offset: 2px; }
 .pub-logo { font-weight: 800; font-size: 18px; letter-spacing: -.02em; text-decoration: none; }
 .pub-logo b { color: var(--pub-logo-a); font-weight: 800; } .pub-logo i { color: var(--pub-logo-b); font-style: normal; }
 .pub-sample { position: absolute; right: 14px; bottom: -10px; font-size: 11px; font-weight: 600; color: var(--pub-mute);
@@ -97,6 +98,7 @@ html[data-daypart="night"] .auth-h1 em { color: #f2a7c0; }
 .auth-control input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--pub-ink);
   font: 500 16px/1 var(--font-dm-sans), system-ui, sans-serif; padding: 0 12px 0 10px; }
 .auth-control input::placeholder { color: var(--pub-soft); font-weight: 400; }
+.auth-control input:focus-visible { outline: none; } /* the control's focus-within ring is the indicator */
 .auth-control:focus-within { border-color: var(--pub-pink); background: var(--pub-card); box-shadow: 0 0 0 3.5px rgba(217, 98, 140, .16); }
 .auth-control:focus-within > svg { color: var(--pub-pink); }
 .auth-control.is-valid { border-color: #b9e2cb; }
@@ -104,14 +106,14 @@ html[data-daypart="night"] .auth-h1 em { color: #f2a7c0; }
 .auth-control.is-warn { border-color: #e8c88f; }
 .auth-control.is-readonly { border-style: dashed; background: transparent; }
 .auth-control .auth-ok { margin-right: 12px; color: var(--pub-green); }
-.auth-eye { height: 100%; padding: 0 14px; border: 0; background: none; color: var(--pub-mute); font: 600 13px var(--font-dm-sans), sans-serif; cursor: pointer; border-radius: 0 12px 12px 0; }
+.auth-eye { height: 100%; padding: 0 14px; border: 0; background: none; color: var(--pub-mute); font: 600 13px var(--font-dm-sans), sans-serif; cursor: pointer; border-radius: 0 12px 12px 0; min-height: 44px; }
 .auth-hint { font-size: 13px; line-height: 1.4; margin: 6px 0 0; color: var(--pub-mute); }
 .auth-hint.is-error { color: var(--pub-red); }
 .auth-hint.is-warn { color: var(--pub-amber); }
 html[data-daypart="night"] .auth-hint.is-error { color: #ff9aab; }
 .auth-hint button, .auth-hint a { font: inherit; font-weight: 700; color: var(--pub-pink); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: none; }
 .auth-meter { display: flex; gap: 4px; margin-top: 8px; }
-.auth-meter i { flex: 1; height: 4px; border-radius: 9px; background: var(--pub-line); transition: background-color .2s var(--pub-ease); }
+.auth-meter i { flex: 1; height: 4px; border-radius: 9px; background: var(--pub-line); }
 .auth-meter[data-score="1"] i:nth-child(-n+1) { background: var(--pub-red); }
 .auth-meter[data-score="2"] i:nth-child(-n+2) { background: var(--pub-amber); }
 .auth-meter[data-score="3"] i:nth-child(-n+3), .auth-meter[data-score="4"] i { background: var(--pub-green); }
@@ -130,6 +132,10 @@ html[data-daypart="night"] .auth-hint.is-error { color: #ff9aab; }
 .auth-or::before, .auth-or::after { content: ''; flex: 1; height: 1px; background: var(--pub-line); }
 .auth-link { color: var(--pub-pink); font-weight: 600; text-decoration: none; background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; }
 html[data-daypart="night"] .auth-link { color: #f2a7c0; }
+/* ≥44px hit area for small text links/buttons without moving layout. Horizontal inset stays small; any overlap
+   with the input below is harmless because the later, positioned .auth-control paints (and hit-tests) on top. */
+.auth-link, .auth-hint button, .auth-hint a { position: relative; }
+.auth-link::before, .auth-hint button::before, .auth-hint a::before { content: ''; position: absolute; inset: -13px -6px; }
 .auth-link--quiet { color: var(--pub-mute); text-decoration: underline; text-underline-offset: 2px; font-weight: 500; }
 .auth-fine { font-size: 12.5px; line-height: 1.5; color: var(--pub-mute); text-align: center; margin: 14px 0 0; }
 .auth-fine a { color: var(--pub-ink); font-weight: 600; text-decoration: none; }
@@ -153,7 +159,7 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
 .auth-steps i.on { background: var(--pub-pink); }
 .auth-years { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
 .auth-years button { min-height: 44px; border: 1.5px solid var(--pub-field); border-radius: 11px; background: var(--pub-card); color: var(--pub-mute);
-  font: 700 14px var(--font-dm-sans), sans-serif; cursor: pointer; transition: transform .12s var(--pub-ease), background-color .15s var(--pub-ease); }
+  font: 700 14px var(--font-dm-sans), sans-serif; cursor: pointer; transition: transform .12s var(--pub-ease); }
 .auth-years button[aria-checked="true"] { border-color: var(--pub-pink); background: var(--pub-pink-soft); color: var(--pub-pink); }
 .auth-years button:active { transform: scale(.96); }
 .auth-badge { width: 50px; height: 50px; border-radius: 15px; display: grid; place-items: center; margin-bottom: 14px; }

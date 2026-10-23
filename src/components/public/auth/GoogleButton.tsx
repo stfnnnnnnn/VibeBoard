@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { signIn } from 'next-auth/react';
 
 export function GoogleMark() {
@@ -16,9 +16,15 @@ export function GoogleMark() {
 /* Standard OAuth redirect button. Also the fallback when Google's personalized button can't load. */
 export default function GoogleButton({ label = 'Continue with Google', prompt }: { label?: string; prompt?: 'select_account' }) {
   const [busy, setBusy] = useState(false);
+  // Coming back from Google via the back button restores this page from bfcache with busy still set.
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => { if (e.persisted) setBusy(false); };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, []);
   return (
     <button type="button" className="auth-btn auth-btn--google" disabled={busy}
-      onClick={() => { setBusy(true); void signIn('google', { redirectTo: '/dashboard' }, prompt ? { prompt } : undefined); }}>
+      onClick={() => { setBusy(true); signIn('google', { redirectTo: '/dashboard' }, prompt ? { prompt } : undefined).catch(() => setBusy(false)); }}>
       <GoogleMark />
       {busy ? 'Opening Google…' : label}
     </button>
