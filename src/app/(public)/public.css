@@ -327,12 +327,20 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
   .auth-card { animation: pub-pop .35s var(--pub-ease) both; }
   .auth-hint.is-error { animation: pub-hint-in .2s var(--pub-ease) both; }
 }
-/* The arc only exists above 880px; below it the sun is hidden and moments are a plain list, so they must never be dimmed there (R23). */
+/* The arc only exists above 880px; below it the sun is hidden and moments are a plain list, so they must never be dimmed there (R23).
+   Everything waits for LandingMotion's `is-armed` (R25), so no-JS and pre-hydration show every moment lit and no stray sun. */
 @media (prefers-reduced-motion: no-preference) and (min-width: 881px) {
-  .lp-moment { transition: opacity .5s var(--pub-ease), transform .5s var(--pub-ease); }
-  .lp-arc:not(.is-lit-1) .lp-moment:nth-child(1), .lp-arc:not(.is-lit-2) .lp-moment:nth-child(2),
-  .lp-arc:not(.is-lit-3) .lp-moment:nth-child(3), .lp-arc:not(.is-lit-4) .lp-moment:nth-child(4) { opacity: .45; transform: translateY(6px); }
+  .lp-moment { transition: transform .5s var(--pub-ease); }
+  .lp-moment .lp-time, .lp-card--moment > * { transition: opacity .5s var(--pub-ease); }
+  /* Dim the contents, not the card: the card stays opaque so the dashed path and sun never show through it. */
+  .lp-arc.is-armed:not(.is-lit-1) .lp-moment:nth-child(1), .lp-arc.is-armed:not(.is-lit-2) .lp-moment:nth-child(2),
+  .lp-arc.is-armed:not(.is-lit-3) .lp-moment:nth-child(3), .lp-arc.is-armed:not(.is-lit-4) .lp-moment:nth-child(4) { transform: translateY(6px); }
+  .lp-arc.is-armed:not(.is-lit-1) .lp-moment:nth-child(1) :is(.lp-time, .lp-card--moment > *),
+  .lp-arc.is-armed:not(.is-lit-2) .lp-moment:nth-child(2) :is(.lp-time, .lp-card--moment > *),
+  .lp-arc.is-armed:not(.is-lit-3) .lp-moment:nth-child(3) :is(.lp-time, .lp-card--moment > *),
+  .lp-arc.is-armed:not(.is-lit-4) .lp-moment:nth-child(4) :is(.lp-time, .lp-card--moment > *) { opacity: .45; }
   /* offset-anchor (the box centre) already lands the dot on the path, so the static -9px centring margin is dropped. */
-  .lp-arc__sun { margin: 0; opacity: 1; offset-path: path('M0,180 C90,20 310,20 400,180'); offset-rotate: 0deg; offset-distance: var(--sun, 0%); transition: offset-distance .2s linear; }
+  .lp-arc__sun { margin: 0; offset-path: path('M0,180 C90,20 310,20 400,180'); offset-rotate: 0deg; offset-distance: var(--sun, 0%); transition: offset-distance .2s linear; }
+  .lp-arc.is-armed .lp-arc__sun { opacity: 1; }
   .lp-arc[style*="--sun-path"] .lp-arc__sun { offset-path: var(--sun-path); }
 }

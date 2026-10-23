@@ -17,7 +17,8 @@ export default function DaypartGreeting({ page }: { page: 'login' | 'signup' }) 
     // Pause the sky glows' drift while the tab is hidden (public.css: html.pub-hidden).
     const vis = () => document.documentElement.classList.toggle('pub-hidden', document.hidden);
     document.addEventListener('visibilitychange', vis);
-    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis); };
+    vis();
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis); document.documentElement.classList.remove('pub-hidden'); };
   }, []);
   return (
     <>
