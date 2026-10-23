@@ -42,7 +42,13 @@ export default function SignupForm() {
     const firstBad = keys.find(k => clientErr(k));
     if (firstBad) { refs[firstBad].current?.focus(); return; }
     setBusy(true); setFormErr(null);
-    const res = await fetch('/api/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) });
+    let res: Response;
+    try {
+      res = await fetch('/api/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) });
+    } catch {
+      setBusy(false); setFormErr('Something went wrong on our side. Please try again.');
+      return;
+    }
     const data = (await res.json().catch(() => ({}))) as { errors?: Partial<Record<Key, string>>; code?: string; error?: string };
     if (res.status === 409 && data.code === 'email-taken') {
       setBusy(false); setTaken(true);
@@ -56,7 +62,8 @@ export default function SignupForm() {
       else setFormErr(data.error ?? 'Something went wrong on our side. Please try again.');
       return;
     }
-    const r = await signIn('credentials', { email: cleanEmail(v.email), password: v.password, redirect: false });
+    // The account exists now; if the auto login fails for any reason, the login page is the way in.
+    const r = await signIn('credentials', { email: cleanEmail(v.email), password: v.password, redirect: false }).catch(() => null);
     if (r?.ok && !r.error) { router.push('/dashboard'); router.refresh(); return; }
     router.push('/login');
   }

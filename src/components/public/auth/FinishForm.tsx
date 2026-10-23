@@ -1,5 +1,5 @@
 'use client';
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
@@ -19,23 +19,26 @@ export default function FinishForm({ identity }: { identity: FinishIdentity }) {
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const firstRef = useRef<HTMLInputElement>(null);
+  const lastRef = useRef<HTMLInputElement>(null);
   const fErr = touched ? nameError(cleanName(first), 'first name') : null;
   const lErr = touched ? nameError(cleanName(last), 'last name') : null;
   const hello = cleanName(first) || 'there';
 
   async function cancel() {
-    await fetch('/api/auth/signup-ticket', { method: 'DELETE' });
+    try { await fetch('/api/auth/signup-ticket', { method: 'DELETE' }); } catch { /* still leave; the ticket expires on its own */ }
     router.push('/login');
   }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setTouched(true);
-    if (nameError(cleanName(first), 'first name') || nameError(cleanName(last), 'last name')) return;
+    if (nameError(cleanName(first), 'first name')) { firstRef.current?.focus(); return; }
+    if (nameError(cleanName(last), 'last name')) { lastRef.current?.focus(); return; }
     setBusy(true); setError(null);
-    const r = await signIn('google-finish', { first_name: first, last_name: last, year: year ?? '', redirect: false });
+    const r = await signIn('google-finish', { first_name: first, last_name: last, year: year ?? '', redirect: false }).catch(() => null);
     if (r?.ok && !r.error) {
-      await fetch('/api/auth/signup-ticket', { method: 'DELETE' });
+      await fetch('/api/auth/signup-ticket', { method: 'DELETE' }).catch(() => undefined);
       router.push('/dashboard'); router.refresh();
       return;
     }
@@ -55,13 +58,13 @@ export default function FinishForm({ identity }: { identity: FinishIdentity }) {
           // eslint-disable-next-line @next/next/no-img-element -- Google avatar host isn't in next/image config; tiny, decorative.
           ? <img src={identity.picture} alt="" referrerPolicy="no-referrer" />
           : <span className="auth-avatar" aria-hidden="true">{identity.email.charAt(0).toUpperCase()}</span>}
-        <div className="who"><b>{identity.email}</b><span>✓ Verified by Google</span></div>
+        <div className="who"><b title={identity.email}>{identity.email}</b><span>✓ Verified by Google</span></div>
         <button type="button" className="auth-link auth-link--quiet" onClick={cancel}>Not you?</button>
       </div>
       <form onSubmit={onSubmit} noValidate>
         <div className="auth-row2">
-          <Field id="first_name" label="First name" icon={User} value={first} onChange={setFirst} onBlur={() => setTouched(true)} autoComplete="given-name" error={fErr} required />
-          <Field id="last_name" label="Last name" value={last} onChange={setLast} onBlur={() => setTouched(true)} autoComplete="family-name" error={lErr} required />
+          <Field id="first_name" label="First name" icon={User} value={first} onChange={setFirst} onBlur={() => setTouched(true)} autoComplete="given-name" error={fErr} inputRef={firstRef} required />
+          <Field id="last_name" label="Last name" value={last} onChange={setLast} onBlur={() => setTouched(true)} autoComplete="family-name" error={lErr} inputRef={lastRef} required />
         </div>
         <div className="auth-field">
           <p className="auth-label" id="year-label"><span>What year are you in?</span><span className="opt">Optional</span></p>

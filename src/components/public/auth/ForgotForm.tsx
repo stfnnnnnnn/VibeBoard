@@ -2,6 +2,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { KeyRound, Mail, MailCheck } from 'lucide-react';
 import Field from './Field';
+import FormAlert from './FormAlert';
 import { cleanEmail, emailError } from '@/lib/auth/validate';
 import { RESEND_COOLDOWN_SEC } from '@/lib/auth/limits';
 
@@ -11,6 +12,7 @@ export default function ForgotForm() {
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => { try { const s = sessionStorage.getItem('vb-forgot-email'); if (s) setEmail(s); } catch { /* storage blocked */ } }, []);
   useEffect(() => {
@@ -26,8 +28,14 @@ export default function ForgotForm() {
     setTouched(true);
     const clean = cleanEmail(email);
     if (emailError(clean)) return;
-    setBusy(true);
-    await fetch('/api/auth/password/forgot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: clean }) });
+    setBusy(true); setFailed(false);
+    try {
+      await fetch('/api/auth/password/forgot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: clean }) });
+    } catch {
+      // Network failure: never claim a link was sent. Return to (or stay on) the form with an error.
+      setBusy(false); setSentTo(null); setCooldown(0); setFailed(true);
+      return;
+    }
     setBusy(false); setSentTo(clean); setCooldown(RESEND_COOLDOWN_SEC);
   }
 
@@ -50,6 +58,7 @@ export default function ForgotForm() {
       <div className="auth-badge auth-badge--pink"><KeyRound size={24} aria-hidden="true" /></div>
       <h1 className="auth-h1">Forgot your password?</h1>
       <p className="auth-sub">Enter your email and we&apos;ll send you a link to set a new one.</p>
+      {failed && <FormAlert tone="error">We couldn&apos;t reach the server. Check your connection and try again.</FormAlert>}
       <form onSubmit={send} noValidate>
         <Field id="email" label="Email" icon={Mail} type="email" value={email} onChange={setEmail} onBlur={() => setTouched(true)}
           autoComplete="email" inputMode="email" placeholder="you@school.edu.ph" error={err} required />
