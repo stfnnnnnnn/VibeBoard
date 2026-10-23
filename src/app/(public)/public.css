@@ -118,7 +118,7 @@ html[data-daypart="night"] .auth-hint.is-error { color: #ff9aab; }
 .auth-meter[data-score="1"] i:nth-child(-n+1) { background: var(--pub-red); }
 .auth-meter[data-score="2"] i:nth-child(-n+2) { background: var(--pub-amber); }
 .auth-meter[data-score="3"] i:nth-child(-n+3), .auth-meter[data-score="4"] i { background: var(--pub-green); }
-.auth-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.auth-row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 @media (max-width: 340px) { .auth-row2 { grid-template-columns: 1fr; } }
 
 /* ── Buttons, divider, links ── */
