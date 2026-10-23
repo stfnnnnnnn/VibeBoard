@@ -92,7 +92,7 @@ html[data-daypart="night"] .auth-h1 em { color: #f2a7c0; }
 .auth-label { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 700; margin: 0 0 6px; }
 .auth-label .opt { font-weight: 500; color: var(--pub-soft); }
 .auth-label a, .auth-label button.auth-link { font-size: 13px; }
-.auth-control { position: relative; display: flex; align-items: center; height: 46px; border: 1.5px solid var(--pub-field); border-radius: 12px;
+.auth-control { position: relative; z-index: 1; display: flex; align-items: center; height: 46px; border: 1.5px solid var(--pub-field); border-radius: 12px;
   background: var(--pub-field-bg); transition: border-color .15s var(--pub-ease), box-shadow .15s var(--pub-ease), background-color .15s var(--pub-ease); }
 .auth-control > svg { flex: 0 0 auto; margin-left: 12px; color: var(--pub-soft); }
 .auth-control input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--pub-ink);
@@ -123,7 +123,8 @@ html[data-daypart="night"] .auth-hint.is-error { color: #ff9aab; }
 /* ── Buttons, divider, links ── */
 .auth-btn { display: inline-flex; width: 100%; align-items: center; justify-content: center; gap: 8px; min-height: 46px; border-radius: 12px;
   border: 1.5px solid var(--pub-ink); background: var(--pub-ink); color: var(--pub-card); font: 700 15px var(--font-dm-sans), sans-serif;
-  cursor: pointer; text-decoration: none; transition: transform .12s var(--pub-ease), opacity .15s var(--pub-ease); }
+  cursor: pointer; text-decoration: none; transition: transform .12s var(--pub-ease), opacity .15s var(--pub-ease);
+  position: relative; z-index: 1; }
 .auth-btn:active:not(:disabled) { transform: scale(.97); }
 .auth-btn:disabled { opacity: .6; cursor: not-allowed; }
 .auth-btn--ghost { background: var(--pub-card); color: var(--pub-ink); border-color: var(--pub-field); }
@@ -132,8 +133,9 @@ html[data-daypart="night"] .auth-hint.is-error { color: #ff9aab; }
 .auth-or::before, .auth-or::after { content: ''; flex: 1; height: 1px; background: var(--pub-line); }
 .auth-link { color: var(--pub-pink); font-weight: 600; text-decoration: none; background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; }
 html[data-daypart="night"] .auth-link { color: #f2a7c0; }
-/* ≥44px hit area for small text links/buttons without moving layout. Horizontal inset stays small; any overlap
-   with the input below is harmless because the later, positioned .auth-control paints (and hit-tests) on top. */
+/* ≥44px hit area for small text links/buttons without moving layout. Horizontal inset stays small. The overlays
+   are z-index auto, while .auth-control and .auth-btn are z-index 1, so inputs and buttons always win the overlap
+   whether the link sits above them (label row) or below them (hints, links under a button). */
 .auth-link, .auth-hint button, .auth-hint a { position: relative; }
 .auth-link::before, .auth-hint button::before, .auth-hint a::before { content: ''; position: absolute; inset: -13px -6px; }
 .auth-link--quiet { color: var(--pub-mute); text-decoration: underline; text-underline-offset: 2px; font-weight: 500; }
