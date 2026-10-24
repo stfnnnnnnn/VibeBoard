@@ -48,12 +48,12 @@ export function googleAccountMail(p: { firstName: string; url: string; minutes: 
 
 export function verifyMail(p: { firstName: string; url: string }): MailContent {
   const subject = 'Confirm your email for VibeBoard';
-  const text = `Hi ${p.firstName},\n\nConfirm your email so you can always reset your password: ${p.url}\n\nThis link expires in 24 hours.\n\nVibeBoard`;
+  const text = `Hi ${p.firstName},\n\nConfirm your email so you can always reset your password: ${p.url}\n\nThis link expires in 24 hours. Didn't create a VibeBoard account? Ignore this email.\n\nVibeBoard`;
   const html = layout(
     'Confirm your email',
     `Hi ${esc(p.firstName)}, welcome to VibeBoard! Confirm your email so you can always reset your password.`,
     { label: 'Confirm my email', url: p.url },
-    'This link expires in 24 hours.',
+    "This link expires in 24 hours. Didn't create a VibeBoard account? Ignore this email.",
   );
   return { subject, html, text };
 }

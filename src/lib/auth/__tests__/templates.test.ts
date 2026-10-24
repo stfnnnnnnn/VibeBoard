@@ -27,3 +27,9 @@ test('googleAccountMail', () => {
   assert.equal(m.subject, 'How to sign in to VibeBoard');
   assert.match(m.text, /Continue with Google/);
 });
+
+test('verifyMail tells people who did not sign up to ignore it', () => {
+  const m = verifyMail({ firstName: 'Juan', url: 'http://x/verify-email?token=1' });
+  assert.match(m.text, /Didn't create a VibeBoard account\? Ignore this email\./);
+  assert.match(m.html, /Didn't create a VibeBoard account\? Ignore this email\./);
+});
