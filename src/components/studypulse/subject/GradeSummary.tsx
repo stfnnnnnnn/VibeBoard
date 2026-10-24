@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Calculator, Flag, RotateCcw } from 'lucide-react';
 import { toGradeInfo, type GradeScale } from '@/lib/gradeScale';
 import { projectPeriod, subjectFinal, type CategoryStats, type PeriodInput, type PeriodProjection } from '@/lib/studypulse/projection';
+import type { FinalMode } from '@/lib/studypulse/types';
 import { legacyMidtermPeriod } from '@/lib/studypulse/periodModel';
 import { f1, gradeTone } from '@/lib/studypulse/ui/format';
 import SpSegmented from '../ui/SpSegmented';
@@ -22,7 +23,7 @@ const contribution = (c: ContribCat, gw: number) => (c.avg === null || gw <= 0 |
 /** Custom-preset summary: per-period current (graded-only, spec D11) with a category breakdown and an optional what-if. */
 export default function GradeSummary({ periods, projections, finalMode, finalGrade, finalPeriodKey, scale, transmutationOn, lab }: {
   periods: PeriodInput[]; projections: PeriodProjection[];
-  finalMode: 'average' | 'collective' | 'period' | null; // 'period': fixed in Task 4
+  finalMode: FinalMode | null;
   finalGrade: number | null; finalPeriodKey: string | null;
   scale: GradeScale | null; transmutationOn: boolean;
   lab: { has: boolean; lec: number; lab: number };
@@ -33,13 +34,13 @@ export default function GradeSummary({ periods, projections, finalMode, finalGra
   /* What-if runs through the same engine as the normal view: an edited category's graded list becomes
      [the typed average]; untouched categories keep their real entries at full precision, and an
      untouched ungraded one stays ungraded (it doesn't count). So with no edits, every period value and
-     the final grade equal the normal view exactly, in average and collective mode alike. */
+     the final grade equal the normal view exactly, in either final mode. */
   const wifPeriods = useMemo(() => (!whatIf ? periods : periods.map(p => ({
     ...p, categories: p.categories.map(c => (c.key in wif ? { ...c, graded: [wif[c.key]] } : c)),
   }))), [periods, whatIf, wif]);
   const wifProj = useMemo(() => (!whatIf ? projections : wifPeriods.map(projectPeriod)), [whatIf, wifPeriods, projections]);
   const periodValues = wifProj.map(p => p.current);
-  const shownFinal = !whatIf ? finalGrade : subjectFinal(wifPeriods, finalMode);
+  const shownFinal = !whatIf ? finalGrade : subjectFinal(wifPeriods, finalMode, finalPeriodKey);
   /* Hint for an empty input: the period's current, else the mean of graded periods. Display only. */
   const graded = projections.map(p => p.current).filter((v): v is number => v !== null);
   const fallback = graded.length ? graded.reduce((s, v) => s + v, 0) / graded.length : null;
@@ -102,9 +103,9 @@ export default function GradeSummary({ periods, projections, finalMode, finalGra
         })}
       </div>
 
-      {finalMode && (
+      {finalMode === 'average' && (
         <div className="sp-sum__final sp-num">
-          <span className="sp-tone-muted sp-sum__final-label"><Flag size={14} aria-hidden /> Final grade · {finalMode === 'collective' ? 'collective percentage of all categories' : 'average of all periods'}</span>
+          <span className="sp-tone-muted sp-sum__final-label"><Flag size={14} aria-hidden /> Final grade · average of periods</span>
           <span><b className={`sp-sum__final-val ${TONE[gradeTone(shownFinal)]}`}>{shownFinal === null ? '—' : dp(shownFinal)}</b> <span className="sp-tone-muted">{letterLine(shownFinal, scale)}</span></span>
         </div>
       )}

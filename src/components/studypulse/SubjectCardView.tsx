@@ -16,7 +16,7 @@ import GradeSummary, { LegacyGradeSummary } from './subject/GradeSummary';
 import { loadTransmutationTable, type TransmutationTable } from '@/lib/transmutation';
 import type { GradeScale } from '@/lib/gradeScale';
 import { averageOf, buildCustomPeriods, buildLegacyPeriods, nounFor } from '@/lib/studypulse/periodModel';
-import { projectPeriod, subjectFinal, type PeriodInput } from '@/lib/studypulse/projection';
+import { normalizeFinalMode, projectPeriod, subjectFinal, type PeriodInput } from '@/lib/studypulse/projection';
 import { categoryColor } from '@/lib/studypulse/ui/colors';
 
 /* ── Types ── */
@@ -210,10 +210,12 @@ function SubjectCardViewInner({
     : buildLegacyPeriods(activities, quizzes, exams, prefs, projTable)
   ), [config, catEntries, activities, quizzes, exams, prefs, projTable]);
   const projections = useMemo(() => periods.map(projectPeriod), [periods]);
-  const finalMode = config?.preset.final_mode ?? null;
-  const finalGrade = config ? subjectFinal(periods, finalMode) : null;
-  const scale: GradeScale | null = config ? config.grade_scale : '4pt';
+  /* Normalised again here: a preset returned by the legacy wizard can still carry 'collective'. */
+  const finalMode = normalizeFinalMode(config?.preset.final_mode);
   const finalPeriodId = config?.preset.final_period_id ?? null;
+  const finalPeriodKey = finalPeriodId !== null ? `p${finalPeriodId}` : null;
+  const finalGrade = config ? subjectFinal(periods, finalMode, finalPeriodKey) : null;
+  const scale: GradeScale | null = config ? config.grade_scale : '4pt';
 
   const tiles: HeaderTile[] = config
     ? [
@@ -297,7 +299,7 @@ function SubjectCardViewInner({
               </PeriodPanel>
             ))}
             <GradeSummary periods={periods} projections={projections} finalMode={finalMode} finalGrade={finalGrade}
-              finalPeriodKey={finalPeriodId !== null ? `p${finalPeriodId}` : null} scale={scale} transmutationOn={transmutationOn}
+              finalPeriodKey={finalPeriodKey} scale={scale} transmutationOn={transmutationOn}
               lab={{ has: config.has_lab === 1, lec: config.lec_weight, lab: config.lab_weight }} />
           </>
         )}

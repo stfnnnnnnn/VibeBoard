@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   projectPeriod, gradeAt, planOutcome, soloNeed, scenarios, closestReachable,
-  targetPresets, outcomeTone, defaultSlotValue, subjectFinal, subjectOverall, scaleThresholds,
+  targetPresets, outcomeTone, defaultSlotValue, subjectFinal, subjectOverall, normalizeFinalMode, scaleThresholds,
   type PeriodInput, type CategoryInput,
 } from '../projection';
 
@@ -146,19 +146,20 @@ test('presets and thresholds per scale', () => {
   assert.deepEqual(scaleThresholds(null).map(t => t.min), [90, 80, 70, 60]);
 });
 
-test('final grade: average and collective', () => {
-  near(subjectFinal([MIDTERM, FINALS], 'average'), 81.6);
-  near(subjectFinal([MIDTERM, FINALS], 'collective'), 81.6);
-  assert.equal(subjectFinal([MIDTERM, FINALS], null), null);
-  near(subjectOverall([MIDTERM, FINALS], null), 81.6);
-  near(subjectOverall([MIDTERM], null), 95.2);
-  const empty: PeriodInput = { key: 'z', name: 'Z', target: 85, categories: [cat({ key: 'a', weight: 100 })] };
-  assert.equal(subjectOverall([empty], null), null);
+test('final grade: period, average, none', () => {
+  near(subjectFinal([MIDTERM, FINALS], 'period', 'p2'), 68.0);
+  near(subjectFinal([MIDTERM, FINALS], 'average', null), 81.6);
+  assert.equal(subjectFinal([MIDTERM, FINALS], null, null), null);
+  assert.equal(subjectFinal([MIDTERM, FINALS], 'period', 'nope'), null);
+  near(subjectOverall([MIDTERM, FINALS], null, null), 81.6);
+  near(subjectOverall([MIDTERM, FINALS], 'period', 'p2'), 68.0);
 });
 
-test('collective pools categories at their own weights', () => {
-  const a: PeriodInput = { key: 'a', name: 'A', target: 85, categories: [cat({ key: 'x', weight: 10, graded: [100] })] };
-  const b: PeriodInput = { key: 'b', name: 'B', target: 85, categories: [cat({ key: 'y', weight: 90, graded: [50] })] };
-  near(subjectFinal([a, b], 'collective'), 55);
-  near(subjectFinal([a, b], 'average'), 75);
+test('normalizeFinalMode maps legacy collective to average, unknown to null', () => {
+  assert.equal(normalizeFinalMode('period'), 'period');
+  assert.equal(normalizeFinalMode('average'), 'average');
+  assert.equal(normalizeFinalMode('collective'), 'average');
+  assert.equal(normalizeFinalMode('bogus'), null);
+  assert.equal(normalizeFinalMode(null), null);
+  assert.equal(normalizeFinalMode(undefined), null);
 });

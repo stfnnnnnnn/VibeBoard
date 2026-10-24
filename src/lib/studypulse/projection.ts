@@ -1,6 +1,7 @@
 /* Deterministic grade projection (spec §4). Pure: no React, no fetch, no DB.
    A period's grade after every remaining item scores x is linear: G(x) = a + b·x. */
 import { SCALE_4PT_ROWS, SCALE_1PT_ROWS, type GradeScale } from '@/lib/gradeScale';
+import type { FinalMode } from './types';
 
 export interface CategoryInput {
   key: string;
@@ -193,31 +194,26 @@ export function defaultSlotValue(proj: PeriodProjection): number {
   return Math.max(0, Math.min(100, round1(proj.need)));
 }
 
-/** Pooled graded-only average over every category of every period, each at its own weight. */
-export function collectiveCurrent(periods: PeriodInput[]): number | null {
-  let ws = 0, w = 0;
-  for (const p of periods) for (const c of p.categories) {
-    if (!c.graded.length || c.weight <= 0) continue;
-    ws += c.weight * (c.graded.reduce((s, g) => s + g, 0) / c.graded.length);
-    w += c.weight;
-  }
-  return w > 0 ? ws / w : null;
-}
-
 function meanOfCurrents(periods: PeriodInput[]): number | null {
   const cs = periods.map(p => projectPeriod(p).current).filter((v): v is number => v !== null);
   return cs.length ? cs.reduce((s, v) => s + v, 0) / cs.length : null;
 }
 
-/** The preset's Final Grade (spec §4.4); null when the preset defines none. */
-// 'period' is accepted temporarily (returns null); fixed in Task 4.
-export function subjectFinal(periods: PeriodInput[], mode: 'average' | 'collective' | 'period' | null): number | null {
-  if (mode === 'collective') return collectiveCurrent(periods);
+/** A raw DB `final_mode` as a FinalMode: legacy 'collective' reads as 'average'; anything unknown is null. */
+export function normalizeFinalMode(raw: unknown): FinalMode | null {
+  if (raw === 'period' || raw === 'average') return raw;
+  if (raw === 'collective') return 'average';
+  return null;
+}
+
+/** The preset's Final Grade (spec §4.4): one period's grade, or the mean of period grades; null when none. */
+export function subjectFinal(periods: PeriodInput[], mode: FinalMode | null, finalPeriodKey: string | null): number | null {
+  if (mode === 'period') { const p = periods.find(x => x.key === finalPeriodKey); return p ? projectPeriod(p).current : null; }
   if (mode === 'average') return meanOfCurrents(periods);
   return null;
 }
 
 /** One number for a subject card: the Final Grade when defined, else the mean of period currents. */
-export function subjectOverall(periods: PeriodInput[], mode: 'average' | 'collective' | 'period' | null): number | null { // 'period': fixed in Task 4
-  return mode ? subjectFinal(periods, mode) : meanOfCurrents(periods);
+export function subjectOverall(periods: PeriodInput[], mode: FinalMode | null, finalPeriodKey: string | null): number | null {
+  return mode ? subjectFinal(periods, mode, finalPeriodKey) : meanOfCurrents(periods);
 }

@@ -4,7 +4,7 @@ import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
 import { ensureGradingV2Schema, ensureSubjectSection } from '@/lib/migrate';
 import { buildCustomPeriods, buildLegacyPeriods } from './periodModel';
-import { projectPeriod, subjectOverall } from './projection';
+import { normalizeFinalMode, projectPeriod, subjectOverall } from './projection';
 import { EMPTY_PREFS } from './prefs';
 import type { EntryRow, GradingConfig, SubjectCardData } from './types';
 
@@ -26,6 +26,7 @@ export async function loadGradingConfig(userSubjectId: number): Promise<GradingC
     );
     const preset = {
       ...presets[0],
+      final_mode: normalizeFinalMode(presets[0].final_mode),
       periods: periods.map(p => ({ ...p, categories: cats.filter(c => c.period_id === p.period_id) })),
     };
     return {
@@ -73,7 +74,11 @@ async function computeCurrentGrade(userSubjectId: number): Promise<CardGrade> {
     const byCat: Record<number, Lite[]> = {};
     for (const r of rows) (byCat[r.cat_id as number] ??= []).push(lite(r));
     const periods = buildCustomPeriods(config.preset, byCat, EMPTY_PREFS, null);
-    return { current_grade: subjectOverall(periods, config.preset.final_mode ?? null), grade_scale: config.grade_scale };
+    const { final_mode, final_period_id } = config.preset;
+    return {
+      current_grade: subjectOverall(periods, final_mode ?? null, final_period_id != null ? 'p' + final_period_id : null),
+      grade_scale: config.grade_scale,
+    };
   }
   const [acts] = await pool.execute<RowDataPacket[]>('SELECT activity_name AS name, score, items, grade FROM activities WHERE user_subject_id=?', [userSubjectId]);
   const [quizzes] = await pool.execute<RowDataPacket[]>('SELECT quiz_name AS name, score, items, grade FROM quizzes WHERE user_subject_id=?', [userSubjectId]);
