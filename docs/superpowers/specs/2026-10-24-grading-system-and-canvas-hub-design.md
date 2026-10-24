@@ -5,7 +5,7 @@
 **Builds on:** `2026-10-22-studypulse-revamp-design.md`, which defines the StudyPulse tokens (`studypulse.css`), the projection engine, and the subject page structure. Its constraints still apply: the style gate, tokens only, ≥4.5:1 contrast, the motion rules and reduced motion.
 **Mockups:** these are the source of truth, in `.superpowers/brainstorm/1679-1792810448/content/`:
 - `grading-simulation-v8.html`: interactive, real math. Covers the setup wizard, the subject page, the grade summary, the entry tables and the linked lab. Use its two samples: "Midterm + Finals" and "3 shifts".
-- `canvas-hub-v1b.html`: interactive. Covers the Overview, Activity Bank and Announcements tabs. It is the first mockup (v1) with one change: a single header row `[←] Canvas [Overview | Activity Bank | Announcements] … [Subject ▾]`. Every other canvas-hub file is a rejected exploration.
+- `canvas-hub-v1c.html`: interactive. Covers the Overview, Activity Bank and Announcements tabs. It is the first mockup (v1) with two changes: a single header row `[←] Canvas [Overview | Activity Bank | Announcements] … [Subject ▾]` (v1b), and the Note field in every "Turn this into" form (v1c, C6). Every other canvas-hub file is a rejected exploration.
 
 ## 1. Why
 
@@ -60,6 +60,7 @@ A code audit then found the following.
 | C3 | Activity Bank: a **smart suggestion** ("Goes to Finals › Quizzes · 18 / 20 → 90.0", with an ⓘ explaining why), one-click **Add**, **Change…** picker, **bulk** add/ignore, and an empty state. |
 | C4 | Announcements: an **inbox list plus reading pane**. "Turn this into" offers Task · Event · Reminder · Schedule change as multi-select tabs, with suggested ones marked and pre-filled. **Convert (n)**. On a phone the list and detail stack. |
 | C5 | Recoverability: **Ignored** (bank) and **Dismissed** (announcements) filters with **Restore**, plus an **Undo** toast after each ignore, add and dismiss (Convert's toast links to Workboard instead, see §6). |
+| C6 | **Notes for extra details.** Every "Turn this into" form has a **Note**, pre-filled with the announcement's extra-detail sentences ("Bring a calculator.", "Coverage: …"), which are also highlighted in the body. The note is saved on whatever the conversion creates, including school tasks, which gain notes in Workboard and show them in StudyPulse (§6.1). Mockup: `canvas-hub-v1c.html`. |
 
 ## 3. Grading model
 
@@ -211,7 +212,7 @@ New pure module `src/lib/studypulse/presetDiff.ts`: `diffPreset(oldPreset, newDr
 - On a phone the views wrap to a full-width row under the title, and the filter to its own row below that.
 - Arriving with `subject=` shows a "Showing <code> only · Show all subjects" bar.
 - **Components** (under `src/components/studypulse/canvas/`): `CanvasOverview`, `ProfileStrip`, `CourseMapping`, `ActivityBank`, `BankRow`, `Announcements`, `AnnouncementDetail`, `ConvertPanel`, `UndoToast`. The old `Canvas*.tsx` files are deleted.
-- **Overview (C2):** the layout in `canvas-hub-v1b.html`.
+- **Overview (C2):** the layout in `canvas-hub-v1c.html`.
   - A two-column grid: a 360px profile card on the left, the courses panel on the right. It stacks on a phone.
   - The card: avatar initials, name, a Connected chip; a key–value list (Last sync with its status, Auto-sync, Access token expiry, Courses mapped · new); a full-width Sync now; an eyebrow "Connection" with a Disconnect Canvas link (inline confirm).
   - The courses panel: New Canvas courses, one row each, with "Link to subject…", "or", "Create subject" and "Ignore". Then a Mapped list with per-subject pending and to-review counts.
@@ -241,6 +242,36 @@ New pure module `src/lib/studypulse/presetDiff.ts`: `diffPreset(oldPreset, newDr
   - **Convert:** no undo, because it creates items across Workboard tables. The toast instead reads "Converted into N items · **View in Workboard**".
 - **No `alert()` and no `confirm()`.** Errors show inline on the row or panel. Disconnect asks for confirmation in a small inline confirm.
 
+### 6.1 Notes (C6)
+
+**Extraction**
+- Pure `extractAnnouncementNote(body: string): string` lives in `src/lib/canvas/classify.ts`.
+- It splits the stripped body into sentences and keeps those that open with an extra-detail cue: bring, coverage, covers, attendance, wear, prepare, don't forget, remember to, materials, requirements, note, reminder that, please bring. It joins them with a space and returns `''` when none match.
+- It runs in `GET /api/canvas/announcements` as `suggested_note`, so the client does not repeat the logic. The same cue list drives the body highlight (`noteSpans(body)` returns the character ranges).
+
+**Convert form**
+- Each destination form ends with a full-width **Note** textarea (max 1,000 characters).
+- It is pre-filled with `suggested_note` and labelled "From the announcement" with an ⓘ. Each destination keeps its own edited value.
+
+**Include endpoint**
+- Every destination accepts `note?: string | null` (trimmed; empty means null; over 1,000 characters is a 400):
+  - event and reminder write `workboard_items.note`;
+  - schedule change keeps its existing `note`;
+  - task writes the new `workboard_entry_meta.note`, upserting the overlay row for the created entry.
+
+**Workboard, school tasks only**
+- **Schema:** `workboard_entry_meta.note TEXT NULL`.
+- **Reads:** `workItems.ts` reads `m.note` instead of the hard-coded `null`, so the Notes section of the item detail shows it.
+- **Writes:**
+  - `patchAcademicItem` accepts `note` into the overlay;
+  - `PATCH /api/workboard/academic/[source]/[id]` and `POST /api/workboard/academic/create` accept `note`.
+- **Dialog:** `WorkItemDialog` enables the Note field for academic items (edit and the new-graded path). The hint "Study Pulse doesn't have a place for … Note yet" drops "Note" from its list.
+
+**StudyPulse**
+- The subject page's entry queries `LEFT JOIN workboard_entry_meta` for `note`.
+- `EntryTable` shows a small note icon after the name, inline like the Canvas badge, opening an `InfoTip` with the note text.
+- Notes are read-only here and edited in Workboard. The tooltip says "Edit in Workboard".
+
 ## 7. Cross-cutting
 
 1. **Motion:**
@@ -263,6 +294,7 @@ New pure module `src/lib/studypulse/presetDiff.ts`: `diffPreset(oldPreset, newDr
    - `labLink`: both sides, one side, neither, and the final rule.
    - `presetDiff`: keep IDs, inserts, deletes with moves, and refusing a delete with entries but no move.
    - `suggestBankTarget`: name match, alias match, guess fallback, and legacy mode.
+   - `extractAnnouncementNote` / `noteSpans`: "Bring a calculator." and "Coverage: …" kept; plain sentences dropped; empty body → `''`; ranges line up with the kept sentences.
    - The existing tests still pass (the 1.0-scale letter expectations are updated where they assumed point = letter).
 4. **GWA (G6):** the GWA calculator today is manual entry and OCR. It does not read subject grades, so this work does **not** change it. The rule "a linked lecture + lab counts as one entry with summed units at the combined grade" is recorded here for whenever the GWA calculator gains "import from my subjects", which is out of scope.
 
@@ -272,4 +304,5 @@ New pure module `src/lib/studypulse/presetDiff.ts`: `diffPreset(oldPreset, newDr
 - Combined lecture + lab target planning.
 - Editing the grade scale thresholds.
 - Restyling the landing, schedule and GWA pages.
-- Any change to Workboard.
+- Any change to Workboard beyond school-task notes (§6.1).
+- Editing notes from StudyPulse (they are edited in Workboard).
