@@ -5,7 +5,7 @@
 **Builds on:** `2026-10-22-studypulse-revamp-design.md`, which defines the StudyPulse tokens (`studypulse.css`), the projection engine, and the subject page structure. Its constraints still apply: the style gate, tokens only, ≥4.5:1 contrast, the motion rules and reduced motion.
 **Mockups:** these are the source of truth, in `.superpowers/brainstorm/1679-1792810448/content/`:
 - `grading-simulation-v8.html`: interactive, real math. Covers the setup wizard, the subject page, the grade summary, the entry tables and the linked lab. Use its two samples: "Midterm + Finals" and "3 shifts".
-- `canvas-hub-v3.html`: interactive. Covers the Overview, Activity Bank and Announcements tabs.
+- `canvas-hub-final.html`: interactive. Covers the Overview, Activity Bank and Announcements tabs. It is the v1 layout with only the full-width tab bar changed; v2–v4 and `canvas-overview-variants.html` are rejected explorations.
 
 ## 1. Why
 
@@ -56,7 +56,7 @@ A code audit then found the following.
 | G11 | Explanatory notes become **ⓘ info buttons**, not extra lines. This covers carried entries, reused scores, points earned and the lab combination. |
 | G12 | The Canvas badge sits **inline** with the entry name. |
 | C1 | Canvas becomes a **hub with tabs**: Overview · Activity Bank · Announcements. The tab bar spans the full width. The subject filter lives in each tab's toolbar. A subject page's Canvas menu opens the hub pre-filtered to that subject. |
-| C2 | Overview: a **profile strip on top** (identity, last sync, auto-sync, token expiry, course counts, Sync now, Disconnect), then **New Canvas courses**, then the **Mapped** list. |
+| C2 | Overview keeps the **v1 two-column layout**. Left: a vertical profile card (avatar, name, Connected chip; rows for last sync, auto-sync, access token and courses; a full-width Sync now; "Connection · Disconnect Canvas"). Right: **New Canvas courses** (Link to subject… · or · Create subject · Ignore) and the **Mapped** list. The header keeps "Connected as … · synced …" and Sync now. The tab bar is the only change from v1. |
 | C3 | Activity Bank: a **smart suggestion** ("Goes to Finals › Quizzes · 18 / 20 → 90.0", with an ⓘ explaining why), one-click **Add**, **Change…** picker, **bulk** add/ignore, and an empty state. |
 | C4 | Announcements: an **inbox list plus reading pane**. "Turn this into" offers Task · Event · Reminder · Schedule change as multi-select tabs, with suggested ones marked and pre-filled. **Convert (n)**. On a phone the list and detail stack. |
 | C5 | Recoverability: **Ignored** (bank) and **Dismissed** (announcements) filters with **Restore**, plus an **Undo** toast after each ignore, add and dismiss (Convert's toast links to Workboard instead, see §6). |
@@ -211,10 +211,10 @@ New pure module `src/lib/studypulse/presetDiff.ts`: `diffPreset(oldPreset, newDr
 - The subject filter is a select inside each tab's toolbar.
 - Arriving with `subject=` shows a "Showing <code> only · Show all subjects" bar.
 - **Components** (under `src/components/studypulse/canvas/`): `CanvasOverview`, `ProfileStrip`, `CourseMapping`, `ActivityBank`, `BankRow`, `Announcements`, `AnnouncementDetail`, `ConvertPanel`, `UndoToast`. The old `Canvas*.tsx` files are deleted.
-- **Overview (C2):**
-  - A profile strip: avatar initials, name, a Connected chip, and stats (last sync and its status, auto-sync, token expiry, mapped and new courses), Sync now, and a quiet Disconnect link.
-  - New Canvas courses: one row each, with "Link to subject…", "or", "Create subject" and "Ignore".
-  - A Mapped list with per-subject pending and to-review counts.
+- **Overview (C2):** the layout in `canvas-hub-final.html`.
+  - A two-column grid: a 360px profile card on the left, the courses panel on the right. It stacks on a phone.
+  - The card: avatar initials, name, a Connected chip; a key–value list (Last sync with its status, Auto-sync, Access token expiry, Courses mapped · new); a full-width Sync now; an eyebrow "Connection" with a Disconnect Canvas link (inline confirm).
+  - The courses panel: New Canvas courses, one row each, with "Link to subject…", "or", "Create subject" and "Ignore". Then a Mapped list with per-subject pending and to-review counts.
   - The "Connect Canvas" pairing flow (bookmarklet) keeps today's behaviour, restyled, when not connected.
 - **Activity Bank (C3):**
   - **Server:** `GET /api/canvas/bank` adds `suggestion: { period_id, period_name, cat_id, cat_name, confidence: 'match' | 'guess', reason }` per pending item, from a new pure `suggestBankTarget(item, preset, recentPeriodId)` in `src/lib/canvas/classify.ts`, which reuses its keyword rules.
