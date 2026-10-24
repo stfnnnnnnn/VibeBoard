@@ -34,9 +34,23 @@ export async function GET(
   const presetId = sg.preset_id as number;
 
   const [presets] = await pool.execute<RowDataPacket[]>(
-    'SELECT * FROM grading_presets WHERE preset_id=?',
-    [presetId]
+    'SELECT * FROM grading_presets WHERE preset_id=? AND user_id=?',
+    [presetId, userId]
   );
+  // A subject pointing at another user's preset (possible before Task 6) exposes nothing from it.
+  if (!presets.length) {
+    return Response.json({
+      config: {
+        user_subject_id: userSubjectId,
+        preset_id:   sg.preset_id,
+        has_lab:     sg.has_lab,
+        lec_weight:  sg.lec_weight,
+        lab_weight:  sg.lab_weight,
+        grade_scale: '4pt',
+        preset:      null,
+      }
+    });
+  }
   const [periods] = await pool.execute<RowDataPacket[]>(
     'SELECT * FROM grading_periods WHERE preset_id=? ORDER BY sort_order',
     [presetId]
@@ -88,13 +102,22 @@ export async function POST(
 
   const { preset_id, has_lab, lec_weight, lab_weight } = await req.json();
 
+  // The preset must belong to the caller too, or a subject could be pointed at someone else's preset.
+  const presetId = Number(preset_id);
+  if (!Number.isInteger(presetId)) return Response.json({ error: 'Grading system not found' }, { status: 404 });
+  const [ownsPreset] = await pool.execute<RowDataPacket[]>(
+    'SELECT 1 FROM grading_presets WHERE preset_id=? AND user_id=?',
+    [presetId, userId]
+  );
+  if (!ownsPreset.length) return Response.json({ error: 'Grading system not found' }, { status: 404 });
+
   await pool.execute(
     `INSERT INTO subject_grading (user_subject_id, preset_id, has_lab, lec_weight, lab_weight)
      VALUES (?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        preset_id=VALUES(preset_id), has_lab=VALUES(has_lab),
        lec_weight=VALUES(lec_weight), lab_weight=VALUES(lab_weight)`,
-    [userSubjectId, preset_id, has_lab ? 1 : 0, lec_weight ?? 100, lab_weight ?? 0]
+    [userSubjectId, presetId, has_lab ? 1 : 0, lec_weight ?? 100, lab_weight ?? 0]
   );
 
   return Response.json({ status: 'success' });
