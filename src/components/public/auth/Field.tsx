@@ -12,6 +12,8 @@ export interface FieldProps {
   onBlur?: () => void;
   error?: React.ReactNode;
   hint?: React.ReactNode;
+  /** Announce hint changes (default). Off for hints that change on every keystroke, like the password meter. */
+  hintLive?: boolean;
   warn?: boolean;
   valid?: boolean;
   autoComplete?: string;
@@ -24,9 +26,12 @@ export interface FieldProps {
   trailing?: React.ReactNode;
 }
 
-/* Labelled input with icon, inline hint/error wired via aria-describedby (spec §6.2, §10). */
+/* Labelled input with icon, inline hint/error wired via aria-describedby (spec §6.2, §10). Both message regions stay
+   mounted (empty when there is nothing to say), so the first error is announced: a live region that appears together
+   with its text is often missed by screen readers. The error replaces the hint visually, as before. */
 export default function Field(p: FieldProps) {
-  const describedBy = p.error || p.hint ? `${p.id}-msg` : undefined;
+  const hint = p.error ? null : p.hint;
+  const describedBy = [p.error && `${p.id}-msg`, hint && `${p.id}-hint`].filter(Boolean).join(' ') || undefined;
   const state = p.error ? 'is-invalid' : p.warn ? 'is-warn' : p.valid ? 'is-valid' : '';
   const Icon = p.icon;
   return (
@@ -56,11 +61,8 @@ export default function Field(p: FieldProps) {
         {p.trailing}
         {p.valid && !p.error && !p.trailing && <Check size={17} className="auth-ok" aria-hidden="true" />}
       </div>
-      {(p.error || p.hint) && (
-        <p id={`${p.id}-msg`} className={`auth-hint ${p.error ? 'is-error' : p.warn ? 'is-warn' : ''}`} aria-live="polite">
-          {p.error ?? p.hint}
-        </p>
-      )}
+      <p id={`${p.id}-msg`} className="auth-hint is-error" aria-live="polite">{p.error}</p>
+      <p id={`${p.id}-hint`} className={`auth-hint ${p.warn ? 'is-warn' : ''}`} aria-live={p.hintLive === false ? 'off' : 'polite'}>{hint}</p>
     </div>
   );
 }

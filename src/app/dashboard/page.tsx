@@ -20,7 +20,8 @@ export default async function DashboardPage() {
   if (!session?.user) redirect('/login');
 
   const firstName = session.user.name?.split(' ')[0] ?? 'Student';
-  const me = await findById(Number(session.user.id));
+  // Fails open: if the lookup errors, the dashboard still renders (just without the verify banner).
+  const me = await findById(Number(session.user.id)).catch(() => null);
 
   async function handleSignOut() {
     'use server';

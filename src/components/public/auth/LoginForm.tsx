@@ -99,8 +99,11 @@ export default function LoginForm() {
         </FormAlert>
       )}
 
-      <GooglePersonalized onCredential={onGoogleCredential} />
-      <p className="auth-center"><UseAnother /></p>
+      {/* While a Google credential is being exchanged, the whole Google area is inert (GIS draws in an iframe). */}
+      <div className="auth-google" aria-busy={googleBusy} aria-disabled={googleBusy || undefined}>
+        <GooglePersonalized onCredential={onGoogleCredential} />
+        <p className="auth-center"><UseAnother disabled={googleBusy} /></p>
+      </div>
 
       <div className="auth-or">or log in with email</div>
       <form onSubmit={onSubmit} noValidate>
@@ -125,10 +128,10 @@ export default function LoginForm() {
 }
 
 /* "Use another account": the OAuth chooser, so a shared PC never reuses the last Google session silently. */
-function UseAnother() {
+function UseAnother({ disabled }: { disabled?: boolean }) {
   const [busy, setBusy] = useState(false);
   return (
-    <button type="button" className="auth-link auth-link--quiet" disabled={busy}
+    <button type="button" className="auth-link auth-link--quiet" disabled={busy || disabled}
       onClick={() => { setBusy(true); void signIn('google', { redirectTo: '/dashboard' }, { prompt: 'select_account' }); }}>
       Use another account
     </button>

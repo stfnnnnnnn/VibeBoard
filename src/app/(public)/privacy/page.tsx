@@ -15,6 +15,8 @@ export default function PrivacyPage() {
         <li>If you use a password: a one-way hash of it, never the password itself.</li>
         <li>What you add to the app: subjects, grades, tasks, schedules, money entries and habits.</li>
         <li>If you connect Canvas: an access token, stored encrypted, and the course items it syncs.</li>
+        <li>For security: how many times sign-in failed recently, and when your account was created.</li>
+        <li>Older accounts may also hold a date of birth, middle name, status and program from our previous sign-up form. Ask us and we&apos;ll clear them.</li>
       </ul>
       <h2>Why</h2>
       <p>To show your board, keep you signed in, let you reset your password, and sync Canvas if you ask us to.</p>

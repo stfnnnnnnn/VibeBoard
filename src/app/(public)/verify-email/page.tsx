@@ -5,13 +5,18 @@ import AuthShell from '@/components/public/auth/AuthShell';
 import ResendVerify from '@/components/public/auth/ResendVerify';
 import { auth } from '@/auth';
 import { consumeVerifyToken } from '@/lib/auth/authTokens';
+import { findById } from '@/lib/auth/users';
 
 export const metadata: Metadata = { title: 'Confirm your email · VibeBoard', referrer: 'no-referrer' };
 
 export default async function VerifyPage({ searchParams }: { searchParams: Promise<{ token?: string }> }) {
   const { token = '' } = await searchParams;
-  const ok = (await consumeVerifyToken(token)) !== null;
-  const signedIn = ok ? false : !!(await auth())?.user;
+  const consumed = (await consumeVerifyToken(token)) !== null;
+  const user = consumed ? null : (await auth())?.user;
+  // A stale link (already used, or superseded by a resend) for an account that is already confirmed is still a success.
+  const me = user?.id ? await findById(Number(user.id)).catch(() => null) : null;
+  const ok = consumed || !!me?.email_verified_at;
+  const signedIn = !ok && !!user;
   return (
     <AuthShell topRight={null}>
       {ok ? (

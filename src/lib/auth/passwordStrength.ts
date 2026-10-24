@@ -15,6 +15,8 @@ export function scorePassword(pw: string): Strength {
     const n = MIN_PASSWORD - pw.length;
     return { score: 0, label: 'Too short', hint: `${n} more character${n === 1 ? '' : 's'}.` };
   }
+  // bcrypt ignores everything past 72 bytes, and the server rejects it (validate.ts), so never call it "Great".
+  if (new TextEncoder().encode(pw).length > 72) return { score: 1, label: 'Too long', hint: 'Use 72 bytes or fewer.' };
   if (COMMON.has(pw.toLowerCase()) || /^(.)\1+$/.test(pw)) {
     return { score: 1, label: 'Too common', hint: "This one is easy to guess. Try a phrase only you'd know." };
   }

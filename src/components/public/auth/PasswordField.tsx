@@ -18,6 +18,7 @@ export default function PasswordField(p: {
         onBlur={p.onBlur} error={p.error} autoComplete={p.autoComplete} labelAside={p.labelAside} inputRef={p.inputRef}
         placeholder={p.placeholder ?? 'Your password'} required
         hint={s ? <span>{s.label}{s.hint ? ` · ${s.hint}` : ''}</span> : undefined}
+        hintLive={false} warn={s?.label === 'Too long'}
         trailing={
           <button type="button" className="auth-eye" onClick={() => setShow(v => !v)} aria-pressed={show}
             aria-label={show ? 'Hide password' : 'Show password'}>

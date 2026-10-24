@@ -10,12 +10,13 @@ type GsiId = {
 declare global { interface Window { google?: { accounts?: { id?: GsiId } } } }
 
 /* Google's own personalized "Continue as …" button (spec §4.3, D7). Falls back to the plain OAuth button
-   if the script is blocked, slow (>3 s), or NEXT_PUBLIC_GOOGLE_CLIENT_ID is missing. Never auto-selects. */
+   if the script is blocked, slow (>3 s), NEXT_PUBLIC_GOOGLE_CLIENT_ID is missing, or GIS loads but draws nothing
+   (FedCM or third-party cookies blocked). Never auto-selects. */
 export default function GooglePersonalized({ onCredential, fallbackLabel }: { onCredential: (c: string) => void; fallbackLabel?: string }) {
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
   const host = useRef<HTMLDivElement>(null);
   const cb = useRef(onCredential);
-  cb.current = onCredential;
+  useEffect(() => { cb.current = onCredential; }, [onCredential]);
   const [failed, setFailed] = useState(!clientId);
   const [rendered, setRendered] = useState(false);
 
@@ -36,6 +37,13 @@ export default function GooglePersonalized({ onCredential, fallbackLabel }: { on
     });
     setRendered(true);
   }, [clientId]);
+
+  // renderButton can return without drawing anything; give it ~1.5 s, then use the plain button.
+  useEffect(() => {
+    if (!rendered || failed) return;
+    const t = setTimeout(() => { if (!host.current?.childElementCount) setFailed(true); }, 1500);
+    return () => clearTimeout(t);
+  }, [rendered, failed]);
 
   useEffect(() => {
     if (failed) return;
