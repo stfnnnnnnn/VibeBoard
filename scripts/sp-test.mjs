@@ -8,11 +8,12 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
 
-const ROOT = 'src/lib';
-// Only StudyPulse modules plus the two shared pure libs they import.
-const INCLUDE = /^(studypulse\/.+|gradeScale|transmutation)\.ts$/;
+const ROOT = 'src';
+const DIRS = ['src/lib', 'src/components/studypulse/grading'];
+// StudyPulse modules, the two shared pure libs they import, and the grading setup's pure helpers (not .tsx).
+const INCLUDE = /^lib\/(studypulse\/.+|gradeScale|transmutation)\.ts$|^components\/studypulse\/grading\/(__tests__\/)?[^/]+\.ts$/;
 // Modules that import the DB pool. Never transpiled; tests may only `import type` from them.
-const SERVER = /^studypulse\/subjectCards\.ts$/;
+const SERVER = /^lib\/studypulse\/subjectCards\.ts$/;
 const out = mkdtempSync(join(tmpdir(), 'sp-test-'));
 const walk = d => readdirSync(d).flatMap(n => {
   const p = join(d, n);
@@ -20,7 +21,7 @@ const walk = d => readdirSync(d).flatMap(n => {
 });
 
 const tests = [];
-for (const file of walk(ROOT)) {
+for (const file of DIRS.flatMap(walk)) {
   const rel = relative(ROOT, file).split('\\').join('/');
   if (!INCLUDE.test(rel) || SERVER.test(rel)) continue;
   const { outputText } = ts.transpileModule(readFileSync(file, 'utf8'), {
@@ -30,7 +31,7 @@ for (const file of walk(ROOT)) {
   const fromDir = posix.dirname(rel);
   const js = outputText
     .replace(/(from\s+['"])@\/lib\/([^'"]+)(['"])/g, (_, a, p, b) => {
-      let r = posix.relative(fromDir, p);
+      let r = posix.relative(fromDir, 'lib/' + p);
       if (!r.startsWith('.')) r = './' + r;
       return `${a}${r}${b}`;
     })

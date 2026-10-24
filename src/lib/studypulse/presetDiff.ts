@@ -95,8 +95,8 @@ export function validateDraft(name: unknown, draft: unknown): string | null {
   return linkGroupError(draft);
 }
 
-/** The link-group rule on its own (PUT via validateDraft, and POST /grading, which skips the other checks so the
-    legacy wizard keeps working): the period model reads one category per group, so a period may hold at most one
+/** The link-group rule on its own (validateDraft's last check, which PUT and POST /grading both run): the period
+    model reads one category per group, so a period may hold at most one
     category of each non-empty link_group. Returns the 400 message, or null. Tolerates malformed input. */
 export function linkGroupError(periods: unknown): string | null {
   if (!Array.isArray(periods)) return null;

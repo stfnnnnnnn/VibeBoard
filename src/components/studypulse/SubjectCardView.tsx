@@ -1,9 +1,9 @@
 'use client';
 
 import { Suspense, useState, useMemo, useCallback, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { GraduationCap } from 'lucide-react';
-import GradingSetupWizard, { type GradingPresetFull } from './GradingSetupWizard';
+import GradingSetup, { type SavedInfo } from './grading/GradingSetup';
 import TargetPlanner from './planner/TargetPlanner';
 import { usePlannerPrefs } from './planner/usePlannerPrefs';
 import CategorySection from './subject/CategorySection';
@@ -25,6 +25,30 @@ import type { EntryRow, GradingConfig } from '@/lib/studypulse/types';
 export type { EntryRow, GradingConfig, Urgency, EntryStatus } from '@/lib/studypulse/types';
 export type GradeMode   = 'finals' | 'midterm' | 'whatif';
 export type SectionType = 'activities' | 'quizzes' | 'exams';
+
+/** This subject's grade entries grouped by cat_id, re-read after the setup sheet moved entries between categories.
+    Same row shape the page builds (canvas_linked is not in this route's rows; the caller carries it over by id). */
+async function fetchCatEntries(userSubjectId: number): Promise<Record<number, EntryRow[]> | null> {
+  try {
+    const res = await fetch(`/api/studypulse/grade-entries?subject_id=${userSubjectId}`);
+    if (!res.ok) return null;
+    const { entries } = await res.json() as { entries: Array<Record<string, unknown>> };
+    const out: Record<number, EntryRow[]> = {};
+    const day = (v: unknown) => (v ? String(v).split('T')[0] : '');
+    for (const e of entries) {
+      (out[Number(e.cat_id)] ??= []).push({
+        id: Number(e.entry_id), name: String(e.name ?? ''), specificType: '',
+        urgency: (e.urgency as EntryRow['urgency']) ?? 'Low', status: (e.status as EntryRow['status']) ?? 'Pending',
+        deadline: day(e.deadline), accomplished_at: day(e.accomplished_at),
+        score: e.score != null ? String(e.score) : '', items: e.items != null ? String(e.items) : '',
+        grade: e.grade != null ? Number(e.grade) : null, canvas_linked: false,
+      });
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
 
 /* ═══════════════════════════════════════════
    SubjectCardView — main export
@@ -71,20 +95,20 @@ function SubjectCardViewInner({
   const [quizzes,    setQuizzes]    = useState<EntryRow[]>(initialQuizzes);
   const [exams,      setExams]      = useState<EntryRow[]>(initialExams);
   const [config,     setConfig]     = useState<GradingConfig | null>(initialConfig);
-  const [showWizard, setShowWizard] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
 
-  /* ── Auto-launch the grading wizard for a just-created subject ──
+  /* ── Auto-open the grading setup for a just-created subject ──
      Both creation paths (manual add on the subjects grid, and Canvas "Create
      Subject") land here with ?new=1. Fire once on mount, then strip the param so
-     a refresh — or any later visit to this subject — doesn't re-open the wizard.
+     a refresh — or any later visit to this subject — doesn't re-open the setup.
      The param is dropped with history.replaceState rather than router.replace:
      it's a pure URL-bar rewrite with no Next navigation, no re-render and no RSC
-     re-fetch, so it can't disturb the wizard we just opened in the same effect. */
+     re-fetch, so it can't disturb the setup we just opened in the same effect. */
   const searchParams = useSearchParams();
 
   useEffect(() => {
     if (searchParams.get('new') !== '1') return;
-    setShowWizard(true);
+    setShowSetup(true);
     const rest = new URLSearchParams(searchParams.toString());
     rest.delete('new');
     const qs = rest.toString();
@@ -150,7 +174,7 @@ function SubjectCardViewInner({
   const { prefs, setTarget, setExtra, saveError, retry } = usePlannerPrefs(userSubjectId);
 
   /* ── Period tabs: one period, or every period ("Both"/"All"). Back to "all"
-     whenever the active preset changes (including right after the wizard). ── */
+     whenever the active preset changes (including right after the setup sheet saves). ── */
   const [periodSel, setPeriodSel] = useState<PeriodSelection>('all');
   useEffect(() => { setPeriodSel('all'); }, [config?.preset_id]);
   // The effect above lands a render late; derive too, so a selection from the old preset never renders an empty page.
@@ -178,25 +202,39 @@ function SubjectCardViewInner({
     }
   };
 
-  const handleWizardComplete = (preset: GradingPresetFull) => {
-    const newConfig: GradingConfig = {
-      preset_id:   preset.preset_id,
-      has_lab:     preset.has_lab,
-      lec_weight:  preset.lec_weight,
-      lab_weight:  preset.lab_weight,
-      grade_scale: preset.grade_scale,
-      preset,
-    };
-    setConfig(newConfig);
-    /* Keep rows already loaded for a category the new preset still has (re-running the wizard on the same or an
-       existing preset reuses its cat_ids, and those DB rows are intact); a new category starts empty. */
-    setCatEntries(prev => {
-      const init: Record<number, EntryRow[]> = {};
-      for (const p of preset.periods) for (const c of p.categories) init[c.cat_id] = prev[c.cat_id] ?? [];
-      return init;
-    });
-    setShowWizard(false);
-  };
+  /* This subject's entry count per category, so the setup sheet knows which removed categories need a home. */
+  const entryCounts = useMemo(() => {
+    const out: Record<number, number> = {};
+    for (const [id, rows] of Object.entries(catEntries)) {
+      const n = rows.filter(r => r.id > 0).length;
+      if (n) out[Number(id)] = n;
+    }
+    return out;
+  }, [catEntries]);
+
+  /* The setup sheet saved (it already re-read the config via GET subjects/[id]/grading). Rows already loaded stay
+     with every category that survived (edits keep cat_ids); after a copy or a map the entries changed category, so
+     they are fetched again. Either way the server components are refreshed. */
+  const router = useRouter();
+  const handleSetupSaved = useCallback(async (newConfig: GradingConfig | null, info: SavedInfo) => {
+    if (newConfig) {
+      setConfig(newConfig);
+      const fresh = info.entriesMoved ? await fetchCatEntries(userSubjectId) : null;
+      setCatEntries(prev => {
+        const byId = new Map(Object.values(prev).flat().map(r => [r.id, r]));
+        const init: Record<number, EntryRow[]> = {};
+        for (const p of newConfig.preset.periods) {
+          for (const c of p.categories) {
+            init[c.cat_id] = fresh
+              ? (fresh[c.cat_id] ?? []).map(r => ({ ...r, canvas_linked: byId.get(r.id)?.canvas_linked ?? r.canvas_linked }))
+              : prev[c.cat_id] ?? [];
+          }
+        }
+        return init;
+      });
+    }
+    if (info.entriesMoved || info.labChanged) router.refresh();
+  }, [router, userSubjectId]);
 
   const isCustomMode   = config !== null;
   const totalLegacy    = activities.length + quizzes.length + exams.length;
@@ -210,7 +248,7 @@ function SubjectCardViewInner({
     : buildLegacyPeriods(activities, quizzes, exams, prefs, projTable)
   ), [config, catEntries, activities, quizzes, exams, prefs, projTable]);
   const projections = useMemo(() => periods.map(projectPeriod), [periods]);
-  /* Normalised again here: a preset returned by the legacy wizard can still carry 'collective'. */
+  /* Normalised again here: a preset saved by the old wizard can still carry 'collective'. */
   const finalMode = normalizeFinalMode(config?.preset.final_mode);
   const finalPeriodId = config?.preset.final_period_id ?? null;
   const finalPeriodKey = finalPeriodId !== null ? `p${finalPeriodId}` : null;
@@ -243,12 +281,14 @@ function SubjectCardViewInner({
   return (
     <div className="vb-bg sp-page">
       <div className="sp-wrap">
-        {showWizard && (
-          <GradingSetupWizard
+        {showSetup && (
+          <GradingSetup
             userSubjectId={userSubjectId}
-            onComplete={handleWizardComplete}
-            onCancel={() => setShowWizard(false)}
+            config={config}
             existingPresets={existingPresets}
+            entryCounts={entryCounts}
+            onSaved={handleSetupSaved}
+            onClose={() => setShowSetup(false)}
           />
         )}
 
@@ -260,7 +300,7 @@ function SubjectCardViewInner({
           ) : undefined}
           transmutationOn={transmutationOn} transLoading={transLoading} transError={transError} onToggleTrans={handleTransToggle}
           plannerOpen={plannerOpen} onTogglePlanner={() => setPlannerOpen(v => !v)}
-          isCustom={isCustomMode} onGrading={() => setShowWizard(true)} userSubjectId={userSubjectId} />
+          isCustom={isCustomMode} onGrading={() => setShowSetup(true)} userSubjectId={userSubjectId} />
 
         {/* ── Target planner: always mounted so it can animate open and closed ── */}
         <TargetPlanner open={plannerOpen} periods={periods} projections={projections} scale={scale} transmutationOn={transmutationOn}
@@ -307,10 +347,10 @@ function SubjectCardViewInner({
         {/* ── Legacy mode ── */}
         {!isCustomMode && (
           <>
-            {totalLegacy === 0 && !showWizard && (
+            {totalLegacy === 0 && !showSetup && (
               <div className="sp-panel sp-legacy-empty">
                 <p className="sp-tone-muted">No entries yet. Set up a custom grading system, or use the default layout below.</p>
-                <button type="button" className="sp-btn sp-btn--primary sp-focus-ring" onClick={() => setShowWizard(true)}><GraduationCap size={16} /> Set up grading system</button>
+                <button type="button" className="sp-btn sp-btn--primary sp-focus-ring" onClick={() => setShowSetup(true)}><GraduationCap size={16} /> Set up grading system</button>
               </div>
             )}
             <div className="sp-panel sp-legacy-panel">

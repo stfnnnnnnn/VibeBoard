@@ -4,7 +4,7 @@ import pool from '@/lib/db';
 import { ensureGradeScale, ensureFinalGrade, ensureCategoryLinking, ensureGradingV2Schema } from '@/lib/migrate';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
-import { linkGroupError, resolveFinal } from '@/lib/studypulse/presetDiff';
+import { resolveFinal, validateDraft } from '@/lib/studypulse/presetDiff';
 
 /* GET  /api/studypulse/grading  — list all presets for user */
 export async function GET() {
@@ -38,13 +38,10 @@ export async function POST(req: NextRequest) {
     final_period_index, final_mode,
   } = await req.json();
 
-  if (!name || !Array.isArray(periods) || periods.length === 0) {
-    return Response.json({ error: 'name and periods are required' }, { status: 400 });
-  }
-  // Only the link-group rule (shared with PUT); the weight-sum check is left out so the legacy wizard keeps working.
-  const groupError = linkGroupError(periods);
-  if (groupError) return Response.json({ error: groupError }, { status: 400 });
-  // final_mode is 'period' | 'average' (legacy 'collective' maps to 'average' so the old wizard keeps working);
+  // The same whole-draft check PUT runs (names, weights summing to 100, one category per linked group).
+  const draftError = validateDraft(name, periods);
+  if (draftError) return Response.json({ error: draftError }, { status: 400 });
+  // final_mode is 'period' | 'average' (a stored legacy 'collective' still maps to 'average');
   // final_period_index picks the period for either mode. Checked up front with placeholder ids.
   const finalCheck = resolveFinal(final_mode ?? null, null, final_period_index, null, periods.map((_: unknown, i: number) => i + 1));
   if ('error' in finalCheck) return Response.json({ error: finalCheck.error }, { status: 400 });
@@ -64,7 +61,7 @@ export async function POST(req: NextRequest) {
     const [result] = await conn.execute<ResultSetHeader>(
       `INSERT INTO grading_presets (user_id, name, is_default, has_lab, lec_weight, lab_weight, grade_scale)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [userId, name, is_default ? 1 : 0, has_lab ? 1 : 0,
+      [userId, String(name).trim(), is_default ? 1 : 0, has_lab ? 1 : 0,
        lec_weight ?? 100, lab_weight ?? 0, grade_scale ?? '4pt']
     );
     const presetId = result.insertId;
