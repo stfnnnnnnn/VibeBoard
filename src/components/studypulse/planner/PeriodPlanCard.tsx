@@ -8,6 +8,7 @@ import {
   type PeriodInput, type PeriodProjection,
 } from '@/lib/studypulse/projection';
 import { f1 } from '@/lib/studypulse/ui/format';
+import { gradeInPct } from '@/lib/studypulse/points';
 import GradeBar from './GradeBar';
 import PlanSandbox, { slotKey } from './PlanSandbox';
 import ScenarioRow from './ScenarioRow';
@@ -91,7 +92,7 @@ export default function PeriodPlanCard({ period, proj, scale, onTarget, onExtra 
         <div className="sp-nums__side">
           <div className="sp-eyebrow">Target</div>
           <div className="sp-nums__v">{T}%{tg ? ` · ${tg.letter}` : ''}</div>
-          <div className="sp-nums__cov">{Math.round(proj.coverage)}% of the grade is in</div>
+          <div className="sp-nums__cov">{gradeInPct(proj)}% of the grade is in</div>
         </div>
       </div>
 

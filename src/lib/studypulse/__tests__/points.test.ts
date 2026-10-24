@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pointsOf, periodPoints, rawPercent, fmtWeight, whatIfOverrides } from '../points';
+import { pointsOf, periodPoints, rawPercent, fmtWeight, whatIfOverrides, gradeInPct } from '../points';
 import { projectPeriod, type CategoryInput } from '../projection';
 import type { TransmutationTable } from '../../transmutation';
 
@@ -107,4 +107,18 @@ test('fmtWeight: integers plain, decimals trimmed', () => {
   assert.equal(fmtWeight(40), '40');
   assert.equal(fmtWeight(12.5), '12.5');
   assert.equal(fmtWeight(33.333333), '33.33');
+});
+
+test('gradeInPct: the one "% of grade in" label (R13): graded weight / total weight, rounded', () => {
+  const finals = projectPeriod({ key: 'p2', name: 'Finals', target: 85, categories: [
+    cat({ key: 'q', weight: 36, graded: [70, 85, 90] }),
+    cat({ key: 't', weight: 24, graded: [60, 90, 100], pendingNames: ['Task 4'] }),
+    cat({ key: 'm', weight: 15, graded: [80], singleton: true }),
+    cat({ key: 'f', weight: 25, pendingNames: ['Final Exam'], singleton: true }),
+  ] });
+  assert.equal(gradeInPct(finals), 75);
+  assert.equal(gradeInPct(finals), Math.round(periodPoints(finals.categories).inShare));
+  assert.equal(Math.round(finals.coverage), 69); // item-level planner coverage stays as it was, and differs
+  assert.equal(gradeInPct(projectPeriod({ key: 'e', name: 'E', target: 85, categories: [cat({ key: 'a', weight: 40, pendingNames: ['x'] })] })), 0);
+  assert.equal(gradeInPct({ categories: [{ n: 1, weight: 1, avg: 90 }, { n: 0, weight: 2, avg: null }] }), 33);
 });

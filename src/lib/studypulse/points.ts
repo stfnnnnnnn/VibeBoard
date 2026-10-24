@@ -32,6 +32,11 @@ export function periodPoints(cats: Pick<CategoryStats, 'n' | 'weight' | 'avg'>[]
   return { earned, gradedWeight, totalWeight, inShare: totalWeight > 0 ? (gradedWeight / totalWeight) * 100 : 0 };
 }
 
+/** The single definition behind every user-facing "% of grade in" label on the subject page (ruling R13): the share of
+    the period's weight that is graded, rounded. Not projectPeriod().coverage, which is item-level planner math. */
+export const gradeInPct = (proj: { categories: Pick<CategoryStats, 'n' | 'weight' | 'avg'>[] }): number =>
+  Math.round(periodPoints(proj.categories).inShare);
+
 const num = (v: number | string): number => (typeof v === 'number' ? v : v.trim() === '' ? NaN : Number(v));
 
 /** A typed raw score as a percent: score / items × 100 (clamped to 0..100), or the transmuted grade when a table is

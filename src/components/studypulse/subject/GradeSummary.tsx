@@ -6,7 +6,7 @@ import { toGradeInfo, type GradeScale } from '@/lib/gradeScale';
 import { projectPeriod, type CategoryStats, type PeriodInput, type PeriodProjection } from '@/lib/studypulse/projection';
 import type { FinalMode } from '@/lib/studypulse/types';
 import { legacyMidtermPeriod } from '@/lib/studypulse/periodModel';
-import { fmtWeight, periodPoints, pointsOf, whatIfOverrides, type WhatIfEdit } from '@/lib/studypulse/points';
+import { fmtWeight, gradeInPct, periodPoints, pointsOf, whatIfOverrides, type WhatIfEdit } from '@/lib/studypulse/points';
 import type { TransmutationTable } from '@/lib/transmutation';
 import { f1, gradeTone } from '@/lib/studypulse/ui/format';
 import SpSegmented from '../ui/SpSegmented';
@@ -42,7 +42,7 @@ function PeriodBig({ name, value, cats }: { name: string; value: number | null; 
         {value !== null && (
           <span className="sp-sum__bigtip">
             <InfoTip label={`About ${name}: points earned`}>
-              <b>{f1(pts.earned)} of {fmtWeight(pts.gradedWeight)} pts earned</b> so far. {Math.round(pts.inShare)}% of this period&apos;s grade is in; ungraded categories don&apos;t count against you yet.
+              <b>{f1(pts.earned)} of {fmtWeight(pts.gradedWeight)} pts earned</b> so far. {gradeInPct({ categories: cats })}% of this period&apos;s grade is in; ungraded categories don&apos;t count against you yet.
             </InfoTip>
           </span>
         )}
@@ -92,6 +92,8 @@ export default function GradeSummary({ periods, projections, finalMode, finalPer
   const finalValues = combine ? combine(periodValues) : periodValues;
   const shownFinal = meanOf(finalValues);
   const showFinal = finalMode === 'average';
+  /* Overrides are per category: an earlier period's what-if does not reach a later period's reused/carried values. */
+  const hasCarry = periods.some(p => p.categories.some(c => c.carried || c.reused));
   /* Hint for an empty input: the period's current, else the mean of graded periods. Display only. */
   const graded = projections.map(p => p.current).filter((v): v is number => v !== null);
   const fallback = graded.length ? graded.reduce((s, v) => s + v, 0) / graded.length : null;
@@ -136,6 +138,7 @@ export default function GradeSummary({ periods, projections, finalMode, finalPer
             {enterAs === 'pct' ? 'Type a category average.' : `Type a score out of its items${transTable ? '; it is transmuted like your entries' : ''}.`}{' '}
             Untouched fields keep your real grades, and an ungraded category doesn&apos;t count until you type a value. Weights stay fixed and nothing is saved. For item-by-item planning, use the Target planner.
           </p>
+          {hasCarry && <p className="sp-sum__note sp-sum__note--inline">Reused and carried scores in later periods use your real grades.</p>}
         </div>
       )}
 

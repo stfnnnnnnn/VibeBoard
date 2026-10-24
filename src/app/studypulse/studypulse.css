@@ -465,7 +465,7 @@
 .sp-sum__fg { color: var(--sp-pink-ink); }
 .sp-sum__wifbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: -6px 0 14px; }
 .sp-sum__wiflabel { font: 700 12.5px var(--sp-font-ui); color: var(--sp-text-muted); }
-.sp-sum__note--inline { margin: 0; flex-basis: 100%; }
+.sp-sum__note.sp-sum__note--inline { margin: 0; flex-basis: 100%; }
 .sp-sum__col--final { background: linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(253, 228, 239, 0.7)); border: 1px solid rgba(240, 103, 157, 0.35); }
 .sp-sum__col--final .sp-sum__colhead { color: var(--sp-pink-ink); display: flex; align-items: center; justify-content: center; gap: 5px; }
 /* The Final grade tab shows the final column alone. */

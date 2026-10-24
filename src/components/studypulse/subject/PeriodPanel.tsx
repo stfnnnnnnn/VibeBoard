@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { CalendarDays, Flag } from 'lucide-react';
 import type { PeriodInput, PeriodProjection } from '@/lib/studypulse/projection';
 import { f1, gradeTone } from '@/lib/studypulse/ui/format';
+import { gradeInPct } from '@/lib/studypulse/points';
 
 /** `isFinal`: this period holds the subject's final grade (the 'period' rule). `hidden` keeps the panel mounted (its edit and collapse state live on) but out of layout, focus and the a11y tree. */
 export default function PeriodPanel({ period, proj, isFinal, hidden = false, children }: {
@@ -15,7 +16,7 @@ export default function PeriodPanel({ period, proj, isFinal, hidden = false, chi
         <h2 className="sp-period__title"><CalendarDays size={18} className="sp-tone-muted" aria-hidden />{period.name}</h2>
         {isFinal && <span className="sp-chip sp-chip--pink"><Flag size={12} aria-hidden /> Final grade</span>}
         <span className={`sp-chip sp-chip--${tone === 'none' ? 'neutral' : tone} sp-num`}>
-          {proj.current === null ? 'No grades yet' : `${f1(proj.current)} · ${Math.round(proj.coverage)}% of grade in`}
+          {proj.current === null ? 'No grades yet' : `${f1(proj.current)} · ${gradeInPct(proj)}% of grade in`}
         </span>
         <div className="sp-period__weights">
           <div className="sp-wbar" aria-hidden>
