@@ -207,6 +207,8 @@ export default function GradingSetup({ userSubjectId, config, existingPresets, e
           </div>
           <button type="button" className="sp-icon-btn sp-focus-ring" aria-label="Close grading setup" onClick={requestClose}><X size={18} aria-hidden /></button>
         </header>
+        {/* While a save is in flight the editor is inert (no edits, mode or step changes); the footer stays live. */}
+        <div className="sp-gs-lock" inert={saving}>
         <ModePicker mode={mode} onMode={switchMode} hasCurrent={!!current} hasOthers={others.length > 0} newKind={newKind} onNewKind={switchKind} />
         {showSteps && (
           <nav aria-label="Setup steps">
@@ -247,6 +249,7 @@ export default function GradingSetup({ userSubjectId, config, existingPresets, e
             <p className="sp-gs-note sp-gs-note--warn">Removed categories keep their entries until you choose where they go in Review.</p>
           )}
         </div>
+        </div>
         <footer className="sp-gs__foot">
           {confirming ? (
             <div className="sp-gs-confirm" role="alertdialog" aria-labelledby="gs-discard">
@@ -259,7 +262,7 @@ export default function GradingSetup({ userSubjectId, config, existingPresets, e
               <button ref={cancelRef} type="button" className="sp-btn sp-btn--quiet sp-focus-ring" onClick={requestClose} disabled={saving}>Cancel</button>
               <div className="sp-gs__foot-right">
                 {showSteps && step > 0 && (
-                  <button type="button" className="sp-btn sp-btn--ghost sp-focus-ring" onClick={() => { if (step === 1) pendingFocus.current = 'next'; goStep(step - 1); }}><ArrowLeft size={15} aria-hidden /> Back</button>
+                  <button type="button" className="sp-btn sp-btn--ghost sp-focus-ring" onClick={() => { if (step === 1) pendingFocus.current = 'next'; goStep(step - 1); }} disabled={saving}><ArrowLeft size={15} aria-hidden /> Back</button>
                 )}
                 {showSteps && step < 4 ? (
                   <button ref={nextRef} type="button" className="sp-btn sp-btn--primary sp-focus-ring" onClick={() => goStep(step + 1)}>Next <ArrowRight size={15} aria-hidden /></button>

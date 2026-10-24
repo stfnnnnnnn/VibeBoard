@@ -158,7 +158,7 @@ export default function GradeSummary({ periods, projections, finalMode, finalPer
                   const realAvg = projections[pi].categories.find(x => x.key === c.key)?.avg ?? null;
                   const e = edits[c.key];
                   return (
-                    <div key={c.key} className="sp-sum__row">
+                    <div key={c.key} className={`sp-sum__row${whatIf ? ' sp-sum__row--wif' : ''}`}>
                       <span className="sp-sum__name"><b>{c.name}</b><CategoryInfo cat={c} /><small>{fmtWeight(c.weight)}%</small></span>
                       {whatIf ? (
                         <span className="sp-sum__val">

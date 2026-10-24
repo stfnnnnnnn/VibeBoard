@@ -33,10 +33,25 @@ export default async function SubjectCardPage(
     canvasReady = false;
   }
 
+  // Every entry query below LEFT JOINs the Workboard overlay for its note (spec 2026-10-24 §6.1, Ruling R2). The join is
+  // scoped to this user, so another user's overlay row can never surface here. Notes are optional too: if the overlay
+  // DDL fails, the join is swapped for an empty one (same `?` count, so params line up) and every note reads null.
+  let notesReady = true;
+  try {
+    await ensureEntryNoteSchema();
+  } catch (err) {
+    console.error('ensureEntryNoteSchema() failed; rendering without entry notes:', err);
+    notesReady = false;
+  }
+  const noteJoin = (sql: string) => notesReady ? sql
+    : sql.replace(/LEFT JOIN workboard_entry_meta m ON [^\n]*? AND m\.user_id = \?/g, 'LEFT JOIN (SELECT NULL AS note, ? AS uid) m ON FALSE');
+
   /** Runs the canvas_entry_links-joined query, falling back to the plain one on any failure. */
   async function selectEntries(
     sqlWithCanvas: string, sqlWithoutCanvas: string, params: (string | number)[],
   ): Promise<RowDataPacket[]> {
+    sqlWithCanvas = noteJoin(sqlWithCanvas);
+    sqlWithoutCanvas = noteJoin(sqlWithoutCanvas);
     if (canvasReady) {
       try {
         const [rows] = await pool.execute<RowDataPacket[]>(sqlWithCanvas, params);
@@ -53,10 +68,6 @@ export default async function SubjectCardPage(
   const { id } = await props.params;
   const userId        = parseInt(session.user.id);
   const userSubjectId = parseInt(id);
-
-  // Every entry query below LEFT JOINs the Workboard overlay for its note (spec 2026-10-24 §6.1, Ruling R2). The join is
-  // scoped to this user, so another user's overlay row can never surface here.
-  await ensureEntryNoteSchema();
 
   await ensureSubjectSection();
   const [subjects] = await pool.execute<RowDataPacket[]>(`

@@ -90,7 +90,7 @@ export interface GradingPeriod   { period_id: number; name: string; categories: 
  *
  * `mode` is the whole point: a legacy subject is graded as Activity/Quiz/Exam, a custom one
  * as a category inside a grading period, and the create route 400s if the body describes the
- * wrong one. It is derived exactly as `CanvasAnnouncementBank` derives it — a *real* preset
+ * wrong one. It is derived exactly as `GET /api/canvas/announcements` derives `subject_mode` — a *real* preset
  * means custom — which is also how the route's own `getSubjectMode` decides (it JOINs
  * `grading_presets`, so a `subject_grading` row pointing at a missing preset is legacy on
  * both sides). Deriving it from `config !== null` instead would disagree with the server on

@@ -15,8 +15,13 @@ export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  // Guarantees canvas_announcement_bank.seen_at exists (returned through bank.*).
-  await ensureGradingV2Schema();
+  // Guarantees canvas_announcement_bank.seen_at exists (returned through bank.*). If the DDL fails the list still loads;
+  // rows just come back without seen_at, so every one reads as unread.
+  try {
+    await ensureGradingV2Schema();
+  } catch (err) {
+    console.error('Canvas announcements: ensureGradingV2Schema failed; listing without seen_at:', err);
+  }
 
   const userId = parseInt(session.user.id);
   const status = req.nextUrl.searchParams.get('status') ?? 'pending';

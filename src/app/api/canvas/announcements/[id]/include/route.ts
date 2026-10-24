@@ -292,8 +292,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       conn.release();
     }
   } catch (err) {
+    // Logged in full, but the client only gets a generic line: raw DB error text leaks schema details.
     console.error('Canvas announcement include failed:', err);
-    const message = err instanceof Error ? err.message : String(err);
-    return Response.json({ error: message }, { status: 500 });
+    return Response.json({ error: 'Could not convert this announcement. Try again.' }, { status: 500 });
   }
 }

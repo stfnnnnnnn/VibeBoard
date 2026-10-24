@@ -231,20 +231,23 @@ export default function ActivityBank({ subject, subjects, toast, onCountsChange 
     mark(setBusy, addable.map(x => x.id), true);
     const done: number[] = [];
     let failed = 0;
-    for (const item of addable) {
-      const t = suggestedTarget(item.suggestion)!;
-      setError(item.id, null);
-      try {
-        const res = await post(`/api/canvas/bank/${item.id}/include`, includeBody(t));
-        if (res.ok) done.push(item.id);
-        else { failed++; setError(item.id, await errorOf(res, 'Couldn’t add this item. Try again.')); }
-      } catch {
-        failed++; setError(item.id, 'Couldn’t reach the server. Check your connection and try again.');
-      } finally {
-        mark(setBusy, [item.id], false);
+    try {
+      for (const item of addable) {
+        const t = suggestedTarget(item.suggestion)!;
+        setError(item.id, null);
+        try {
+          const res = await post(`/api/canvas/bank/${item.id}/include`, includeBody(t));
+          if (res.ok) done.push(item.id);
+          else { failed++; setError(item.id, await errorOf(res, 'Couldn’t add this item. Try again.')); }
+        } catch {
+          failed++; setError(item.id, 'Couldn’t reach the server. Check your connection and try again.');
+        } finally {
+          mark(setBusy, [item.id], false);
+        }
       }
+    } finally {
+      setBulkBusy(false); // never leave the bulk bar locked, whatever the loop does
     }
-    setBulkBusy(false);
     leave(done, 'pending');
     if (done.length) changed();
     const tail = [
@@ -261,18 +264,21 @@ export default function ActivityBank({ subject, subjects, toast, onCountsChange 
     setBulkBusy(true);
     mark(setBusy, ids, true); // queued rows are locked for the whole run, as in bulkAdd
     const done: number[] = [];
-    for (const id of ids) {
-      setError(id, null);
-      try {
-        const res = await post(`/api/canvas/bank/${id}/ignore`);
-        if (res.ok) done.push(id); else setError(id, await errorOf(res, 'Couldn’t ignore this item. Try again.'));
-      } catch {
-        setError(id, 'Couldn’t reach the server. Check your connection and try again.');
-      } finally {
-        mark(setBusy, [id], false);
+    try {
+      for (const id of ids) {
+        setError(id, null);
+        try {
+          const res = await post(`/api/canvas/bank/${id}/ignore`);
+          if (res.ok) done.push(id); else setError(id, await errorOf(res, 'Couldn’t ignore this item. Try again.'));
+        } catch {
+          setError(id, 'Couldn’t reach the server. Check your connection and try again.');
+        } finally {
+          mark(setBusy, [id], false);
+        }
       }
+    } finally {
+      setBulkBusy(false);
     }
-    setBulkBusy(false);
     leave(done, 'pending', 'ignored');
     if (done.length) {
       changed();

@@ -7,9 +7,9 @@ import { buildBookmarkletHref } from '@/lib/canvas/bookmarklet';
 const PAIR_POLL_MS = 3000;
 
 /**
- * The bookmarklet pairing flow, ported unchanged from the old CanvasConnectPanel: POST /api/canvas/pair/start makes a
- * code, then the code's status is polled every 3 s until it is used (reload) or expires. Shared by the not-connected
- * panel and the profile card's Reconnect.
+ * The bookmarklet pairing flow, ported from the old CanvasConnectPanel: POST /api/canvas/pair/start makes a code, then
+ * the code's status is polled every 3 s until it is used (reload) or expires (pairing cleared, error set). Shared by
+ * the not-connected panel and the profile card's Reconnect.
  */
 export function usePairing() {
   const [busy, setBusy]       = useState(false);
@@ -25,6 +25,7 @@ export function usePairing() {
   useEffect(() => stopPolling, []);
 
   const startPairing = async () => {
+    stopPolling();
     setBusy(true);
     setError(null);
     try {
@@ -35,7 +36,13 @@ export function usePairing() {
       setPairing({ code: data.code, expiresAt });
 
       pollRef.current = setInterval(async () => {
-        if (Date.now() > expiresAt) { stopPolling(); return; }
+        // Expired: drop the dead button (and its "Waiting…" spinner) so the caller shows its start button again.
+        if (Date.now() > expiresAt) {
+          stopPolling();
+          setPairing(null);
+          setError('That connect button expired. Start again to get a new one.');
+          return;
+        }
         try {
           const statusRes  = await fetch(`/api/canvas/pair/start?code=${encodeURIComponent(data.code)}`);
           const statusData = await statusRes.json();

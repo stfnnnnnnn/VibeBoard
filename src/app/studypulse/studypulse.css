@@ -241,6 +241,8 @@
 .sp-add { display: inline-flex; align-items: center; gap: 5px; font: 700 12.5px var(--sp-font-ui); color: var(--sp-pink-ink); background: var(--sp-pink-bg); border: 0; border-radius: var(--sp-r-md); padding: 6px 11px; min-height: 32px; cursor: pointer; transition: transform var(--sp-dur-fast) var(--sp-ease); }
 .sp-add:active:not(:disabled) { transform: scale(0.97); }
 .sp-add:disabled { opacity: 0.7; cursor: default; }
+/* Long category or period names wrap these labels; the icon keeps its size instead of shrinking with the text. */
+.sp-add svg, .sp-ptab svg { flex-shrink: 0; }
 .sp-table-wrap { overflow-x: auto; }
 /* On a phone the 640px table scrolls sideways and the Grade column starts off-screen (T12). A scroll-linked
    fade on the right edge says "there is more"; it lifts as you reach the end, and stays off when nothing overflows
@@ -469,6 +471,10 @@
 .sp-sum__in { display: inline-flex; align-items: center; gap: 4px; color: var(--sp-text-muted); font-weight: 700; }
 .sp-sum__row .sp-sum__raw { width: 70px; padding-left: 8px; padding-right: 8px; }
 .sp-sum__val small { margin-top: 2px; }
+/* What-if inputs need ~160px; in a narrow column (5 periods) the value block wraps under the name instead of spilling out. */
+.sp-sum__row--wif { flex-wrap: wrap; row-gap: 4px; }
+.sp-sum__row--wif .sp-sum__name { flex: 1 1 90px; }
+.sp-sum__row--wif .sp-sum__val { margin-left: auto; }
 /* The "x of y pts earned" ⓘ hangs off the number's right edge, so the number itself stays centred. */
 .sp-sum__bignum { position: relative; display: inline-block; }
 .sp-sum__bigtip { position: absolute; left: 100%; top: 50%; transform: translateY(-50%); margin-left: 2px; display: flex; line-height: 1; }
@@ -671,6 +677,7 @@
 .sp-gs-step[aria-current='step'] { background: var(--sp-ink); color: var(--sp-on-ink); }
 .sp-gs-step__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--sp-danger-fill); box-shadow: 0 0 0 2px var(--sp-surface); }
 @media (hover: hover) and (pointer: fine) { .sp-gs-step:not([aria-current='step']):hover { background: var(--sp-surface); color: var(--sp-text); } }
+.sp-gs-lock { display: contents; }
 .sp-gs__body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 24px 24px; }
 .sp-gs__foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 24px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--sp-hair); background: rgba(255, 255, 255, 0.72); }
 .sp-gs__foot-right { margin-left: auto; display: flex; gap: 8px; }
@@ -759,6 +766,8 @@
   .sp-gs-flag, .sp-gs-step { min-height: 36px; }
   .sp-gs-wbox { height: 40px; }
 }
+/* The weight boxes are bare 13px inputs; iOS would zoom into them on focus (same rule as .sp-input above). */
+@media (hover: none) { .sp-gs-wbox input { font-size: 16px; } }
 @media (prefers-reduced-motion: reduce) {
   .sp-gs, .sp-gs-scrim, .sp-gs-confirm { animation: sp-gs-fade 1ms linear backwards; }
   .sp-gs-step:active, .sp-gs-flag:active { transform: none; }
