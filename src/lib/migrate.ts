@@ -933,6 +933,8 @@ export async function ensureProjectionPrefsSchema(): Promise<void> {
 export async function ensureAuthV2Schema(): Promise<void> {
   if (_ranAuthV2) return;
   // MODIFY is safe to repeat: it only relaxes NOT NULL and widens the year enum.
+  // Keep in sync with database/schema.sql; widening year_level later must update this MODIFY too
+  // (it runs on every cold start and would otherwise narrow the enum back).
   await pool.query(`ALTER TABLE user_login
       MODIFY middle_name VARCHAR(100) NULL,
       MODIFY year_level  ENUM('1st Year','2nd Year','3rd Year','4th Year','5th Year') NULL,
@@ -947,10 +949,13 @@ export async function ensureAuthV2Schema(): Promise<void> {
     }
   };
   await add(`ALTER TABLE user_login ADD COLUMN google_sub VARCHAR(255) NULL`);
-  if (await add(`ALTER TABLE user_login ADD COLUMN email_verified_at DATETIME NULL`)) {
-    // Accounts created before verification existed are treated as verified, so linking Google
-    // never wipes their passwords (spec §3.5). Runs only in the call that adds the column.
-    await pool.query(`UPDATE user_login SET email_verified_at = NOW() WHERE email_verified_at IS NULL`);
+  // Accounts created before verification existed are treated as verified, so linking Google never
+  // wipes their passwords (spec §3.5). The ADD itself stamps every existing row through the temporary
+  // default, so there is no window where a new signup could be swept up by a separate backfill UPDATE.
+  // The default is then removed (createUser always writes email_verified_at explicitly). MODIFY, not
+  // ALTER COLUMN ... DROP DEFAULT: MariaDB 10.4 silently keeps a CURRENT_TIMESTAMP default on DROP DEFAULT.
+  if (await add(`ALTER TABLE user_login ADD COLUMN email_verified_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP`)) {
+    await pool.query(`ALTER TABLE user_login MODIFY email_verified_at DATETIME NULL DEFAULT NULL`);
   }
   await add(`ALTER TABLE user_login ADD COLUMN session_version INT NOT NULL DEFAULT 0`);
   await add(`ALTER TABLE user_login ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`);

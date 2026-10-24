@@ -8,13 +8,16 @@ ALTER TABLE user_login
   MODIFY program     INT(11) NULL,
   MODIFY password    VARCHAR(255) NULL,
   ADD COLUMN google_sub        VARCHAR(255) NULL,
-  ADD COLUMN email_verified_at DATETIME NULL,
+  -- Existing accounts predate verification; the temporary default stamps them as verified in this
+  -- same statement (accepted risk, spec §3.5). The default is removed right after.
+  ADD COLUMN email_verified_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
   ADD COLUMN session_version   INT NOT NULL DEFAULT 0,
   ADD COLUMN created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   ADD UNIQUE KEY google_sub_unique (google_sub);
 
--- Existing accounts predate verification; treat them as verified (accepted risk, spec §3.5).
-UPDATE user_login SET email_verified_at = NOW() WHERE email_verified_at IS NULL;
+-- New accounts get NULL unless verified (createUser writes the column explicitly). MODIFY rather than
+-- ALTER COLUMN ... DROP DEFAULT, which MariaDB 10.4 silently ignores for a CURRENT_TIMESTAMP default.
+ALTER TABLE user_login MODIFY email_verified_at DATETIME NULL DEFAULT NULL;
 
 CREATE TABLE IF NOT EXISTS auth_tokens (
   token_id   INT AUTO_INCREMENT PRIMARY KEY,

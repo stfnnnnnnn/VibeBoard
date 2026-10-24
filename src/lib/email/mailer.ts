@@ -17,7 +17,8 @@ export async function sendMail(m: MailContent & { to: string }): Promise<boolean
   const t = getTransport();
   if (!t) {
     if (process.env.NODE_ENV === 'production') {
-      console.error(`[mail] GMAIL_USER / GMAIL_APP_PASSWORD not set; "${m.subject}" to ${m.to} was not sent`);
+      // Recipient redacted to its domain: production logs must not collect addresses.
+      console.error(`[mail] GMAIL_USER / GMAIL_APP_PASSWORD not set; "${m.subject}" to *@${m.to.split('@').pop()} was not sent`);
     } else {
       console.log(`\n[mail:dev] to=${m.to} subject="${m.subject}"\n${m.text}\n`);
     }

@@ -104,6 +104,9 @@ Fill in the database credentials and an `AUTH_SECRET` (`npx auth secret` generat
 | `DB_HOST`, `DB_USER`, `DB_PASS`, `DB_NAME` | Everything |
 | `AUTH_SECRET`, `AUTH_URL` | Sign-in sessions |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | "Sign in with Google" |
+| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Google One Tap and the personalized Google button (same value as `GOOGLE_CLIENT_ID`). `NEXT_PUBLIC_*` values are inlined at build time, so set it before `npm run build` |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Sending password-reset and email-confirmation mail (a Gmail App Password, not the account password). Unset in dev: mail is printed to the server console |
+| `EMAIL_FROM_NAME` | Optional sender display name (default `VibeBoard`) |
 | `WEATHER_API_KEY`, `QUOTES_API_KEY` | Dashboard weather and quote widgets |
 | `CANVAS_TOKEN_ENC_KEY` | Canvas integration (encrypting stored tokens) |
 | `CRON_SECRET` | Scheduled Canvas sync |

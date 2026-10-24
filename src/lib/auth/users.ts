@@ -1,4 +1,6 @@
-/* user_login access for auth (spec §3.4). Server-only. Every call ensures the auth v2 schema first. */
+/* user_login access for auth (spec §3.4). Server-only. The find* helpers, createUser and getSessionVersion
+   ensure the auth v2 schema first; linkGoogle, recordFailedLogin and clearFailedLogins don't, because they
+   only ever run on a user a find* call just returned, so the schema is already in place. */
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import pool from '@/lib/db';
 import { ensureAuthV2Schema } from '@/lib/migrate';
