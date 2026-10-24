@@ -5,7 +5,7 @@
 **Builds on:** `2026-10-22-studypulse-revamp-design.md`, which defines the StudyPulse tokens (`studypulse.css`), the projection engine, and the subject page structure. Its constraints still apply: the style gate, tokens only, ≥4.5:1 contrast, the motion rules and reduced motion.
 **Mockups:** these are the source of truth, in `.superpowers/brainstorm/1679-1792810448/content/`:
 - `grading-simulation-v8.html`: interactive, real math. Covers the setup wizard, the subject page, the grade summary, the entry tables and the linked lab. Use its two samples: "Midterm + Finals" and "3 shifts".
-- `canvas-hub-final.html`: interactive. Covers the Overview, Activity Bank and Announcements tabs. It is the v1 layout with only the full-width tab bar changed; v2–v4 and `canvas-overview-variants.html` are rejected explorations.
+- `canvas-hub-v1b.html`: interactive. Covers the Overview, Activity Bank and Announcements tabs. It is the first mockup (v1) with one change: a single header row `[←] Canvas [Overview | Activity Bank | Announcements] … [Subject ▾]`. Every other canvas-hub file is a rejected exploration.
 
 ## 1. Why
 
@@ -55,8 +55,8 @@ A code audit then found the following.
 | G10 | What-if takes input as **Percent** or **Raw score** (score / items). Nothing is saved. |
 | G11 | Explanatory notes become **ⓘ info buttons**, not extra lines. This covers carried entries, reused scores, points earned and the lab combination. |
 | G12 | The Canvas badge sits **inline** with the entry name. |
-| C1 | Canvas becomes a **hub with tabs**: Overview · Activity Bank · Announcements. The tab bar spans the full width. The subject filter lives in each tab's toolbar. A subject page's Canvas menu opens the hub pre-filtered to that subject. |
-| C2 | Overview keeps the **v1 two-column layout**. Left: a vertical profile card (avatar, name, Connected chip; rows for last sync, auto-sync, access token and courses; a full-width Sync now; "Connection · Disconnect Canvas"). Right: **New Canvas courses** (Link to subject… · or · Create subject · Ignore) and the **Mapped** list. The header keeps "Connected as … · synced …" and Sync now. The tab bar is the only change from v1. |
+| C1 | Canvas becomes a **hub with three views** (Overview · Activity Bank · Announcements), shown as a segmented tab control **in the header row, right beside the title**. The header is `[← back icon] Canvas [views] … [Subject filter]`. The back control is an icon-only button labelled "Back to StudyPulse". The subject filter appears at the right end of the header row on Activity Bank and Announcements only. A subject page's Canvas menu opens the hub pre-filtered to that subject. |
+| C2 | Overview keeps the **v1 two-column layout**. Left: a vertical profile card (avatar, name, Connected chip; rows for last sync, auto-sync, access token and courses; a full-width Sync now; "Connection · Disconnect Canvas"). Right: **New Canvas courses** (Link to subject… · or · Create subject · Ignore) and the **Mapped** list. Sync appears **only** in the profile card: the header has no sync line and no Sync now button (they were redundant). The header row is the only change from v1. |
 | C3 | Activity Bank: a **smart suggestion** ("Goes to Finals › Quizzes · 18 / 20 → 90.0", with an ⓘ explaining why), one-click **Add**, **Change…** picker, **bulk** add/ignore, and an empty state. |
 | C4 | Announcements: an **inbox list plus reading pane**. "Turn this into" offers Task · Event · Reminder · Schedule change as multi-select tabs, with suggested ones marked and pre-filled. **Convert (n)**. On a phone the list and detail stack. |
 | C5 | Recoverability: **Ignored** (bank) and **Dismissed** (announcements) filters with **Restore**, plus an **Undo** toast after each ignore, add and dismiss (Convert's toast links to Workboard instead, see §6). |
@@ -207,11 +207,11 @@ New pure module `src/lib/studypulse/presetDiff.ts`: `diffPreset(oldPreset, newDr
 
 **Route:** `/studypulse/canvas?tab=overview|bank|announcements&subject=<id>`.
 - The default tab is `bank` when anything is pending, otherwise `overview`.
-- `CanvasClientShell` is rebuilt on the `sp-` tokens, with the header, a full-width tab bar (icons and counts), and the tab panels.
-- The subject filter is a select inside each tab's toolbar.
+- `CanvasClientShell` is rebuilt on the `sp-` tokens, with the single header row (back icon button, "Canvas", the views tablist with counts, and the subject select on Activity Bank and Announcements) and the tab panels.
+- On a phone the views wrap to a full-width row under the title, and the filter to its own row below that.
 - Arriving with `subject=` shows a "Showing <code> only · Show all subjects" bar.
 - **Components** (under `src/components/studypulse/canvas/`): `CanvasOverview`, `ProfileStrip`, `CourseMapping`, `ActivityBank`, `BankRow`, `Announcements`, `AnnouncementDetail`, `ConvertPanel`, `UndoToast`. The old `Canvas*.tsx` files are deleted.
-- **Overview (C2):** the layout in `canvas-hub-final.html`.
+- **Overview (C2):** the layout in `canvas-hub-v1b.html`.
   - A two-column grid: a 360px profile card on the left, the courses panel on the right. It stacks on a phone.
   - The card: avatar initials, name, a Connected chip; a key–value list (Last sync with its status, Auto-sync, Access token expiry, Courses mapped · new); a full-width Sync now; an eyebrow "Connection" with a Disconnect Canvas link (inline confirm).
   - The courses panel: New Canvas courses, one row each, with "Link to subject…", "or", "Create subject" and "Ignore". Then a Mapped list with per-subject pending and to-review counts.
