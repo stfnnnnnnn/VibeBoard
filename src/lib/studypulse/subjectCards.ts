@@ -9,15 +9,16 @@ import { combinePeriods, overallOfCurrents, periodNamesMatch } from './labLink';
 import { EMPTY_PREFS } from './prefs';
 import type { EntryRow, GradingConfig, SubjectCardData } from './types';
 
-/** The subject's custom grading config, or null (no config, or grading tables not created yet). */
-export async function loadGradingConfig(userSubjectId: number): Promise<GradingConfig | null> {
+/** The subject's custom grading config, or null (no config, a preset `userId` does not own, or grading tables not
+    created yet). Callers verify the subject belongs to `userId` first. */
+export async function loadGradingConfig(userSubjectId: number, userId: number): Promise<GradingConfig | null> {
   try {
     await ensureGradingV2Schema();
     const [sgRows] = await pool.execute<RowDataPacket[]>('SELECT * FROM subject_grading WHERE user_subject_id=?', [userSubjectId]);
     if (!sgRows.length) return null;
     const sg = sgRows[0];
     const presetId = sg.preset_id as number;
-    const [presets] = await pool.execute<RowDataPacket[]>('SELECT * FROM grading_presets WHERE preset_id=?', [presetId]);
+    const [presets] = await pool.execute<RowDataPacket[]>('SELECT * FROM grading_presets WHERE preset_id=? AND user_id=?', [presetId, userId]);
     if (!presets.length) return null;
     const [periods] = await pool.execute<RowDataPacket[]>('SELECT * FROM grading_periods WHERE preset_id=? ORDER BY sort_order', [presetId]);
     const [cats] = await pool.execute<RowDataPacket[]>(
@@ -58,8 +59,8 @@ export interface SubjectGradeModel { periods: PeriodInput[]; config: GradingConf
 
 /** Period inputs (raw grades, default prefs) plus the custom grading config for one subject; null when the
     subject has no custom config (legacy grading). No ownership check: callers verify ownership first. */
-export async function loadSubjectGradeModel(userSubjectId: number): Promise<SubjectGradeModel | null> {
-  const config = await loadGradingConfig(userSubjectId);
+export async function loadSubjectGradeModel(userSubjectId: number, userId: number): Promise<SubjectGradeModel | null> {
+  const config = await loadGradingConfig(userSubjectId, userId);
   if (!config) return null;
   const [rows] = await pool.execute<RowDataPacket[]>(
     'SELECT cat_id, name, score, items, grade FROM grade_entries WHERE user_subject_id=?', [userSubjectId],
@@ -73,14 +74,14 @@ type GradeInfo = CardGrade & { model: SubjectGradeModel | null };
 
 /** Overall current grade for a card. Never throws: a failed query shows the card ungraded instead of failing
     the whole list (this runs per subject inside Promise.all, and Workboard's dialog uses the same API). */
-export async function currentGradeFor(userSubjectId: number): Promise<CardGrade> {
-  const { current_grade, grade_scale } = await gradeInfoFor(userSubjectId);
+export async function currentGradeFor(userSubjectId: number, userId: number): Promise<CardGrade> {
+  const { current_grade, grade_scale } = await gradeInfoFor(userSubjectId, userId);
   return { current_grade, grade_scale };
 }
 
-async function gradeInfoFor(userSubjectId: number): Promise<GradeInfo> {
+async function gradeInfoFor(userSubjectId: number, userId: number): Promise<GradeInfo> {
   try {
-    return await computeGradeInfo(userSubjectId);
+    return await computeGradeInfo(userSubjectId, userId);
   } catch (err) {
     console.error(`[studypulse] current grade failed for user_subject_id=${userSubjectId}:`, err);
     return { current_grade: null, grade_scale: null, model: null };
@@ -88,8 +89,8 @@ async function gradeInfoFor(userSubjectId: number): Promise<GradeInfo> {
 }
 
 /** Raw grades only: the transmutation table is client-loaded. */
-async function computeGradeInfo(userSubjectId: number): Promise<GradeInfo> {
-  const model = await loadSubjectGradeModel(userSubjectId);
+async function computeGradeInfo(userSubjectId: number, userId: number): Promise<GradeInfo> {
+  const model = await loadSubjectGradeModel(userSubjectId, userId);
   if (model) {
     const { final_mode, final_period_id } = model.config.preset;
     return {
@@ -174,7 +175,7 @@ export async function listSubjectCards(userId: number): Promise<SubjectCardData[
       completed_tasks: completed,
       total_tasks: total,
       progress_percent: total > 0 ? Math.round((completed / total) * 100) : 0,
-      ...(await gradeInfoFor(id)),
+      ...(await gradeInfoFor(id, userId)),
       lab_tag: null as SubjectCardData['lab_tag'],
     };
   }));

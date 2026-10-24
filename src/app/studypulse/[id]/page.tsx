@@ -84,7 +84,7 @@ export default async function SubjectCardPage(
   }
 
   /* ── Custom grading config (shared loader) + its grade_entries ── */
-  const gradingConfig: GradingConfig | null = await loadGradingConfig(userSubjectId);
+  const gradingConfig: GradingConfig | null = await loadGradingConfig(userSubjectId, userId);
   const initialGradeEntries: Record<number, EntryRow[]> = {};
   if (gradingConfig) {
     try {

@@ -4,6 +4,7 @@ import pool from '@/lib/db';
 import { ensureGradingV2Schema } from '@/lib/migrate';
 import type { RowDataPacket } from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
+import { editPresetTx } from '@/lib/studypulse/presetWrites';
 
 /* GET /api/studypulse/grading/[id] — full preset with periods + categories */
 export async function GET(
@@ -46,12 +47,40 @@ export async function GET(
   return Response.json({ preset: { ...presets[0], periods: periodsWithCats } });
 }
 
-/* PUT /api/studypulse/grading/[id] — stubbed until Task 7's editor replaces it.
-   The old handler deleted periods and categories before checking ownership; nothing in the UI calls it. */
-export async function PUT() {
+/* PUT /api/studypulse/grading/[id] — edit a grading system without losing entries (spec §3.6).
+   Body: { name, grade_scale, final_mode, final_period_index, periods: DraftPeriod[], moves, scope: 'all' | 'copy',
+   user_subject_id }. One transaction; the preset row is locked and ownership-checked before anything else.
+   'all' edits in place (ids kept); 'copy' clones the draft for user_subject_id only.
+   The in-transaction body (ownership, validation, SQL) is editPresetTx in lib/studypulse/presetWrites. */
+export async function PUT(
+  req: NextRequest,
+  props: { params: Promise<{ id: string }> }
+) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-  return Response.json({ error: 'Use the new editor' }, { status: 501 });
+  await ensureGradingV2Schema();
+  const userId   = parseInt(session.user.id);
+  const { id }   = await props.params;
+  const presetId = parseInt(id);
+  if (!Number.isInteger(presetId)) return Response.json({ error: 'Not found' }, { status: 404 });
+
+  const body = await req.json().catch(() => null) as Record<string, unknown> | null;
+  if (!body || typeof body !== 'object') return Response.json({ error: 'Invalid request' }, { status: 400 });
+
+  const conn: PoolConnection = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const result = await editPresetTx(conn, userId, presetId, body);
+    if (result.status === 200) await conn.commit();
+    else await conn.rollback();
+    return Response.json(result.body, { status: result.status });
+  } catch (err) {
+    await conn.rollback();
+    const msg = err instanceof Error ? err.message : String(err);
+    return Response.json({ error: msg }, { status: 500 });
+  } finally {
+    conn.release();
+  }
 }
 
 /* DELETE /api/studypulse/grading/[id]
@@ -82,7 +111,8 @@ export async function DELETE(
     }
 
     const [usage] = await conn.execute<RowDataPacket[]>(
-      'SELECT COUNT(*) AS n FROM subject_grading WHERE preset_id=?', [presetId]
+      // Locking read: no subject can be pointed at this preset between the count and the delete.
+      'SELECT COUNT(*) AS n FROM subject_grading WHERE preset_id=? FOR UPDATE', [presetId]
     );
     const count = Number(usage[0]?.n ?? 0);
     if (count > 0) {

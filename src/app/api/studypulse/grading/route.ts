@@ -4,6 +4,7 @@ import pool from '@/lib/db';
 import { ensureGradeScale, ensureFinalGrade, ensureCategoryLinking, ensureGradingV2Schema } from '@/lib/migrate';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
+import { resolveFinal } from '@/lib/studypulse/presetDiff';
 
 /* GET  /api/studypulse/grading  — list all presets for user */
 export async function GET() {
@@ -40,6 +41,10 @@ export async function POST(req: NextRequest) {
   if (!name || !Array.isArray(periods) || periods.length === 0) {
     return Response.json({ error: 'name and periods are required' }, { status: 400 });
   }
+  // final_mode is 'period' | 'average' (legacy 'collective' maps to 'average' so the old wizard keeps working);
+  // final_period_index picks the period for either mode. Checked up front with placeholder ids.
+  const finalCheck = resolveFinal(final_mode ?? null, null, final_period_index, null, periods.map((_: unknown, i: number) => i + 1));
+  if ('error' in finalCheck) return Response.json({ error: finalCheck.error }, { status: 400 });
 
   await ensureGradeScale();
   await ensureFinalGrade();
@@ -61,7 +66,7 @@ export async function POST(req: NextRequest) {
     );
     const presetId = result.insertId;
 
-    let finalPeriodId: number | null = null;
+    const periodIds: number[] = [];
     for (let pi = 0; pi < periods.length; pi++) {
       const period = periods[pi];
       const [pr] = await conn.execute<ResultSetHeader>(
@@ -69,23 +74,24 @@ export async function POST(req: NextRequest) {
         [presetId, period.name, pi]
       );
       const periodId = pr.insertId;
-      if (pi === final_period_index) finalPeriodId = periodId;
+      periodIds.push(periodId);
 
       for (let ci = 0; ci < (period.categories ?? []).length; ci++) {
         const cat = period.categories[ci];
         await conn.execute(
-          `INSERT INTO grading_categories (period_id, name, weight, is_singleton, sort_order, link_group, carry_score)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO grading_categories (period_id, name, weight, is_singleton, sort_order, link_group, carry_score, include_earlier)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [periodId, cat.name, cat.weight, cat.is_singleton ? 1 : 0, ci,
-           cat.link_group ?? null, cat.carry_score === false ? 0 : 1]
+           cat.link_group ?? null, cat.carry_score === false ? 0 : 1, cat.include_earlier ? 1 : 0]
         );
       }
     }
 
-    if (finalPeriodId !== null && (final_mode === 'average' || final_mode === 'collective')) {
+    const fin = resolveFinal(final_mode ?? null, null, final_period_index, null, periodIds);
+    if (!('error' in fin) && fin.final_mode !== null) {
       await conn.execute(
         `UPDATE grading_presets SET final_period_id=?, final_mode=? WHERE preset_id=?`,
-        [finalPeriodId, final_mode, presetId]
+        [fin.final_period_id, fin.final_mode, presetId]
       );
     }
 

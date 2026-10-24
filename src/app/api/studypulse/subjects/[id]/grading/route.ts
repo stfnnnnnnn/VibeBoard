@@ -3,6 +3,8 @@ import { auth } from '@/auth';
 import pool from '@/lib/db';
 import { ensureGradingV2Schema } from '@/lib/migrate';
 import type { RowDataPacket } from 'mysql2';
+import type { PoolConnection } from 'mysql2/promise';
+import { setSubjectPresetTx } from '@/lib/studypulse/presetWrites';
 
 /* GET /api/studypulse/subjects/[id]/grading
    Returns subject grading config + full preset (periods + categories) if configured */
@@ -82,7 +84,9 @@ export async function GET(
 }
 
 /* POST /api/studypulse/subjects/[id]/grading
-   Upsert subject grading config (link to existing preset OR create inline) */
+   Upsert the subject's grading config. Body: { preset_id, has_lab, lec_weight, lab_weight, map? }. Switching a
+   subject that has entries to a different preset needs `map` (old cat_id -> new cat_id | 'delete'), else 400
+   { error: 'map-required', categories: [{ cat_id, name, entry_count }] }. SQL: setSubjectPresetTx. */
 export async function POST(
   req: NextRequest,
   props: { params: Promise<{ id: string }> }
@@ -100,25 +104,25 @@ export async function POST(
   );
   if (!owns.length) return Response.json({ error: 'Not found' }, { status: 404 });
 
-  const { preset_id, has_lab, lec_weight, lab_weight } = await req.json();
-
-  // The preset must belong to the caller too, or a subject could be pointed at someone else's preset.
+  const body = await req.json().catch(() => null) as Record<string, unknown> | null;
+  if (!body) return Response.json({ error: 'Invalid request' }, { status: 400 });
+  const { preset_id, has_lab, lec_weight, lab_weight, map } = body;
   const presetId = Number(preset_id);
   if (!Number.isInteger(presetId)) return Response.json({ error: 'Grading system not found' }, { status: 404 });
-  const [ownsPreset] = await pool.execute<RowDataPacket[]>(
-    'SELECT 1 FROM grading_presets WHERE preset_id=? AND user_id=?',
-    [presetId, userId]
-  );
-  if (!ownsPreset.length) return Response.json({ error: 'Grading system not found' }, { status: 404 });
 
-  await pool.execute(
-    `INSERT INTO subject_grading (user_subject_id, preset_id, has_lab, lec_weight, lab_weight)
-     VALUES (?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       preset_id=VALUES(preset_id), has_lab=VALUES(has_lab),
-       lec_weight=VALUES(lec_weight), lab_weight=VALUES(lab_weight)`,
-    [userSubjectId, presetId, has_lab ? 1 : 0, lec_weight ?? 100, lab_weight ?? 0]
-  );
-
-  return Response.json({ status: 'success' });
+  const conn: PoolConnection = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    // Preset ownership (locking read), the entry map and the upsert all run in this one transaction.
+    const result = await setSubjectPresetTx(conn, userId, userSubjectId, presetId, { has_lab, lec_weight, lab_weight, map });
+    if (result.status === 200) await conn.commit();
+    else await conn.rollback();
+    return Response.json(result.body, { status: result.status });
+  } catch (err) {
+    await conn.rollback();
+    const msg = err instanceof Error ? err.message : String(err);
+    return Response.json({ error: msg }, { status: 500 });
+  } finally {
+    conn.release();
+  }
 }

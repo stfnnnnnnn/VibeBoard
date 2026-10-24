@@ -97,7 +97,7 @@ export async function PUT(req: NextRequest, props: Ctx) {
     return Response.json({ error: 'One of these subjects is already linked to another subject' }, { status: 409 });
   }
 
-  const [lecConfig, labConfig] = await Promise.all([loadGradingConfig(lecId), loadGradingConfig(labId)]);
+  const [lecConfig, labConfig] = await Promise.all([loadGradingConfig(lecId, userId), loadGradingConfig(labId, userId)]);
   const lecture_periods = lecConfig?.preset.periods.map(p => p.name) ?? [];
   const lab_periods = labConfig?.preset.periods.map(p => p.name) ?? [];
   if (!lecConfig || !labConfig) {
