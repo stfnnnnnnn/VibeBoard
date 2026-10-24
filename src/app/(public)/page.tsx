@@ -1,4 +1,6 @@
 import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
+import { auth } from '@/auth';
 import LandingNav from '@/components/public/landing/LandingNav';
 import Hero from '@/components/public/landing/Hero';
 import ProblemCta from '@/components/public/landing/ProblemCta';
@@ -12,7 +14,9 @@ export const metadata: Metadata = {
   description: 'Grades, deadlines, money and habits on one calm board. Free for students.',
 };
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  // DB-backed check (session_version): the edge middleware can't see revocations.
+  if ((await auth())?.user) redirect('/dashboard');
   return (
     <div className="pub-root lp">
       <div className="lp-glow lp-glow--peach" aria-hidden="true" />

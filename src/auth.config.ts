@@ -1,7 +1,12 @@
 import type { NextAuthConfig } from 'next-auth';
 
-const PROTECTED  = ['/dashboard', '/studypulse', '/finance', '/habits', '/workboard'];
-const AUTH_PAGES = ['/', '/login', '/signup', '/signup/finish', '/forgot-password'];
+const PROTECTED = ['/dashboard', '/studypulse', '/finance', '/habits', '/workboard'];
+
+// The "signed-in users are sent to /dashboard" bounce for /, /login, /signup,
+// /signup/finish and /forgot-password lives in those pages (`await auth()`),
+// not here. This middleware is edge-safe and never re-checks session_version,
+// so for a revoked session it still sees a user while the pages' auth() sees
+// none: bouncing here would loop /dashboard -> /login -> /dashboard forever.
 
 export const authConfig: NextAuthConfig = {
   providers: [],
@@ -17,11 +22,6 @@ export const authConfig: NextAuthConfig = {
       // Redirect unauthenticated users away from protected pages
       if (PROTECTED.some((p) => path.startsWith(p)) && !isLoggedIn) {
         return false; // NextAuth redirects to pages.signIn
-      }
-
-      // Redirect authenticated users away from auth/landing pages
-      if (isLoggedIn && AUTH_PAGES.includes(path)) {
-        return Response.redirect(new URL('/dashboard', nextUrl));
       }
 
       return true;
