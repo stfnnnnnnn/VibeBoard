@@ -72,9 +72,10 @@ export default function GradeSummary({ periods, projections, finalMode, finalPer
           {transmutationOn && <span className="sp-chip sp-chip--blue">transmuted</span>}
           {whatIf && <span className="sp-chip sp-chip--pink">what if</span>}
         </h2>
-        {/* The what-if inputs live in the period columns, so the controls go with them (the final view has none). */}
+        {/* The what-if inputs live in the period columns, so starting one and Reset stay with them. The final view
+            still shows a running what-if (chip + values) and keeps Exit, so it can always be left from here. */}
         {whatIf && view === 'all' && <button type="button" className="sp-btn sp-btn--quiet sp-focus-ring" onClick={() => setWif({})}><RotateCcw size={14} /> Reset</button>}
-        {view === 'all' && (
+        {(view === 'all' || whatIf) && (
           <button type="button" aria-pressed={whatIf} className={`sp-btn ${whatIf ? 'sp-btn--dark' : 'sp-btn--ghost'} sp-focus-ring`} onClick={() => { setWhatIf(v => !v); setWif({}); }}>
             {whatIf ? 'Exit what-if' : 'What if?'}
           </button>

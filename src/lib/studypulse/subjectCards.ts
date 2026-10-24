@@ -55,7 +55,8 @@ const lite = (r: RowDataPacket): Lite => ({
 
 type CardGrade = Pick<SubjectCardData, 'current_grade' | 'grade_scale'>;
 
-export interface SubjectGradeModel { periods: PeriodInput[]; config: GradingConfig }
+/** `entries`: the lite rows by cat_id the periods were built from (raw), so a caller can rebuild them transmuted. */
+export interface SubjectGradeModel { periods: PeriodInput[]; config: GradingConfig; entries: Record<number, Lite[]> }
 
 /** Period inputs (raw grades, default prefs) plus the custom grading config for one subject; null when the
     subject has no custom config (legacy grading). No ownership check: callers verify ownership first. */
@@ -67,7 +68,7 @@ export async function loadSubjectGradeModel(userSubjectId: number, userId: numbe
   );
   const byCat: Record<number, Lite[]> = {};
   for (const r of rows) (byCat[r.cat_id as number] ??= []).push(lite(r));
-  return { periods: buildCustomPeriods(config.preset, byCat, EMPTY_PREFS, null), config };
+  return { periods: buildCustomPeriods(config.preset, byCat, EMPTY_PREFS, null), config, entries: byCat };
 }
 
 type GradeInfo = CardGrade & { model: SubjectGradeModel | null };

@@ -13,6 +13,8 @@ export interface LabSectionProps {
   lectureWeight: number;
   /** Combined units of the pair, when known (the GWA counts the pair as one grade). */
   units: number | null;
+  /** Both columns transmuted (Transmute is on). */
+  transmuted?: boolean;
   /** False when the two subjects' period names no longer line up: nothing is combined then. */
   matched: boolean;
   rows: Array<{ key: string; name: string; lecture: number | null; lab: number | null; combined: number | null }>;
@@ -20,7 +22,7 @@ export interface LabSectionProps {
 
 /** Linked lecture + lab (spec §3.5, mockup v8 "Linked lab"): per period, Lecture · Lab · Combined. The header tiles, the
     period tabs and the final view show the combined values; the summary and the entry tables stay this subject's own. */
-export default function LabSection({ role, partner, lectureWeight, units, matched, rows }: LabSectionProps) {
+export default function LabSection({ role, partner, lectureWeight, units, transmuted = false, matched, rows }: LabSectionProps) {
   const labWeight = 100 - lectureWeight;
   return (
     <section className="sp-panel sp-lab" aria-labelledby="sp-lab-title">
@@ -28,6 +30,7 @@ export default function LabSection({ role, partner, lectureWeight, units, matche
         <h2 id="sp-lab-title" className="sp-lab__title"><FlaskConical size={17} className="sp-tone-muted" aria-hidden /> {role === 'lecture' ? 'Linked lab' : 'Linked lecture'}</h2>
         {/* The "Linked lab: CODE (30%)" chip lives in the subject header (mockup v8); here the partner is named plainly. */}
         <Link href={`/studypulse/${partner.id}`} className="sp-lab__partner sp-focus-ring"><span className="sp-code-tag">{partner.code}</span> {partner.name}</Link>
+        {transmuted && <span className="sp-chip sp-chip--blue">both transmuted</span>}
         <span className="sp-lab__rule sp-num">
           Per period: Lecture × {lectureWeight}% + Lab × {labWeight}%
           <InfoTip label="How the lecture and lab combine">

@@ -150,6 +150,11 @@ export default async function SubjectCardPage(
           units: Number.isFinite(units) && units > 0 ? units : null,
           periodsMatch,
           partnerCurrents: partner ? partner.periods.map(p => projectPeriod(p).current) : [],
+          // With Transmute on, the client rebuilds the partner's currents transmuted from these (raw rows, by cat_id).
+          partnerPreset: partner ? { periods: partner.config.preset.periods } : null,
+          partnerEntries: partner
+            ? Object.fromEntries(Object.entries(partner.entries).map(([cat, rows]) => [cat, rows.map(r => ({ name: r.name, score: r.score, items: r.items, grade: r.grade }))]))
+            : {},
           lectureFinal,
         };
       }

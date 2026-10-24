@@ -18,16 +18,18 @@ import { loadTransmutationTable, type TransmutationTable } from '@/lib/transmuta
 import type { GradeScale } from '@/lib/gradeScale';
 import { buildCustomPeriods, buildLegacyPeriods, nounFor } from '@/lib/studypulse/periodModel';
 import { normalizeFinalMode, projectPeriod, type PeriodInput } from '@/lib/studypulse/projection';
-import { combinePeriods, overallOfCurrents } from '@/lib/studypulse/labLink';
+import { combinePeriods, overallOfCurrents, periodCurrents, type LinkEntry } from '@/lib/studypulse/labLink';
 import { categoryColor } from '@/lib/studypulse/ui/colors';
 
 /* ── Types ── */
 
-import type { EntryRow, FinalMode, GradingConfig } from '@/lib/studypulse/types';
+import type { EntryRow, FinalMode, GradingConfig, PresetLike } from '@/lib/studypulse/types';
 export type { EntryRow, GradingConfig, Urgency, EntryStatus } from '@/lib/studypulse/types';
 
 /** This subject's lecture/lab link, loaded by the page (spec §3.5). `partnerCurrents` are the partner's raw period
-    grades in period order; `lectureFinal` is the lecture's final rule, which a lab page follows so both pages agree. */
+    grades in period order; `partnerPreset` + `partnerEntries` let the client rebuild them transmuted when Transmute is
+    on, so the lecture and lab pages combine the same numbers. `lectureFinal` is the lecture's final rule, which a lab
+    page follows so both pages agree. */
 export interface LabLinkData {
   role: 'lecture' | 'lab';
   partner: { id: number; code: string; name: string };
@@ -35,6 +37,8 @@ export interface LabLinkData {
   units: number | null;
   periodsMatch: boolean;
   partnerCurrents: (number | null)[];
+  partnerPreset: Pick<PresetLike, 'periods'> | null;
+  partnerEntries: Record<number, LinkEntry[]>;
   lectureFinal: { mode: FinalMode | null; periodIndex: number | null } | null;
 }
 export type GradeMode   = 'finals' | 'midterm' | 'whatif';
@@ -277,11 +281,15 @@ function SubjectCardViewInner({
      period. The period panels, the summary's period columns and the entry tables stay this subject's own. Nothing is
      combined when the period names stopped matching. ── */
   const ownCurrents = projections.map(p => p.current);
-  const linked = config && labLink?.periodsMatch && labLink.partnerCurrents.length === ownCurrents.length ? labLink : null;
+  // Both sides on the same footing: transmuted together when Transmute is on, raw together otherwise.
+  const partnerCurrents = useMemo(() => (!labLink ? [] : projTable && labLink.partnerPreset
+    ? periodCurrents(labLink.partnerPreset, labLink.partnerEntries, projTable)
+    : labLink.partnerCurrents), [labLink, projTable]);
+  const linked = config && labLink?.periodsMatch && partnerCurrents.length === ownCurrents.length ? labLink : null;
   const combine = linked
     ? (own: (number | null)[]) => (linked.role === 'lecture'
-      ? combinePeriods(own, linked.partnerCurrents, linked.lectureWeight)
-      : combinePeriods(linked.partnerCurrents, own, linked.lectureWeight))
+      ? combinePeriods(own, partnerCurrents, linked.lectureWeight)
+      : combinePeriods(partnerCurrents, own, linked.lectureWeight))
     : null;
   const shown = combine ? combine(ownCurrents) : ownCurrents;
 
@@ -366,10 +374,10 @@ function SubjectCardViewInner({
               </PeriodPanel>
             ))}
             {labLink && (
-              <LabSection role={labLink.role} partner={labLink.partner} lectureWeight={labLink.lectureWeight} units={labLink.units}
+              <LabSection role={labLink.role} partner={labLink.partner} lectureWeight={labLink.lectureWeight} units={labLink.units} transmuted={!!projTable}
                 matched={!!linked}
                 rows={periods.map((p, i) => {
-                  const other = labLink.partnerCurrents[i] ?? null;
+                  const other = partnerCurrents[i] ?? null;
                   return {
                     key: p.key, name: p.name, combined: shown[i] ?? null,
                     lecture: labLink.role === 'lecture' ? ownCurrents[i] : other,

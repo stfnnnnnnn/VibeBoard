@@ -74,10 +74,11 @@ export default function InfoTip({ label, children, tone = 'violet' }: {
     };
   }, [open, measure]);
 
-  const toggle = () => setOpen(o => {
-    if (!o) bus.dispatchEvent(new CustomEvent(OPEN, { detail: id }));
-    return !o;
-  });
+  const toggle = () => {
+    const next = !open;
+    if (next) bus.dispatchEvent(new CustomEvent(OPEN, { detail: id })); // outside the updater: no side effects there
+    setOpen(next);
+  };
 
   return (
     <span className={`sp-info sp-info--${tone}`}>
