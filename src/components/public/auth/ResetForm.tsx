@@ -1,5 +1,5 @@
 'use client';
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
@@ -16,18 +16,19 @@ export default function ResetForm({ token, email }: { token: string; email: stri
   const [busy, setBusy] = useState(false);
   const [weak, setWeak] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
+  const pwRef = useRef<HTMLInputElement>(null);
   const err = weak ? 'Use at least 8 characters.' : touched ? passwordError(pw) : null;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setTouched(true);
-    if (passwordError(pw)) return;
+    if (passwordError(pw)) { pwRef.current?.focus(); return; }
     setBusy(true); setFormErr(null);
     try {
       const r = await signIn('password-reset', { token, password: pw, redirect: false });
       if (r?.ok && !r.error) { router.push('/dashboard'); router.refresh(); return; }
       if (r?.code === 'reset-invalid') setExpired(true);
-      else if (r?.code === 'weak') setWeak(true);
+      else if (r?.code === 'weak') { setWeak(true); pwRef.current?.focus(); }
       else setFormErr('Something went wrong. Please try again.');
     } catch {
       setFormErr('Something went wrong. Please try again.');
@@ -46,7 +47,7 @@ export default function ResetForm({ token, email }: { token: string; email: stri
         {/* Hidden username helps password managers save the new password against the right account. */}
         <input type="email" autoComplete="username" value={email} readOnly hidden />
         <PasswordField id="password" label="New password" value={pw} onChange={v => { setPw(v); setWeak(false); }} onBlur={() => setTouched(true)}
-          autoComplete="new-password" meter error={err} placeholder="At least 8 characters" />
+          autoComplete="new-password" meter error={err} inputRef={pwRef} placeholder="At least 8 characters" />
         <button type="submit" className="auth-btn" disabled={busy}>{busy ? 'Saving…' : 'Save and log in'}</button>
       </form>
     </>

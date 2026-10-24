@@ -3,7 +3,7 @@
 .pub-root {
   --pub-ink: #1f1b2b; --pub-mute: #6b6478; --pub-soft: #8f879c; --pub-field: #d9d3e2; --pub-field-bg: #fbfafc;
   --pub-line: rgba(31, 27, 43, .08);
-  --pub-pink: #d9628c; --pub-pink-soft: #fde3ec; --pub-blue: #3d8fbf; --pub-blue-soft: #dcf0fb;
+  --pub-pink: #d9628c; --pub-pink-ink: #ab4069; --pub-pink-soft: #fde3ec; --pub-blue: #3d8fbf; --pub-blue-soft: #dcf0fb;
   --pub-lav: #8a78c4; --pub-lav-soft: #ece6fb; --pub-green: #2f9a64; --pub-green-soft: #ddf5e8;
   --pub-red: #c4485a; --pub-red-soft: #fdecee; --pub-amber: #a5671a; --pub-amber-soft: #fdf3e1;
   --pub-card: #ffffff; --pub-logo-a: var(--pub-pink); --pub-logo-b: var(--pub-blue);
@@ -22,7 +22,13 @@
 .pub-logo b { color: var(--pub-logo-a); font-weight: 800; } .pub-logo i { color: var(--pub-logo-b); font-style: normal; }
 .pub-sample { position: absolute; right: 14px; bottom: -10px; font-size: 11px; font-weight: 600; color: var(--pub-mute);
   background: #fff; border: 1px solid var(--pub-line); border-radius: 999px; padding: 2px 9px; }
-.pub-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.pub-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* Touch: no double-tap-zoom wait on controls, and a long press never selects a button's label. */
+.pub-root :is(a, button) { touch-action: manipulation; }
+.pub-root :is(button, .auth-btn, .lp-btn) { -webkit-user-select: none; user-select: none; }
+/* ≥44px hit area for the small text links (logo, top-bar switch, footer and fine-print links) without moving layout. */
+.pub-logo, .auth-switch, .lp-foot a, .auth-fine a { position: relative; }
+.pub-logo::before, .auth-switch::before, .lp-foot a::before, .auth-fine a::before { content: ''; position: absolute; inset: -14px -4px; }
 
 /* ── Auth shell + sky (four dayparts) ── */
 .auth-shell { position: relative; min-height: 100dvh; overflow: hidden; display: flex; flex-direction: column;
@@ -67,7 +73,7 @@ html[data-daypart="night"] .auth-stars { display: block; position: absolute; ins
 .auth-top .auth-switch { color: var(--pub-mute); text-decoration: none; }
 .auth-top .auth-switch b { color: var(--pub-ink); }
 .auth-main { position: relative; flex: 1; display: grid; place-items: center; padding: 8px 16px 40px; }
-.auth-card { width: 100%; max-width: 400px; background: var(--pub-card); border-radius: 20px; padding: 26px 24px;
+.auth-card { width: 100%; min-width: 0; max-width: 400px; background: var(--pub-card); border-radius: 20px; padding: 26px 24px;
   border: 1px solid var(--pub-line); box-shadow: 0 1px 0 rgba(31, 27, 43, .04), 0 28px 60px -28px rgba(31, 27, 43, .45); }
 html[data-daypart="night"] .auth-card { box-shadow: 0 28px 60px -24px rgba(0, 0, 0, .6); }
 @media (max-width: 420px) { .auth-card { padding: 22px 16px; border-radius: 18px; } .auth-top { padding: 14px 16px; } }
@@ -80,12 +86,12 @@ html[data-daypart="morning"] .dp > [data-dp="morning"], html[data-daypart="after
 html[data-daypart="evening"] .dp > [data-dp="evening"], html[data-daypart="night"] .dp > [data-dp="night"] { display: revert; }
 
 .auth-when { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; font-size: 12px; font-weight: 700; padding: 3px 10px;
-  border-radius: 999px; margin-bottom: 12px; background: var(--pub-blue-soft); color: var(--pub-blue); }
+  border-radius: 999px; margin-bottom: 12px; background: var(--pub-blue-soft); color: #2d6f96; }
 .auth-when svg { display: inline-block; }
-html[data-daypart="morning"] .auth-when { background: #ffeadf; color: #b65a2c; }
-html[data-daypart="evening"] .auth-when { background: var(--pub-lav-soft); color: #6f5db0; }
+html[data-daypart="morning"] .auth-when { background: #ffeadf; color: #9a4a22; }
+html[data-daypart="evening"] .auth-when { background: var(--pub-lav-soft); color: #5f4d9e; }
 html[data-daypart="night"] .auth-when { background: rgba(242, 167, 192, .14); color: #f2a7c0; }
-.auth-h1 { font-size: 28px; line-height: 1.08; letter-spacing: -.035em; font-weight: 700; margin: 0; }
+.auth-h1 { font-size: 28px; line-height: 1.08; letter-spacing: -.035em; font-weight: 700; margin: 0; overflow-wrap: break-word; }
 .auth-h1 em { font-style: normal; color: var(--pub-pink); }
 html[data-daypart="night"] .auth-h1 em { color: #f2a7c0; }
 .auth-sub { font-size: 14px; line-height: 1.45; color: var(--pub-mute); margin: 6px 0 18px; }
@@ -93,7 +99,7 @@ html[data-daypart="night"] .auth-h1 em { color: #f2a7c0; }
 /* ── Fields ── */
 .auth-field { margin-bottom: 14px; }
 .auth-label { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 700; margin: 0 0 6px; }
-.auth-label .opt { font-weight: 500; color: var(--pub-soft); }
+.auth-label .opt { font-weight: 500; color: var(--pub-mute); }
 .auth-label a, .auth-label button.auth-link { font-size: 13px; }
 .auth-control { position: relative; z-index: 1; display: flex; align-items: center; height: 46px; border: 1.5px solid var(--pub-field); border-radius: 12px;
   background: var(--pub-field-bg); transition: border-color .15s var(--pub-ease), box-shadow .15s var(--pub-ease), background-color .15s var(--pub-ease); }
@@ -111,11 +117,13 @@ html[data-daypart="night"] .auth-h1 em { color: #f2a7c0; }
 .auth-control .auth-ok { margin-right: 12px; color: var(--pub-green); }
 .auth-eye { height: 100%; padding: 0 14px; border: 0; background: none; color: var(--pub-mute); font: 600 13px var(--font-dm-sans), sans-serif; cursor: pointer; border-radius: 0 12px 12px 0; min-height: 44px; }
 .auth-hint { font-size: 13px; line-height: 1.4; margin: 6px 0 0; color: var(--pub-mute); }
+/* Field keeps its live regions mounted (and in the accessibility tree); an empty one takes no space. */
+.auth-hint:empty:not(.auth-resend-msg) { margin: 0; }
 .auth-resend-msg { min-height: 1.4em; margin: 8px 0 12px; text-align: center; }
 .auth-hint.is-error { color: var(--pub-red); }
 .auth-hint.is-warn { color: var(--pub-amber); }
 html[data-daypart="night"] .auth-hint.is-error { color: #ff9aab; }
-.auth-hint button, .auth-hint a { font: inherit; font-weight: 700; color: var(--pub-pink); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: none; }
+.auth-hint button, .auth-hint a { font: inherit; font-weight: 700; color: var(--pub-pink-ink); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: none; }
 .auth-meter { display: flex; gap: 4px; margin-top: 8px; }
 .auth-meter i { flex: 1; height: 4px; border-radius: 9px; background: var(--pub-line); }
 .auth-meter[data-score="1"] i:nth-child(-n+1) { background: var(--pub-red); }
@@ -133,47 +141,51 @@ html[data-daypart="night"] .auth-hint.is-error { color: #ff9aab; }
 .auth-btn:disabled { opacity: .6; cursor: not-allowed; }
 .auth-btn--ghost { background: var(--pub-card); color: var(--pub-ink); border-color: var(--pub-field); }
 .auth-btn--google { background: var(--pub-card); color: var(--pub-ink); border-color: var(--pub-field); }
-.auth-or { display: flex; align-items: center; gap: 12px; font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--pub-soft); margin: 18px 0 16px; text-transform: uppercase; }
+.auth-or { display: flex; align-items: center; gap: 12px; font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--pub-mute); margin: 18px 0 16px; text-transform: uppercase; }
 .auth-or::before, .auth-or::after { content: ''; flex: 1; height: 1px; background: var(--pub-line); }
-.auth-link { color: var(--pub-pink); font-weight: 600; text-decoration: none; background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; }
-html[data-daypart="night"] .auth-link { color: #f2a7c0; }
+.auth-link { color: var(--pub-pink-ink); font-weight: 600; text-decoration: none; background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; }
+html[data-daypart="night"] .auth-link, html[data-daypart="night"] .auth-hint :is(button, a) { color: #f2a7c0; }
 /* ≥44px hit area for small text links/buttons without moving layout. Horizontal inset stays small. The overlays
    are z-index auto, while .auth-control and .auth-btn are z-index 1, so inputs and buttons always win the overlap
    whether the link sits above them (label row) or below them (hints, links under a button). */
 .auth-link, .auth-hint button, .auth-hint a { position: relative; }
 .auth-link::before, .auth-hint button::before, .auth-hint a::before { content: ''; position: absolute; inset: -13px -6px; }
-.auth-link--quiet { color: var(--pub-mute); text-decoration: underline; text-underline-offset: 2px; font-weight: 500; }
+.auth-link--quiet, html[data-daypart="night"] .auth-link--quiet { color: var(--pub-mute); text-decoration: underline; text-underline-offset: 2px; font-weight: 500; }
+.auth-link:disabled { cursor: default; opacity: .6; }
 .auth-fine { font-size: 12.5px; line-height: 1.5; color: var(--pub-mute); text-align: center; margin: 14px 0 0; }
 .auth-fine a { color: var(--pub-ink); font-weight: 600; text-decoration: none; }
 .auth-center { text-align: center; margin-top: 10px; }
 .pub-gis { display: flex; justify-content: center; min-height: 44px; position: relative; z-index: 1; }
+.auth-google[aria-busy="true"] { pointer-events: none; opacity: .6; transition: opacity .15s var(--pub-ease); }
 
 /* ── Alerts, identity card, steps, year picker, badge icon ── */
 .auth-alert { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.45; border-radius: 12px; padding: 11px 12px; margin-bottom: 16px; }
-.auth-alert--error { background: var(--pub-red-soft); color: var(--pub-red); }
-.auth-alert--warn { background: var(--pub-amber-soft); color: var(--pub-amber); }
+.auth-alert--error { background: var(--pub-red-soft); color: #ad3f50; }
+.auth-alert--warn { background: var(--pub-amber-soft); color: #875312; }
 .auth-alert--info { background: var(--pub-blue-soft); color: #2d6f96; }
 .auth-alert svg { flex: 0 0 auto; margin-top: 2px; }
 .auth-ident { display: flex; align-items: center; gap: 12px; border: 1.5px solid var(--pub-field); border-radius: 14px; padding: 10px 12px; margin-bottom: 16px; }
 .auth-ident img, .auth-ident .auth-avatar { width: 36px; height: 36px; border-radius: 50%; flex: 0 0 auto; object-fit: cover; }
 .auth-avatar { display: grid; place-items: center; color: #fff; font-weight: 700; background: linear-gradient(135deg, #f2a7c0, #91cbe6); }
 .auth-ident .who { flex: 1; min-width: 0; line-height: 1.3; }
-.auth-ident .who b { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.auth-ident .who span { font-size: 12.5px; color: var(--pub-green); font-weight: 600; }
+/* Wrap, never truncate: the email is how the visitor recognises the account (break-ui). */
+.auth-ident .who b { display: block; font-size: 14px; overflow-wrap: anywhere; }
+.auth-ident .auth-link--quiet { flex: 0 0 auto; white-space: nowrap; }
+.auth-ident .who span { font-size: 12.5px; color: #23784e; font-weight: 600; }
 .auth-steps { display: flex; gap: 6px; margin-bottom: 14px; }
 .auth-steps i { width: 24px; height: 4px; border-radius: 9px; background: var(--pub-line); }
 .auth-steps i.on { background: var(--pub-pink); }
 .auth-years { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
 .auth-years button { position: relative; z-index: 1; min-height: 44px; border: 1.5px solid var(--pub-field); border-radius: 11px; background: var(--pub-card); color: var(--pub-mute);
   font: 700 14px var(--font-dm-sans), sans-serif; cursor: pointer; transition: transform .12s var(--pub-ease); }
-.auth-years button[aria-checked="true"] { border-color: var(--pub-pink); background: var(--pub-pink-soft); color: var(--pub-pink); }
+.auth-years button[aria-checked="true"] { border-color: var(--pub-pink); background: var(--pub-pink-soft); color: var(--pub-pink-ink); }
 .auth-years button:active { transform: scale(.96); }
 .auth-badge { width: 50px; height: 50px; border-radius: 15px; display: grid; place-items: center; margin-bottom: 14px; }
 .auth-badge--pink { background: var(--pub-pink-soft); color: var(--pub-pink); }
 .auth-badge--blue { background: var(--pub-blue-soft); color: var(--pub-blue); }
 .auth-badge--green { background: var(--pub-green-soft); color: var(--pub-green); }
 
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) {
   .auth-btn:hover:not(:disabled) { opacity: .92; }
   .auth-btn--ghost:hover, .auth-btn--google:hover { background: var(--pub-field-bg); opacity: 1; }
   .auth-link:hover { text-decoration: underline; }
@@ -184,6 +196,7 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
 
 /* ── Landing (spec §5, mockup landing-f1-v6) ── */
 .lp { position: relative; overflow: hidden;
+  padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
   background: linear-gradient(180deg, #fff6f1 0%, #fdeef4 16%, #f6f2fb 36%, #eaf5fc 58%, #eef0fb 80%, #ece8f6 100%); }
 .lp-glow { position: absolute; pointer-events: none; border-radius: 50%; }
 .lp-glow--peach { left: -12%; top: -90px; width: 72%; height: 620px; background: radial-gradient(closest-side, rgba(255, 196, 160, .55), transparent); }
@@ -200,7 +213,7 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
 .lp-btn--lg { min-height: 52px; padding: 0 28px; font-size: 16px; }
 .lp-hero { display: grid; grid-template-columns: 1fr 1.08fr; gap: 48px; align-items: center; max-width: 1120px; margin: 0 auto; padding: 56px 24px 72px; }
 .lp-triad { font-size: 14px; font-weight: 700; color: var(--pub-mute); margin: 0 0 16px; }
-.lp-triad b { color: var(--pub-pink); }
+.lp-triad b { color: var(--pub-pink-ink); }
 .lp-h1 { font-size: clamp(40px, 6vw, 68px); line-height: 1; letter-spacing: -.045em; font-weight: 700; margin: 0; }
 .lp-h1 em, .lp-h2 em { font-style: normal; background: linear-gradient(90deg, var(--pub-pink), var(--pub-blue)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .lp-lede { color: var(--pub-mute); font-size: 18px; line-height: 1.55; margin: 20px 0 0; max-width: 460px; }
@@ -225,8 +238,8 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
 .lp-num { font-variant-numeric: tabular-nums; }
 .lp-num--lg { font-size: 20px; }
 .lp-tag { display: inline-block; font-size: 11.5px; padding: 2px 9px; border-radius: 999px; font-weight: 700; }
-.lp-tag--pink { background: var(--pub-pink-soft); color: #b8456f; } .lp-tag--blue { background: var(--pub-blue-soft); color: #2d6f96; }
-.lp-tag--lav { background: var(--pub-lav-soft); color: #6f5db0; } .lp-tag--green { background: var(--pub-green-soft); color: #23784e; }
+.lp-tag--pink { background: var(--pub-pink-soft); color: var(--pub-pink-ink); } .lp-tag--blue { background: var(--pub-blue-soft); color: #2d6f96; }
+.lp-tag--lav { background: var(--pub-lav-soft); color: #5f4d9e; } .lp-tag--green { background: var(--pub-green-soft); color: #23784e; }
 .lp-chip { position: absolute; display: inline-flex; align-items: center; gap: 7px; background: #fff; border-radius: 999px; padding: 8px 14px;
   font-size: 14px; font-weight: 600; white-space: nowrap; box-shadow: 0 10px 24px -12px rgba(31, 27, 43, .35); }
 .lp-chip .dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -235,7 +248,7 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
 .lp-chip--money { left: -18px; bottom: 120px; }
 .lp-chip--habit { right: 8px; bottom: -2px; }
 .lp-problem { max-width: 900px; margin: 0 auto; padding: 56px 24px 24px; text-align: center; }
-.lp-eyebrow { font-size: 12.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--pub-pink); margin: 0 0 6px; }
+.lp-eyebrow { font-size: 12.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--pub-pink-ink); margin: 0 0 6px; }
 .lp-eyebrow--mute { color: var(--pub-mute); }
 .lp-h2 { font-size: clamp(28px, 3.6vw, 40px); letter-spacing: -.035em; line-height: 1.08; margin: 0; font-weight: 700; }
 .lp-h2--big { font-size: clamp(32px, 4.8vw, 52px); }
@@ -268,7 +281,7 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
 .lp-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; max-width: 1120px; margin: 0 auto; padding: 22px 24px 28px; font-size: 13px; color: var(--pub-mute); }
 .lp-foot a { text-decoration: none; }
 
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) {
   .lp-btn:hover { background: #faf8fb; }
   .lp-btn--dark:hover { background: #2c2740; }
   .lp-foot a:hover { color: var(--pub-ink); }
@@ -318,14 +331,15 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
   .lp .lp-hero-visual .lp-chip--float:nth-of-type(1) { animation-delay: 560ms, 1s; }
   .lp .lp-hero-visual .lp-chip--float:nth-of-type(2) { animation-delay: 640ms, 1.6s; animation-duration: .45s, 8s; }
   .lp .lp-hero-visual .lp-chip--float:nth-of-type(3) { animation-delay: 720ms, 2.2s; animation-duration: .45s, 6s; }
-  .lp-xchips .lp-x { transition: transform .6s var(--pub-ease), opacity .6s var(--pub-ease); }
-  .lp-xchips.is-in .lp-x { opacity: .6; }
-  .lp-xchips.is-in .lp-x:nth-child(odd) { transform: translateX(12px); }
-  .lp-xchips.is-in .lp-x:nth-child(even) { transform: translateX(-12px); }
+  /* Chips wait 12px out from their laid-out spot and slide in toward the centre, so neighbours never overlap.
+     The offset is armed by LandingMotion (no-JS shows them at rest) and only the slide-in transitions. */
+  .lp-xchips.is-armed:not(.is-in) .lp-x:nth-child(odd) { transform: translateX(-12px); }
+  .lp-xchips.is-armed:not(.is-in) .lp-x:nth-child(even) { transform: translateX(12px); }
+  .lp-xchips.is-in .lp-x { opacity: .6; transition: transform .6s var(--pub-ease), opacity .6s var(--pub-ease); }
   .auth-glow--a, .auth-glow--b { animation: pub-glow-drift 30s ease-in-out infinite alternate; }
   html.pub-hidden .auth-glow--a, html.pub-hidden .auth-glow--b, html.pub-hidden .lp-chip--float { animation-play-state: paused; }
   .auth-card { animation: pub-pop .35s var(--pub-ease) both; }
-  .auth-hint.is-error { animation: pub-hint-in .2s var(--pub-ease) both; }
+  .auth-hint.is-error:not(:empty) { animation: pub-hint-in .2s var(--pub-ease) both; }
 }
 /* The arc only exists above 880px; below it the sun is hidden and moments are a plain list, so they must never be dimmed there (R23).
    Everything waits for LandingMotion's `is-armed` (R25), so no-JS and pre-hydration show every moment lit and no stray sun. */
@@ -342,9 +356,13 @@ html[data-daypart="night"] .auth-link { color: #f2a7c0; }
   /* offset-anchor (the box centre) already lands the dot on the path, so the static -9px centring margin is dropped. */
   .lp-arc__sun { margin: 0; offset-path: path('M0,180 C90,20 310,20 400,180'); offset-rotate: 0deg; offset-distance: var(--sun, 0%); transition: offset-distance .2s linear; }
   .lp-arc.is-armed .lp-arc__sun { opacity: 1; }
+  /* The arming frame snaps future moments to dim (and the sun onto its spot) instead of fading from lit (R28 #9). */
+  .lp-arc.is-arming :is(.lp-moment, .lp-moment *, .lp-arc__sun) { transition: none; }
   .lp-arc[style*="--sun-path"] .lp-arc__sun { offset-path: var(--sun-path); }
 }
 
 .lp-legal__body { max-width: 720px; margin: 0 auto; padding: 24px 24px 72px; font-size: 16px; line-height: 1.65; }
-.lp-legal__body h2 { font-size: 20px; letter-spacing: -.02em; margin: 32px 0 8px; }
+.lp-legal__body h1 { margin: 8px 0 6px; }
+.lp-legal__body h1 + .lp-mute { margin-bottom: 28px; }
+.lp-legal__body h2 { font-size: 20px; font-weight: 700; letter-spacing: -.02em; margin: 32px 0 8px; }
 .lp-legal__body ul { padding-left: 20px; list-style: disc; }

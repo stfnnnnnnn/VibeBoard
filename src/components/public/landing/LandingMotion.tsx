@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 
 /* Small, dependency-free motion driver for the landing page (spec §8):
    - count-up for [data-countup] (once, 700 ms)
-   - ✕ chips nudge toward the centre when they scroll into view (once)
+   - ✕ chips slide in toward the centre when they scroll into view (once)
    - the day arc: the sun follows scroll progress through the section; moments light up in order
    - pauses decorative loops while the tab is hidden
    Does nothing under prefers-reduced-motion (CSS already shows the final state). */
@@ -36,9 +36,10 @@ export default function LandingMotion() {
 
     const x = document.querySelector('[data-xchips]');
     if (x) {
+      x.classList.add('is-armed');
       const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) { x.classList.add('is-in'); io.disconnect(); } }, { threshold: 0.6 });
       io.observe(x);
-      cleanups.push(() => io.disconnect());
+      cleanups.push(() => { io.disconnect(); x.classList.remove('is-armed'); });
     }
 
     const arc = document.querySelector<HTMLElement>('[data-arc]');
@@ -61,14 +62,16 @@ export default function LandingMotion() {
       };
       const onResize = () => { resized = true; onScroll(); };
       // Light the moments before arming, so already-passed moments never flash dim (CSS dims only under .is-armed).
+      // `is-arming` drops transitions for the first frame, so moments still ahead snap to dim instead of fading from lit.
       sizePath(); update();
-      arc.classList.add('is-armed');
+      arc.classList.add('is-armed', 'is-arming');
+      let arming = requestAnimationFrame(() => { arming = requestAnimationFrame(() => arc.classList.remove('is-arming')); });
       window.addEventListener('scroll', onScroll, { passive: true });
       window.addEventListener('resize', onResize);
       cleanups.push(() => {
         window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onResize);
-        cancelAnimationFrame(raf);
-        arc.classList.remove('is-armed');
+        cancelAnimationFrame(raf); cancelAnimationFrame(arming);
+        arc.classList.remove('is-armed', 'is-arming');
       });
     }
 

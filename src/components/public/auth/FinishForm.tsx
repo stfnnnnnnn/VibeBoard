@@ -24,6 +24,8 @@ export default function FinishForm({ identity }: { identity: FinishIdentity }) {
   const fErr = touched ? nameError(cleanName(first), 'first name') : null;
   const lErr = touched ? nameError(cleanName(last), 'last name') : null;
   const hello = cleanName(first) || 'there';
+  // Narrow cards wrap the email; prefer the break right after the @ (overflow-wrap: anywhere is the fallback).
+  const at = identity.email.indexOf('@');
 
   async function cancel() {
     try { await fetch('/api/auth/signup-ticket', { method: 'DELETE' }); } catch { /* still leave; the ticket expires on its own */ }
@@ -58,7 +60,7 @@ export default function FinishForm({ identity }: { identity: FinishIdentity }) {
           // eslint-disable-next-line @next/next/no-img-element -- Google avatar host isn't in next/image config; tiny, decorative.
           ? <img src={identity.picture} alt="" referrerPolicy="no-referrer" />
           : <span className="auth-avatar" aria-hidden="true">{identity.email.charAt(0).toUpperCase()}</span>}
-        <div className="who"><b title={identity.email}>{identity.email}</b><span>✓ Verified by Google</span></div>
+        <div className="who"><b title={identity.email}>{at > 0 ? <>{identity.email.slice(0, at + 1)}<wbr />{identity.email.slice(at + 1)}</> : identity.email}</b><span>✓ Verified by Google</span></div>
         <button type="button" className="auth-link auth-link--quiet" onClick={cancel}>Not you?</button>
       </div>
       <form onSubmit={onSubmit} noValidate>

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { KeyRound, Mail, MailCheck } from 'lucide-react';
 import Field from './Field';
 import FormAlert from './FormAlert';
@@ -13,6 +13,7 @@ export default function ForgotForm() {
   const [cooldown, setCooldown] = useState(0);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { try { const s = sessionStorage.getItem('vb-forgot-email'); if (s) setEmail(s); } catch { /* storage blocked */ } }, []);
   useEffect(() => {
@@ -27,7 +28,7 @@ export default function ForgotForm() {
     e?.preventDefault();
     setTouched(true);
     const clean = cleanEmail(email);
-    if (emailError(clean)) return;
+    if (emailError(clean)) { emailRef.current?.focus(); return; }
     setBusy(true); setFailed(false);
     try {
       await fetch('/api/auth/password/forgot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: clean }) });
@@ -61,7 +62,7 @@ export default function ForgotForm() {
       {failed && <FormAlert tone="error">We couldn&apos;t reach the server. Check your connection and try again.</FormAlert>}
       <form onSubmit={send} noValidate>
         <Field id="email" label="Email" icon={Mail} type="email" value={email} onChange={setEmail} onBlur={() => setTouched(true)}
-          autoComplete="email" inputMode="email" placeholder="you@school.edu.ph" error={err} required />
+          autoComplete="email" inputMode="email" placeholder="you@school.edu.ph" error={err} inputRef={emailRef} required />
         <button type="submit" className="auth-btn" disabled={busy}>{busy ? 'Sending…' : 'Send reset link'}</button>
       </form>
       <p className="auth-fine">Signed up with Google? Just use <b>Continue with Google</b> on the login page.</p>
