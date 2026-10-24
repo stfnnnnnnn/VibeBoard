@@ -85,3 +85,37 @@ export interface PickerPeriod {
   name:       string;
   categories: Array<{ cat_id: number; name: string }>;
 }
+
+/* ── Announcements (spec §6 C4, §6.1) ── */
+
+export type AnnouncementStatus = 'pending' | 'included' | 'ignored';
+export type Destination = 'task' | 'event' | 'reminder' | 'schedule_change';
+
+/** One row of GET /api/canvas/announcements?status=… */
+export interface AnnouncementItem {
+  id:                     number;
+  title:                  string;
+  message:                string | null;
+  /** UTC "YYYY-MM-DD HH:MM:SS" (normalize.ts toMysqlUtc). */
+  posted_at:              string | null;
+  html_url:               string | null;
+  course_name:            string;
+  user_subject_id:        number | null;
+  subject_mode?:          'legacy' | 'custom';
+  bank_status:            AnnouncementStatus | 'removed_upstream';
+  seen_at:                string | null;
+  suggested_category:     { kind: 'legacy'; target: LegacyTarget } | { kind: 'custom'; categoryName: string } | { kind: 'general' };
+  suggested_destinations: Destination[];
+  /** The extra-detail sentences ("Bring a calculator."), '' when none. */
+  suggested_note:         string;
+  /** [start, end) ranges of those sentences in stripHtml(message). */
+  note_spans:             Array<[number, number]>;
+}
+
+export const DEST_LABEL: Record<Destination, string> = {
+  task: 'Task', event: 'Event', reminder: 'Reminder', schedule_change: 'Schedule change',
+};
+export const DESTINATIONS: Destination[] = ['task', 'event', 'reminder', 'schedule_change'];
+
+/** A class meeting for the schedule-change form (GET /api/studypulse/schedule, trimmed). */
+export interface ScheduleBlockOption { block_id: number; course_code: string; section: string | null; day_of_week: number }

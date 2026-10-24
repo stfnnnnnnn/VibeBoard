@@ -1,19 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import HubHeader, { panelId, tabId } from '@/components/studypulse/canvas/HubHeader';
 import CanvasOverview from '@/components/studypulse/canvas/CanvasOverview';
 import ActivityBank from '@/components/studypulse/canvas/ActivityBank';
+import Announcements from '@/components/studypulse/canvas/Announcements';
 import UndoToast from '@/components/studypulse/canvas/UndoToast';
 import { useUndoToast } from '@/components/studypulse/canvas/useUndoToast';
 import {
   subjectCode, sumCounts,
   type CanvasCourse, type ConnectionStatus, type HubSubject, type HubTab, type PendingCounts,
 } from '@/components/studypulse/canvas/types';
-// Temporary: Task 14 replaces this with the hub's own Announcements.
-import CanvasAnnouncementBank, { type AnnouncementItem } from '@/components/studypulse/CanvasAnnouncementBank';
 
 /**
  * The Canvas hub (spec §6): one header row, then the active view's panel. The view and the subject filter live in the
@@ -33,7 +32,6 @@ export default function CanvasClientShell({ connection, subjects, initialCourses
   const [tab, setTab] = useState<HubTab>(initialTab);
   const [subject, setSubject] = useState<number | null>(initialSubject);
   const [courses, setCourses] = useState<CanvasCourse[]>(initialCourses);
-  const [announcementItems, setAnnouncementItems] = useState<AnnouncementItem[]>([]);
 
   const syncUrl = (t: HubTab, s: number | null) => {
     const q = new URLSearchParams({ tab: t });
@@ -43,26 +41,17 @@ export default function CanvasClientShell({ connection, subjects, initialCourses
   const changeTab = (t: HubTab) => { if (t === tab) return; setTab(t); syncUrl(t, subject); };
   const changeSubject = (s: number | null) => { setSubject(s); syncUrl(tab, s); };
 
-  // Same endpoints as before; only the active view's data is fetched. The Activity Bank loads its own lists.
+  // The Overview's courses arrive with the page and are refetched after its changes; the Activity Bank and
+  // Announcements load their own lists.
   const refresh = useCallback(async () => {
+    if (tab !== 'overview') return;
     try {
-      const sid = subject !== null ? `user_subject_id=${subject}` : '';
-      const [coursesRes, announcementsRes] = await Promise.all([
-        tab === 'overview' ? fetch('/api/canvas/courses') : Promise.resolve(null),
-        tab === 'announcements' ? fetch(`/api/canvas/announcements${sid ? `?${sid}` : ''}`) : Promise.resolve(null),
-      ]);
-      if (coursesRes?.ok) setCourses((await coursesRes.json()).courses);
-      if (announcementsRes?.ok) setAnnouncementItems((await announcementsRes.json()).items);
+      const res = await fetch('/api/canvas/courses');
+      if (res.ok) setCourses((await res.json()).courses);
     } catch (err) {
       console.error('Failed to refresh Canvas data:', err);
     }
-  }, [tab, subject]);
-
-  useEffect(() => {
-    // The Overview's courses arrive with the page and the Activity Bank loads its own lists; Announcements loads on entry.
-    if (!connection.connected || tab !== 'announcements') return;
-    refresh();
-  }, [refresh, connection.connected, tab]);
+  }, [tab]);
 
   const onChange = useCallback(() => {
     refresh();
@@ -101,7 +90,9 @@ export default function CanvasClientShell({ connection, subjects, initialCourses
           {view === 'bank' && (
             <ActivityBank subject={subject} subjects={subjects} toast={toast.show} onCountsChange={refreshCounts} />
           )}
-          {view === 'announcements' && <CanvasAnnouncementBank items={announcementItems} onChange={onChange} />}
+          {view === 'announcements' && (
+            <Announcements subject={subject} subjects={subjects} toast={toast.show} onCountsChange={refreshCounts} />
+          )}
         </div>
       </div>
       <UndoToast api={toast} />

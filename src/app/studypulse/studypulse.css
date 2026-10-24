@@ -972,3 +972,110 @@
   .sp-picker, .sp-bank__bulk { animation: none; }
   .sp-skel { animation: none; }
 }
+
+/* ── Canvas hub: Announcements (spec §6 C4, §6.1, mockup canvas-hub-v1c annView()) ── */
+.sp-chip--violet { background: var(--sp-violet-bg); color: var(--sp-violet); }
+/* The list (360px) beside the reading pane; below 900px they stack and only one shows at a time. */
+.sp-ann { display: grid; grid-template-columns: 360px minmax(0, 1fr); min-height: 560px; overflow: hidden; }
+.sp-ann.is-empty { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+.sp-ann__list { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--sp-hair); }
+.sp-ann.is-empty .sp-ann__list { border-right: 0; }
+.sp-ann__filter { padding: 12px; border-bottom: 1px solid var(--sp-hair); }
+/* One row even with two-digit counts in the 360px column (break-ui): the three options share the width. */
+.sp-ann__seg { display: flex; flex-wrap: nowrap; }
+.sp-ann__seg .sp-seg__opt { flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding-inline: 8px; white-space: nowrap; }
+/* A long list scrolls inside its column, so the opened announcement stays in view beside it. */
+.sp-ann__rows { list-style: none; margin: 0; padding: 0; max-height: 720px; overflow-y: auto; overscroll-behavior: contain; }
+
+/* Leaving (Convert / Dismiss / Restore): the bank's fade + grid-row collapse, 180ms. */
+.sp-arow-shell { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 180ms var(--sp-ease), opacity 180ms var(--sp-ease); }
+.sp-arow-shell.is-leaving { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
+.sp-arow { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--sp-hair); background: transparent; color: var(--sp-text); padding: 13px 16px; cursor: pointer; font: inherit; transition: background-color var(--sp-dur) var(--sp-ease); }
+.sp-arow:focus-visible { outline-offset: -2px; }
+.sp-arow.is-on { background: var(--sp-surface); }
+.sp-arow:disabled { cursor: default; }
+.sp-arow__t { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font: 700 13.5px/1.35 var(--sp-font-ui); overflow-wrap: anywhere; }
+.sp-arow__m { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font: 600 12px var(--sp-font-ui); color: var(--sp-text-muted); }
+.sp-arow__unread { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--sp-pink-deep); }
+.sp-ann__code { display: inline-block; max-width: 200px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+@media (hover: hover) and (pointer: fine) { .sp-arow:not(.is-on):not(:disabled):hover { background: rgba(255, 255, 255, 0.45); } }
+.sp-arow--skel { display: grid; gap: 8px; cursor: default; }
+.sp-skel--name2 { width: min(180px, 45%); height: 14px; }
+
+/* The reading pane. */
+.sp-ann__pane { min-width: 0; }
+.sp-ann__detail { padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sp-ann__back { display: none; align-self: flex-start; margin: -6px 0 -4px -8px; }
+.sp-ann__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font: 600 13px var(--sp-font-ui); color: var(--sp-text-muted); }
+.sp-ann__open { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; padding: 4px 2px; border-radius: 6px; color: var(--sp-blue-ink); font-weight: 700; text-decoration: none; }
+@media (hover: hover) and (pointer: fine) { .sp-ann__open:hover { text-decoration: underline; text-underline-offset: 3px; } }
+.sp-ann__title { margin: 0; font: 800 21px/1.25 var(--sp-font-head); color: var(--sp-text); overflow-wrap: anywhere; outline: none; }
+.sp-ann__body { margin: 0; max-height: 170px; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px; border-radius: var(--sp-r-item); background: rgba(255, 255, 255, 0.55); border: 1px solid rgba(255, 255, 255, 0.85); font: 400 14px/1.65 var(--sp-font-ui); color: var(--sp-text); overflow-wrap: anywhere; }
+.sp-ann__body:focus-visible { outline: 2px solid var(--sp-focus); outline-offset: 2px; }
+.sp-ann__body--empty { color: var(--sp-text-muted); font-style: italic; }
+/* The extra-detail sentences ("Bring a calculator."), the same ones the Note is pre-filled with. */
+.sp-ann-pick { background: var(--sp-violet-bg); color: inherit; border-radius: 5px; padding: 1px 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.sp-ann__status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.sp-ann__status .sp-turn__err { width: 100%; margin: 0; }
+.sp-ann__unmapped { margin: 0; flex: 1 1 260px; font: 600 13px/1.5 var(--sp-font-ui); color: var(--sp-text-muted); }
+
+/* "Turn this into" (mockup .turn): destination tabs, the active one's form, then the actions. */
+.sp-turn { padding: 14px; border-radius: 16px; background: rgba(255, 255, 255, 0.6); border: 1px solid rgba(255, 255, 255, 0.9); }
+.sp-turn__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 10px; }
+.sp-turn__head h3 { margin: 0; font: 800 14px var(--sp-font-head); color: var(--sp-text); }
+.sp-turn__lead { font-size: 13px; color: var(--sp-text-muted); }
+.sp-dtabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+/* One pill per destination: the real include checkbox, then the button that shows its form. */
+.sp-dtab { display: inline-flex; align-items: center; border: 1.5px solid var(--sp-field-border); background: var(--sp-surface); border-radius: 11px; padding-left: 10px; transition: border-color var(--sp-dur) var(--sp-ease); }
+.sp-dtab.is-active { border-color: var(--sp-text); }
+.sp-dtab .sp-check { width: 16px; height: 16px; border-radius: 5px; background-size: 11px 11px; }
+.sp-dtab .sp-check:checked { background-color: var(--sp-success); border-color: var(--sp-success); }
+.sp-dtab__chk { display: grid; place-items: center; width: 28px; height: 32px; margin: -2px -6px -2px -8px; cursor: pointer; }
+.sp-dtab__btn { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 6px 12px 6px 8px; border: 0; background: transparent; border-radius: 0 9px 9px 0; cursor: pointer; font: 700 12.5px var(--sp-font-ui); color: var(--sp-text-muted); transition: color var(--sp-dur) var(--sp-ease); }
+.sp-dtab.is-active .sp-dtab__btn { color: var(--sp-text); }
+.sp-dtab__btn:focus-visible { outline-offset: -2px; }
+@media (hover: hover) and (pointer: fine) { .sp-dtab:not(.is-active) .sp-dtab__btn:hover { color: var(--sp-text); } }
+.sp-dtab__sug { font: 800 11px var(--sp-font-ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--sp-violet); }
+
+.sp-dform { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.sp-dform__f { display: flex; flex-direction: column; gap: 5px; min-width: 0; font: 700 12px var(--sp-font-ui); color: var(--sp-text-muted); }
+.sp-dform__full, .sp-dform__pair, .sp-dform__msg { grid-column: 1 / -1; }
+.sp-dform__pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.sp-dform__msg { margin: 0; display: flex; align-items: center; gap: 6px; font: 600 13px var(--sp-font-ui); color: var(--sp-text-muted); }
+.sp-dform__msg--err { color: var(--sp-danger); }
+.sp-dform select { cursor: pointer; }
+.sp-dform__lbl { display: flex; align-items: center; gap: 8px; }
+.sp-dform__from { font: 800 11px var(--sp-font-ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--sp-violet); }
+.sp-dform__note { resize: vertical; min-height: 58px; font: 500 14px/1.45 var(--sp-font-ui); }
+.sp-dform__count { align-self: flex-end; font: 600 12px var(--sp-font-ui); color: var(--sp-text-muted); }
+.sp-dform__count.is-over { color: var(--sp-danger); }
+.sp-turn__err { margin: 10px 0 0; font: 600 12.5px/1.45 var(--sp-font-ui); color: var(--sp-danger); }
+.sp-turn__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.sp-turn__end { margin-left: auto; display: flex; gap: 8px; }
+
+@media (max-width: 900px) {
+  /* Stacked: the list, or (once a row is opened) the announcement full-width with a back button. */
+  .sp-ann { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .sp-ann__list { border-right: 0; }
+  .sp-ann__rows { max-height: none; overflow: visible; }
+  .sp-ann.is-reading .sp-ann__list, .sp-ann:not(.is-reading) .sp-ann__pane { display: none; }
+  .sp-ann__back { display: inline-flex; }
+  .sp-ann.is-reading .sp-ann__detail { animation: sp-hub-fade 160ms var(--sp-ease); }
+  /* The wide screen's default (first) row isn't "open" on a phone, so it isn't highlighted there. */
+  .sp-arow.is-auto { background: transparent; }
+}
+@media (max-width: 640px) {
+  .sp-ann__detail { padding: 18px 14px; }
+  .sp-ann__title { font-size: 19px; }
+  .sp-turn { padding: 12px; }
+  /* Two pills a row instead of a ragged 2 / 1 / 1 wrap. */
+  .sp-dtabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sp-dtab__btn { flex: 1; flex-wrap: wrap; row-gap: 0; text-align: left; }
+  .sp-dform, .sp-dform__pair { grid-template-columns: minmax(0, 1fr); }
+  .sp-ann__open { margin-left: 0; }
+  .sp-turn__end { margin-left: 0; width: 100%; justify-content: flex-end; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sp-arow-shell { transition-duration: 1ms; }
+  .sp-ann.is-reading .sp-ann__detail { animation: none; }
+}
