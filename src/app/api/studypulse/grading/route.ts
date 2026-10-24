@@ -4,7 +4,7 @@ import pool from '@/lib/db';
 import { ensureGradeScale, ensureFinalGrade, ensureCategoryLinking, ensureGradingV2Schema } from '@/lib/migrate';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
-import { resolveFinal } from '@/lib/studypulse/presetDiff';
+import { linkGroupError, resolveFinal } from '@/lib/studypulse/presetDiff';
 
 /* GET  /api/studypulse/grading  — list all presets for user */
 export async function GET() {
@@ -41,6 +41,9 @@ export async function POST(req: NextRequest) {
   if (!name || !Array.isArray(periods) || periods.length === 0) {
     return Response.json({ error: 'name and periods are required' }, { status: 400 });
   }
+  // Only the link-group rule (shared with PUT); the weight-sum check is left out so the legacy wizard keeps working.
+  const groupError = linkGroupError(periods);
+  if (groupError) return Response.json({ error: groupError }, { status: 400 });
   // final_mode is 'period' | 'average' (legacy 'collective' maps to 'average' so the old wizard keeps working);
   // final_period_index picks the period for either mode. Checked up front with placeholder ids.
   const finalCheck = resolveFinal(final_mode ?? null, null, final_period_index, null, periods.map((_: unknown, i: number) => i + 1));

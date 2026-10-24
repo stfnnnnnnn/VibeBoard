@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { diffPreset, validateMoves, survivingPositions, type DraftPeriod } from '../presetDiff';
-import { validateDraft, resolveFinal } from '../presetDiff';
+import { validateDraft, resolveFinal, linkGroupError } from '../presetDiff';
 
 const OLD = { periods: [
   { period_id: 1, categories: [{ cat_id: 10 }, { cat_id: 11 }] },
@@ -84,4 +84,14 @@ test('resolveFinal follows ruling R8', () => {
   assert.deepEqual(resolveFinal(undefined, 'period', undefined, 1, ids), { final_mode: 'period', final_period_id: 102 });
   assert.deepEqual(resolveFinal(null, 'period', 0, null, ids), { final_mode: null, final_period_id: null });
   assert.deepEqual(resolveFinal('bogus', null, 0, null, ids), { error: 'Unknown final grade rule' });
+});
+
+test('linkGroupError: one category per linked group per period (shared by PUT and POST /grading)', () => {
+  const msg = 'A period can only have one category per linked group';
+  assert.equal(linkGroupError([{ categories: [{ link_group: 'g' }, { link_group: 'g' }] }]), msg);
+  assert.equal(linkGroupError([{ categories: [{ link_group: 'g' }] }, { categories: [{ link_group: 'g' }] }]), null);
+  assert.equal(linkGroupError([{ categories: [{ link_group: null }, { link_group: null }, { link_group: '' }, { link_group: '' }] }]), null);
+  assert.equal(linkGroupError([{ categories: [{ link_group: 'a' }, { link_group: 'b' }] }]), null);
+  assert.equal(linkGroupError([{ categories: [{ link_group: 'x'.repeat(41) }] }]), 'Invalid linked group');
+  assert.equal(linkGroupError([{}, null]), null);
 });

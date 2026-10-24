@@ -83,20 +83,33 @@ export function validateDraft(name: unknown, draft: unknown): string | null {
     if (p.name.trim().length > 50) return 'Period names can be at most 50 characters';
     if (!Array.isArray(p.categories) || p.categories.length === 0) return `${p.name.trim()} needs at least one category`;
     let sum = 0;
-    const groups = new Set<string>();
     for (const c of p.categories) {
       if (!c || typeof c.name !== 'string' || !c.name.trim()) return `Every category in ${p.name.trim()} needs a name`;
       if (c.name.trim().length > 50) return 'Category names can be at most 50 characters';
       const w = Number(c.weight);
       if (!Number.isFinite(w) || w < 0 || w > 100) return `Weights in ${p.name.trim()} must be between 0 and 100`;
       sum += w;
-      if (c.link_group != null && c.link_group !== '') {
-        if (typeof c.link_group !== 'string' || c.link_group.length > 40) return 'Invalid linked group';
-        if (groups.has(c.link_group)) return 'A period can only have one category per linked group';
-        groups.add(c.link_group);
-      }
     }
     if (Math.abs(sum - 100) > 0.01) return `${p.name.trim()}'s weights must add up to 100`;
+  }
+  return linkGroupError(draft);
+}
+
+/** The link-group rule on its own (PUT via validateDraft, and POST /grading, which skips the other checks so the
+    legacy wizard keeps working): the period model reads one category per group, so a period may hold at most one
+    category of each non-empty link_group. Returns the 400 message, or null. Tolerates malformed input. */
+export function linkGroupError(periods: unknown): string | null {
+  if (!Array.isArray(periods)) return null;
+  for (const p of periods as Array<{ categories?: unknown } | null>) {
+    if (!p || !Array.isArray(p.categories)) continue;
+    const groups = new Set<string>();
+    for (const c of p.categories as Array<{ link_group?: unknown } | null>) {
+      const g = c?.link_group;
+      if (g == null || g === '') continue;
+      if (typeof g !== 'string' || g.length > 40) return 'Invalid linked group';
+      if (groups.has(g)) return 'A period can only have one category per linked group';
+      groups.add(g);
+    }
   }
   return null;
 }
