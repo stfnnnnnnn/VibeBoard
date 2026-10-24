@@ -13,16 +13,30 @@ import SubjectToolbar from './subject/SubjectToolbar';
 import PeriodTabs, { type PeriodSelection } from './subject/PeriodTabs';
 import PeriodPanel from './subject/PeriodPanel';
 import GradeSummary, { LegacyGradeSummary } from './subject/GradeSummary';
+import LabSection from './subject/LabSection';
 import { loadTransmutationTable, type TransmutationTable } from '@/lib/transmutation';
 import type { GradeScale } from '@/lib/gradeScale';
-import { averageOf, buildCustomPeriods, buildLegacyPeriods, nounFor } from '@/lib/studypulse/periodModel';
-import { normalizeFinalMode, projectPeriod, subjectFinal, type PeriodInput } from '@/lib/studypulse/projection';
+import { buildCustomPeriods, buildLegacyPeriods, nounFor } from '@/lib/studypulse/periodModel';
+import { normalizeFinalMode, projectPeriod, type PeriodInput } from '@/lib/studypulse/projection';
+import { combinePeriods, overallOfCurrents } from '@/lib/studypulse/labLink';
 import { categoryColor } from '@/lib/studypulse/ui/colors';
 
 /* ── Types ── */
 
-import type { EntryRow, GradingConfig } from '@/lib/studypulse/types';
+import type { EntryRow, FinalMode, GradingConfig } from '@/lib/studypulse/types';
 export type { EntryRow, GradingConfig, Urgency, EntryStatus } from '@/lib/studypulse/types';
+
+/** This subject's lecture/lab link, loaded by the page (spec §3.5). `partnerCurrents` are the partner's raw period
+    grades in period order; `lectureFinal` is the lecture's final rule, which a lab page follows so both pages agree. */
+export interface LabLinkData {
+  role: 'lecture' | 'lab';
+  partner: { id: number; code: string; name: string };
+  lectureWeight: number;
+  units: number | null;
+  periodsMatch: boolean;
+  partnerCurrents: (number | null)[];
+  lectureFinal: { mode: FinalMode | null; periodIndex: number | null } | null;
+}
 export type GradeMode   = 'finals' | 'midterm' | 'whatif';
 export type SectionType = 'activities' | 'quizzes' | 'exams';
 
@@ -70,6 +84,7 @@ interface Props {
   gradingConfig?:      GradingConfig | null;
   initialGradeEntries?: Record<number, EntryRow[]>;
   existingPresets?:    Array<{ preset_id: number; name: string; period_count: number }>;
+  labLink?:            LabLinkData | null;
 }
 
 /* The inner component calls useSearchParams() (to detect the ?new=1 signal a
@@ -90,6 +105,7 @@ function SubjectCardViewInner({
   gradingConfig: initialConfig = null,
   initialGradeEntries = {},
   existingPresets = [],
+  labLink = null,
 }: Props) {
   const [activities, setActivities] = useState<EntryRow[]>(initialActivities);
   const [quizzes,    setQuizzes]    = useState<EntryRow[]>(initialQuizzes);
@@ -149,7 +165,10 @@ function SubjectCardViewInner({
       if (data.status !== 'success') throw new Error(data.error ?? 'Save failed');
       return data.entry_id as number;
     },
-    remove: async row => { await fetch(`/api/studypulse/grade-entries/${row.id}`, { method: 'DELETE' }); },
+    remove: async row => {
+      const res = await fetch(`/api/studypulse/grade-entries/${row.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`the server answered ${res.status}`);
+    },
   }), [userSubjectId]);
 
   const legacyPersistence = useCallback((type: SectionType): EntryPersistence => ({
@@ -166,7 +185,10 @@ function SubjectCardViewInner({
       if (data.status !== 'success') throw new Error(data.error ?? 'Save failed');
       return data.entry_id as number;
     },
-    remove: async row => { await fetch(`/api/studypulse/entries/${row.id}?type=${type}`, { method: 'DELETE' }); },
+    remove: async row => {
+      const res = await fetch(`/api/studypulse/entries/${row.id}?type=${type}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`the server answered ${res.status}`);
+    },
   }), [userSubjectId]);
 
   /* ── Target grade planner ── */
@@ -177,8 +199,6 @@ function SubjectCardViewInner({
      whenever the active preset changes (including right after the setup sheet saves). ── */
   const [periodSel, setPeriodSel] = useState<PeriodSelection>('all');
   useEffect(() => { setPeriodSel('all'); }, [config?.preset_id]);
-  // The effect above lands a render late; derive too, so a selection from the old preset never renders an empty page.
-  const sel: PeriodSelection = periodSel !== 'all' && config?.preset.periods.some(p => p.period_id === periodSel) ? periodSel : 'all';
 
   /* ── Transmutation state ── */
   const [transmutationOn, setTransmutationOn] = useState(false);
@@ -251,32 +271,42 @@ function SubjectCardViewInner({
   /* Normalised again here: a preset saved by the old wizard can still carry 'collective'. */
   const finalMode = normalizeFinalMode(config?.preset.final_mode);
   const finalPeriodId = config?.preset.final_period_id ?? null;
-  const finalPeriodKey = finalPeriodId !== null ? `p${finalPeriodId}` : null;
-  const finalGrade = config ? subjectFinal(periods, finalMode, finalPeriodKey) : null;
   const scale: GradeScale | null = config ? config.grade_scale : '4pt';
 
+  /* ── Linked lab (spec §3.5): the header tiles, the period tabs and the final view show lecture + lab combined per
+     period. The period panels, the summary's period columns and the entry tables stay this subject's own. Nothing is
+     combined when the period names stopped matching. ── */
+  const ownCurrents = projections.map(p => p.current);
+  const linked = config && labLink?.periodsMatch && labLink.partnerCurrents.length === ownCurrents.length ? labLink : null;
+  const combine = linked
+    ? (own: (number | null)[]) => (linked.role === 'lecture'
+      ? combinePeriods(own, linked.partnerCurrents, linked.lectureWeight)
+      : combinePeriods(linked.partnerCurrents, own, linked.lectureWeight))
+    : null;
+  const shown = combine ? combine(ownCurrents) : ownCurrents;
+
+  /* ── The final rule: this preset's, except that a linked lab follows its lecture's (as the subject cards do). ── */
+  const ownFinalIdx = config && finalPeriodId !== null ? config.preset.periods.findIndex(p => p.period_id === finalPeriodId) : -1;
+  const rule = linked?.role === 'lab' && linked.lectureFinal
+    ? linked.lectureFinal
+    : { mode: finalMode, periodIndex: ownFinalIdx >= 0 ? ownFinalIdx : null };
+  const finalIdx = rule.mode === 'period' ? rule.periodIndex : null;
+  const finalKey = finalIdx !== null ? periods[finalIdx]?.key ?? null : null;
+  const shownFinal = config && rule.mode ? overallOfCurrents(shown, periods.map(p => p.key), rule.mode, finalKey) : null;
+  const averageRule = !!config && rule.mode === 'average';
+
+  // The reset effect above lands a render late; derive too, so a stale selection never renders an empty page.
+  const sel: PeriodSelection = periodSel === 'final'
+    ? (averageRule ? 'final' : 'all')
+    : periodSel !== 'all' && config?.preset.periods.some(p => p.period_id === periodSel) ? periodSel : 'all';
+
+  /* 'period' rule: no extra tile, a "Final grade" tag on the designated period's tile. 'average': a Final grade tile. */
   const tiles: HeaderTile[] = config
     ? [
-        ...config.preset.periods.map((p, i) => ({ key: `p${p.period_id}`, label: p.name, value: projections[i]?.current ?? null })),
-        ...(finalMode ? [{ key: 'final', label: 'Final grade', value: finalGrade, final: true }] : []),
+        ...config.preset.periods.map((p, i) => ({ key: `p${p.period_id}`, label: p.name, value: shown[i] ?? null, finalTag: i === finalIdx })),
+        ...(averageRule ? [{ key: 'final', label: 'Final grade', value: shownFinal, final: true }] : []),
       ]
     : [{ key: 'overall', label: 'Overall', value: projections[0]?.current ?? null }];
-
-  /* Which period a linked singleton's score is currently borrowed from — for the
-     shared-score note shown on a not-yet-scored linked entry section. */
-  const linkGroupSourceInfo = useMemo<Record<string, { periodName: string; grade: number }>>(() => {
-    if (!config) return {};
-    const out: Record<string, { periodName: string; grade: number }> = {};
-    for (const period of config.preset.periods) {
-      for (const cat of period.categories) {
-        const rows = catEntries[cat.cat_id] ?? [];
-        if (cat.link_group && rows.some(r => r.grade !== null || (r.score && r.items)) && !(cat.link_group in out)) {
-          out[cat.link_group] = { periodName: period.name, grade: averageOf(rows, projTable) ?? 0 };
-        }
-      }
-    }
-    return out;
-  }, [config, catEntries, projTable]);
 
   return (
     <div className="vb-bg sp-page">
@@ -292,11 +322,12 @@ function SubjectCardViewInner({
           />
         )}
 
-        <SubjectHeader subject={subject} presetName={config?.preset.name ?? null} tiles={tiles} scale={scale} transError={transError} />
+        <SubjectHeader subject={subject} presetName={config?.preset.name ?? null} tiles={tiles} scale={scale} transError={transError}
+          lab={config && labLink ? { role: labLink.role, partnerId: labLink.partner.id, partnerCode: labLink.partner.code, partnerName: labLink.partner.name, lectureWeight: labLink.lectureWeight } : null} />
         <SubjectToolbar
           tabs={isCustomMode ? (
-            <PeriodTabs value={sel} onChange={setPeriodSel}
-              periods={config.preset.periods.map((p, i) => ({ id: p.period_id, name: p.name, current: projections[i]?.current ?? null }))} />
+            <PeriodTabs value={sel} onChange={setPeriodSel} final={averageRule ? { current: shownFinal } : null}
+              periods={config.preset.periods.map((p, i) => ({ id: p.period_id, name: p.name, current: shown[i] ?? null }))} />
           ) : undefined}
           transmutationOn={transmutationOn} transLoading={transLoading} transError={transError} onToggleTrans={handleTransToggle}
           plannerOpen={plannerOpen} onTogglePlanner={() => setPlannerOpen(v => !v)}
@@ -312,13 +343,9 @@ function SubjectCardViewInner({
         {isCustomMode && (
           <>
             {config.preset.periods.map((period, pi) => (
-              <PeriodPanel key={period.period_id} period={periods[pi]} proj={projections[pi]} isFinal={finalPeriodId === period.period_id}
-                hidden={sel !== 'all' && sel !== period.period_id}>
+              <PeriodPanel key={period.period_id} period={periods[pi]} proj={projections[pi]} isFinal={pi === finalIdx}
+                hidden={sel === 'final' || (sel !== 'all' && sel !== period.period_id)}>
                 {period.categories.map((cat, ci) => {
-                  const hasOwn = (catEntries[cat.cat_id] ?? []).some(r => r.grade !== null || (r.score && r.items));
-                  const sharedFrom = (!hasOwn && cat.is_singleton === 1 && cat.carry_score === 1 && cat.link_group)
-                    ? linkGroupSourceInfo[cat.link_group] ?? null
-                    : null;
                   return (
                     <CategorySection
                       key={cat.cat_id}
@@ -332,15 +359,28 @@ function SubjectCardViewInner({
                       persistence={customPersistence(cat.cat_id, period.period_id)}
                       transTable={transTable}
                       transmutationOn={transmutationOn}
-                      sharedFrom={sharedFrom}
+                      model={periods[pi]?.categories[ci] ?? null}
                     />
                   );
                 })}
               </PeriodPanel>
             ))}
-            <GradeSummary periods={periods} projections={projections} finalMode={finalMode} finalGrade={finalGrade}
-              finalPeriodKey={finalPeriodKey} scale={scale} transmutationOn={transmutationOn}
-              lab={{ has: config.has_lab === 1, lec: config.lec_weight, lab: config.lab_weight }} />
+            {labLink && (
+              <LabSection role={labLink.role} partner={labLink.partner} lectureWeight={labLink.lectureWeight} units={labLink.units}
+                matched={!!linked}
+                rows={periods.map((p, i) => {
+                  const other = labLink.partnerCurrents[i] ?? null;
+                  return {
+                    key: p.key, name: p.name, combined: shown[i] ?? null,
+                    lecture: labLink.role === 'lecture' ? ownCurrents[i] : other,
+                    lab: labLink.role === 'lab' ? ownCurrents[i] : other,
+                  };
+                })} />
+            )}
+            <GradeSummary periods={periods} projections={projections} finalMode={rule.mode}
+              finalPeriodKey={finalKey} scale={scale} transmutationOn={transmutationOn}
+              lab={{ has: config.has_lab === 1, lec: config.lec_weight, lab: config.lab_weight }}
+              view={sel === 'final' ? 'final' : 'all'} combine={combine} />
           </>
         )}
 

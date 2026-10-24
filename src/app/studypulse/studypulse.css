@@ -167,7 +167,7 @@
 .sp-form-error { margin-top: 14px; padding: 10px 14px; border-radius: var(--sp-r-md); background: var(--sp-danger-bg); color: var(--sp-danger); font-size: 13px; font-weight: 600; }
 .sp-form-shell { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 280ms var(--sp-ease); }
 .sp-form-shell.is-open { grid-template-rows: 1fr; }
-.sp-form-shell__inner { overflow: hidden; min-height: 0; }
+.sp-form-shell__inner { position: relative; overflow: hidden; min-height: 0; }
 /* Once the slide-open finishes, stop clipping so the panel's drop shadow isn't cut flat; closing re-clips at once. */
 .sp-form-shell.is-open .sp-form-shell__inner { animation: sp-unclip 0s 280ms forwards; }
 @keyframes sp-unclip { to { overflow: visible; } }
@@ -270,8 +270,17 @@
   .sp-et tbody tr:hover .sp-row-actions { opacity: 1; }
 }
 @media (hover: none) { .sp-row-actions { opacity: 1; } }
-.sp-en { font-weight: 600; color: var(--sp-text); display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
-.sp-src { font: 700 12px var(--sp-font-ui); color: var(--sp-blue-ink); background: var(--sp-blue-bg); padding: 1px 6px; border-radius: 6px; white-space: nowrap; flex-shrink: 0; overflow-wrap: normal; }
+/* Not a flex row: the Canvas badge is an inline box after the last word, so it wraps with the name (spec §5.6). */
+.sp-en { display: block; font-weight: 600; color: var(--sp-text); overflow-wrap: anywhere; }
+.sp-src { display: inline-block; margin-left: 6px; vertical-align: 1px; font: 700 12px/20px var(--sp-font-ui); color: var(--sp-blue-ink); background: var(--sp-blue-bg); padding: 0 6px; border-radius: 6px; white-space: nowrap; overflow-wrap: normal; }
+.sp-row-note, .sp-row-err { display: block; margin-top: 4px; font: 600 12px/1.4 var(--sp-font-ui); }
+.sp-row-note { color: var(--sp-blue-ink); }
+.sp-row-err { color: var(--sp-danger); }
+.sp-single__msg { flex-basis: 100%; margin-top: 0; }
+/* Inline delete confirmation (no confirm()): the trash button becomes "Delete" plus a keep (×) button. */
+.sp-confirm-del { border: 0; cursor: pointer; font: 700 12px var(--sp-font-ui); color: var(--sp-on-ink); background: var(--sp-danger); border-radius: var(--sp-r-sm); padding: 0 10px; min-height: 30px; transition: transform var(--sp-dur-fast) var(--sp-ease); }
+.sp-confirm-del:active { transform: scale(0.97); }
+.sp-et tr.is-confirming .sp-row-actions { opacity: 1; }
 .sp-date { color: var(--sp-text-muted); font-weight: 500; white-space: nowrap; }
 .sp-date small { display: block; font-size: 12px; font-weight: 600; }
 .sp-frac { font-weight: 700; white-space: nowrap; }
@@ -292,7 +301,6 @@
 .sp-single .sp-row-actions { opacity: 1; }
 .sp-legacy-panel { padding: 20px 22px; margin-bottom: 18px; }
 .sp-single__note { margin-left: auto; font-size: 12.5px; }
-.sp-shared { margin: 0 16px 14px; font-size: 12.5px; color: var(--sp-pink-ink); background: var(--sp-pink-bg); border-radius: var(--sp-r-md); padding: 8px 12px; display: flex; align-items: center; gap: 8px; }
 
 /* ── Subject page (spec §6.2–6.4, mockup v4 §2–3) ── */
 .sp-sh { padding: 24px 28px; }
@@ -307,12 +315,28 @@
 .sp-meta { display: inline-flex; align-items: center; gap: 6px; font: 600 12.5px var(--sp-font-ui); color: var(--sp-text-muted); background: rgba(255, 255, 255, 0.55); border: 1px solid rgba(255, 255, 255, 0.75); padding: 5px 10px; border-radius: var(--sp-r-pill); }
 .sp-meta--preset { color: var(--sp-pink-ink); }
 .sp-tiles { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
-.sp-tile { width: 150px; padding: 12px 14px; border-radius: 16px; }
-.sp-tile__head { display: flex; justify-content: space-between; align-items: center; }
-.sp-tile__big { font: 800 28px/1 var(--sp-font-head); margin: 8px 0 4px; }
+/* min-width, not width: "C · Satisfactory" is a little wider than the 150px a number needs. */
+.sp-tile { position: relative; min-width: 150px; padding: 12px 14px; border-radius: 16px; }
+.sp-tile__big { font: 800 28px/1 var(--sp-font-head); margin: 8px 0 4px; min-height: 30px; display: flex; align-items: flex-end; }
 .sp-tile__sub { font: 700 12px var(--sp-font-ui); color: var(--sp-text-muted); }
 .sp-tile--final { background: linear-gradient(160deg, rgba(255, 255, 255, 0.88), rgba(253, 228, 239, 0.72)); border: 1px solid rgba(240, 103, 157, 0.35); }
-.sp-tile--final .sp-eyebrow { color: var(--sp-pink-ink); }
+.sp-tile--total .sp-eyebrow { color: var(--sp-pink-ink); }
+.sp-tile__tag { position: absolute; top: -9px; right: 10px; font: 800 11px var(--sp-font-ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--sp-on-ink); background: var(--sp-pink-deep); padding: 3px 8px; border-radius: var(--sp-r-pill); white-space: nowrap; }
+.sp-chip-link { text-decoration: none; transition: transform var(--sp-dur-fast) var(--sp-ease); }
+.sp-chip-link:active { transform: scale(0.97); }
+@media (hover: hover) and (pointer: fine) { .sp-chip-link:hover { background: rgba(116, 188, 217, 0.26); } }
+
+/* LetterGrade (mockup v8 .lg): base letter, raised +/− at 56%, a 4px dot at 40% of currentColor, then the meaning. */
+.sp-lg { display: inline-flex; align-items: baseline; gap: 9px; white-space: nowrap; }
+.sp-lg__l { font: 800 30px/1 var(--sp-font-head); letter-spacing: -0.03em; }
+.sp-lg__m { position: relative; top: -0.62em; margin-left: 1px; font-size: 0.56em; font-weight: 800; letter-spacing: 0; }
+.sp-lg__dot { width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: 0.4; flex-shrink: 0; align-self: center; margin-top: 4px; }
+.sp-lg__d { font: 600 14.5px/1 var(--sp-font-ui); color: var(--sp-text-muted); letter-spacing: 0.005em; }
+.sp-lg--inline { gap: 6px; }
+.sp-lg--inline .sp-lg__l { font-size: 1.15em; }
+.sp-lg--inline .sp-lg__d { font-size: 13px; }
+.sp-lg--inline .sp-lg__dot { margin-top: 2px; }
+.sp-tile .sp-lg { gap: 8px; }
 .sp-unit-switch { display: flex; justify-content: flex-end; margin-top: 8px; }
 .sp-sh__error { margin-top: 12px; padding: 10px 14px; border-radius: var(--sp-r-md); background: var(--sp-danger-bg); color: var(--sp-danger); font-size: 13px; font-weight: 600; }
 
@@ -337,6 +361,8 @@
 .sp-ptab__g--success { background: var(--sp-success-bg); color: var(--sp-success); }
 .sp-ptab__g--warn { background: var(--sp-warn-bg); color: var(--sp-warn); }
 .sp-ptab__g--danger { background: var(--sp-danger-bg); color: var(--sp-danger); }
+.sp-ptab--final { color: var(--sp-pink-ink); }
+.sp-ptab--final .sp-ptab__g { background: var(--sp-pink-bg); color: var(--sp-pink-ink); }
 .sp-ptab-sep { width: 1px; height: 20px; background: var(--sp-hair); align-self: center; margin: 0 2px; }
 .sp-pind { position: absolute; z-index: 0; top: 0; left: 0; border-radius: 12px; background: var(--sp-surface); box-shadow: var(--sp-shadow-knob); pointer-events: none; }
 .sp-pind.is-ready { transition: transform 320ms var(--sp-ease); }
@@ -369,6 +395,45 @@
   .sp-ptab { padding: 8px 10px; gap: 7px; }
 }
 
+/* ── InfoTip (spec §5.5, mockup v8 .info): an 18px ⓘ toggletip. The popover is portalled to <body> (outside .sp-page),
+   so it carries its own font and reduced-motion rule. Enter: 150ms opacity + scale from the trigger (small popover
+   tier); it unmounts on close, so the exit is instant. ── */
+.sp-info { display: inline-flex; vertical-align: middle; margin-left: 4px; }
+.sp-info__btn { width: 18px; height: 18px; padding: 0; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; cursor: pointer; border: 1.5px solid var(--sp-violet); background: var(--sp-surface); color: var(--sp-violet); font: italic 800 12px/1 Georgia, 'Times New Roman', serif; position: relative; transition: transform var(--sp-dur-fast) var(--sp-ease), background-color var(--sp-dur) var(--sp-ease), color var(--sp-dur) var(--sp-ease); }
+/* A 32px hit area around the 18px dot, for touch. */
+.sp-info__btn::before { content: ''; position: absolute; inset: -7px; border-radius: 50%; }
+.sp-info__btn:active { transform: scale(0.92); }
+.sp-info__btn[aria-expanded='true'] { background: var(--sp-violet-bg); }
+.sp-info--pink .sp-info__btn { border-color: var(--sp-pink-ink); color: var(--sp-pink-ink); }
+.sp-info--pink .sp-info__btn[aria-expanded='true'] { background: var(--sp-pink-bg); }
+@media (hover: hover) and (pointer: fine) { .sp-info__btn[aria-expanded='false']:hover { background: var(--sp-violet-bg); } .sp-info--pink .sp-info__btn[aria-expanded='false']:hover { background: var(--sp-pink-bg); } }
+.sp-tip { position: fixed; z-index: 90; width: max-content; max-width: min(260px, calc(100vw - 16px)); padding: 10px 12px; border-radius: var(--sp-r-md); background: var(--sp-ink); color: var(--sp-on-ink); font: 500 12.5px/1.45 var(--sp-font-ui); font-style: normal; text-align: left; white-space: normal; overflow-wrap: break-word; box-shadow: 0 14px 30px -12px rgba(0, 0, 0, 0.5); opacity: 1; transform: none; transition: opacity 150ms var(--sp-ease), transform 150ms var(--sp-ease); }
+.sp-tip b { color: var(--sp-on-ink); font-weight: 700; }
+.sp-tip::after { content: ''; position: absolute; left: var(--sp-tip-arrow, 50%); transform: translateX(-50%); border: 6px solid transparent; }
+.sp-tip--above::after { top: 100%; border-top-color: var(--sp-ink); }
+.sp-tip--below::after { bottom: 100%; border-bottom-color: var(--sp-ink); }
+@starting-style { .sp-tip { opacity: 0; transform: scale(0.96); } }
+@media (prefers-reduced-motion: reduce) {
+  .sp-tip { transition-duration: 1ms; }
+  .sp-info__btn:active { transform: none; }
+}
+
+/* ── Linked lab (spec §3.5, mockup v8 "Linked lab") ── */
+.sp-lab { padding: 20px 22px; margin-bottom: 18px; }
+.sp-lab__head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
+.sp-lab__title { font: 800 17px var(--sp-font-head); margin: 0; display: flex; align-items: center; gap: 8px; }
+.sp-lab__partner { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font: 600 13px var(--sp-font-ui); color: var(--sp-text-muted); text-decoration: none; border-radius: 6px; overflow-wrap: anywhere; }
+@media (hover: hover) and (pointer: fine) { .sp-lab__partner:hover { color: var(--sp-blue-ink); } }
+.sp-lab__rule { margin-left: auto; display: inline-flex; align-items: center; font: 600 12.5px var(--sp-font-ui); color: var(--sp-text-muted); }
+.sp-lab__tbl { width: 100%; min-width: 360px; border-collapse: collapse; font-size: 13.5px; }
+.sp-lab__tbl th, .sp-lab__tbl td { padding: 9px 4px; border-top: 1px solid var(--sp-hair); text-align: left; }
+.sp-lab__tbl thead th { border-top: 0; font: 800 11px var(--sp-font-ui); letter-spacing: 0.07em; text-transform: uppercase; color: var(--sp-text-muted); }
+.sp-lab__tbl tbody th { font-weight: 700; }
+.sp-lab__tbl .r { text-align: right; }
+.sp-lab__comb { font: 800 15px var(--sp-font-ui); }
+.sp-lab__note { margin: 0; font-size: 13px; color: var(--sp-warn); font-weight: 600; }
+@media (max-width: 560px) { .sp-lab { padding: 18px 16px; } .sp-lab__rule { margin-left: 0; } }
+
 /* ── Grade summary (spec §6.4 last bullet) ── */
 .sp-sum { padding: 20px 22px; }
 .sp-sum__head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
@@ -385,16 +450,20 @@
 .sp-sum__row small { display: block; font-size: 12px; color: var(--sp-text-muted); font-weight: 600; }
 .sp-sum__row input { width: 72px; text-align: right; }
 .sp-sum__val { text-align: right; }
-.sp-sum__final { margin-top: 14px; padding: 14px 18px; border-radius: var(--sp-r-item); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; background: var(--sp-pink-bg); }
-.sp-sum__final-label { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; }
-.sp-sum__final-val { font: 800 24px var(--sp-font-head); }
+.sp-sum__col--final { background: linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(253, 228, 239, 0.7)); border: 1px solid rgba(240, 103, 157, 0.35); }
+.sp-sum__col--final .sp-sum__colhead { color: var(--sp-pink-ink); display: flex; align-items: center; justify-content: center; gap: 5px; }
+/* The Final grade tab shows the final column alone. */
+.sp-sum__grid--final { grid-template-columns: minmax(0, 520px); }
+.sp-sum__row b + .sp-info { margin-left: 6px; }
 .sp-sum__note { margin: 12px 0 0; font-size: 12.5px; color: var(--sp-text-muted); }
 .sp-sum__note--lead { margin: -6px 0 14px; }
 
 /* ── Target planner (spec §6.5, mockup v4 §4) ── */
 .sp-tp-shell { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 280ms var(--sp-ease); }
 .sp-tp-shell.is-open { grid-template-rows: 1fr; }
-.sp-tp-shell__inner { overflow: hidden; min-height: 0; }
+/* position: relative makes the collapsed shell the containing block of the planner's absolutely positioned sr-only
+   live region; without it that 1px box escaped to the page and added a white strip below .sp-page (spec §5.1). */
+.sp-tp-shell__inner { position: relative; overflow: hidden; min-height: 0; }
 /* The gap below lives inside the collapsing row (the inner box contains this margin), so closing has no jump. */
 .sp-tp-shell__content { margin-bottom: 22px; opacity: 0; transition: opacity 180ms var(--sp-ease); }
 .sp-tp-shell.is-open .sp-tp-shell__content { opacity: 1; transition-delay: 90ms; }

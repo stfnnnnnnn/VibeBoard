@@ -3,9 +3,11 @@ import { auth } from '@/auth';
 import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
 import SubjectCardView from '@/components/studypulse/SubjectCardView';
-import type { EntryRow, GradingConfig } from '@/components/studypulse/SubjectCardView';
-import { ensureCanvasSchema, ensureSubjectSection } from '@/lib/migrate';
-import { loadGradingConfig } from '@/lib/studypulse/subjectCards';
+import type { EntryRow, GradingConfig, LabLinkData } from '@/components/studypulse/SubjectCardView';
+import { ensureCanvasSchema, ensureGradingV2Schema, ensureSubjectSection } from '@/lib/migrate';
+import { loadGradingConfig, loadSubjectGradeModel } from '@/lib/studypulse/subjectCards';
+import { projectPeriod } from '@/lib/studypulse/projection';
+import { periodNamesMatch } from '@/lib/studypulse/labLink';
 import { todayManila } from '@/lib/studypulse/ui/format';
 import '../studypulse.css';
 
@@ -107,6 +109,55 @@ export default async function SubjectCardPage(
     }
   }
 
+  /* ── Linked lecture/lab (spec §3.5): the link plus the partner's raw period grades, so the header, tabs and final
+     view can show the combined values. Both sides must be this user's subjects (subject_links has no foreign keys,
+     ruling R6). A failure here only drops the lab view; the page still renders. ── */
+  let labLink: LabLinkData | null = null;
+  if (gradingConfig) {
+    try {
+      await ensureGradingV2Schema();
+      const [links] = await pool.execute<RowDataPacket[]>(`
+        SELECT sl.lecture_user_subject_id AS lec, sl.lab_user_subject_id AS lab, sl.lecture_weight,
+               sub_lec.course_code AS lec_code, sub_lec.subject_name AS lec_name, sub_lec.units AS lec_units,
+               sub_lab.course_code AS lab_code, sub_lab.subject_name AS lab_name, sub_lab.units AS lab_units
+        FROM subject_links sl
+        JOIN user_subjects ul ON ul.user_subject_id = sl.lecture_user_subject_id AND ul.user_id = ?
+        JOIN user_subjects ub ON ub.user_subject_id = sl.lab_user_subject_id AND ub.user_id = ?
+        JOIN subjects sub_lec ON sub_lec.subject_id = ul.subject_id
+        JOIN subjects sub_lab ON sub_lab.subject_id = ub.subject_id
+        WHERE sl.lecture_user_subject_id = ? OR sl.lab_user_subject_id = ?
+        LIMIT 1
+      `, [userId, userId, userSubjectId, userSubjectId]);
+      if (links.length) {
+        const l = links[0];
+        const isLecture = Number(l.lec) === userSubjectId;
+        const partnerId = Number(isLecture ? l.lab : l.lec);
+        const partner = await loadSubjectGradeModel(partnerId, userId);
+        const ownNames = gradingConfig.preset.periods.map(p => String(p.name));
+        const periodsMatch = !!partner && periodNamesMatch(ownNames, partner.periods.map(p => p.name));
+        // A lab page follows the lecture's final rule, as the subject cards do; the period index carries across.
+        let lectureFinal: LabLinkData['lectureFinal'] = null;
+        if (!isLecture && partner) {
+          const { final_mode, final_period_id } = partner.config.preset;
+          const idx = partner.config.preset.periods.findIndex(p => p.period_id === final_period_id);
+          lectureFinal = { mode: final_mode ?? null, periodIndex: idx >= 0 ? idx : null };
+        }
+        const units = Number(l.lec_units) + Number(l.lab_units);
+        labLink = {
+          role: isLecture ? 'lecture' : 'lab',
+          partner: { id: partnerId, code: String(isLecture ? l.lab_code : l.lec_code), name: String(isLecture ? l.lab_name : l.lec_name) },
+          lectureWeight: Number(l.lecture_weight),
+          units: Number.isFinite(units) && units > 0 ? units : null,
+          periodsMatch,
+          partnerCurrents: partner ? partner.periods.map(p => projectPeriod(p).current) : [],
+          lectureFinal,
+        };
+      }
+    } catch (err) {
+      console.error(`[studypulse] lab link failed for user_subject_id=${userSubjectId}:`, err);
+    }
+  }
+
   /* ── Load existing presets list (for wizard) ── */
   let existingPresets: Array<{ preset_id: number; name: string; period_count: number }> = [];
   try {
@@ -197,6 +248,7 @@ export default async function SubjectCardPage(
       gradingConfig={gradingConfig}
       initialGradeEntries={initialGradeEntries}
       existingPresets={existingPresets}
+      labLink={labLink}
     />
   );
 }

@@ -3,11 +3,12 @@
 import { useMemo, useState } from 'react';
 import { Calculator, Flag, RotateCcw } from 'lucide-react';
 import { toGradeInfo, type GradeScale } from '@/lib/gradeScale';
-import { projectPeriod, subjectFinal, type CategoryStats, type PeriodInput, type PeriodProjection } from '@/lib/studypulse/projection';
+import { projectPeriod, type CategoryStats, type PeriodInput, type PeriodProjection } from '@/lib/studypulse/projection';
 import type { FinalMode } from '@/lib/studypulse/types';
 import { legacyMidtermPeriod } from '@/lib/studypulse/periodModel';
 import { f1, gradeTone } from '@/lib/studypulse/ui/format';
 import SpSegmented from '../ui/SpSegmented';
+import CategoryInfo from './CategoryInfo';
 
 const TONE = { success: 'sp-tone-success', warn: 'sp-tone-warn', danger: 'sp-tone-danger', none: 'sp-tone-muted' } as const;
 const letterLine = (v: number | null, scale: GradeScale | null) => (v !== null && scale ? (() => { const g = toGradeInfo(v, scale); return `${g.letter} · ${g.description}`; })() : '');
@@ -20,13 +21,21 @@ type ContribCat = Pick<CategoryStats, 'n' | 'weight' | 'avg'>;
 const gradedWeight = (cats: ContribCat[]) => cats.reduce((s, c) => s + (c.n > 0 && c.weight > 0 ? c.weight : 0), 0);
 const contribution = (c: ContribCat, gw: number) => (c.avg === null || gw <= 0 || c.weight <= 0 ? 0 : (c.avg * c.weight) / gw);
 
-/** Custom-preset summary: per-period current (graded-only, spec D11) with a category breakdown and an optional what-if. */
-export default function GradeSummary({ periods, projections, finalMode, finalGrade, finalPeriodKey, scale, transmutationOn, lab }: {
+const meanOf = (vs: (number | null)[]) => { const xs = vs.filter((v): v is number => v !== null); return xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null; };
+
+/** Custom-preset summary: per-period current (graded-only, spec D11) with a category breakdown and an optional what-if.
+    With the 'average' final rule a Final grade column lists each period's grade and their mean; `view="final"` (the
+    Final grade tab) shows that column alone. `combine` maps this subject's period values to the values the final view
+    shows (lecture + lab combined); the period columns themselves stay this subject's own. */
+export default function GradeSummary({ periods, projections, finalMode, finalPeriodKey, scale, transmutationOn, lab, view = 'all', combine }: {
   periods: PeriodInput[]; projections: PeriodProjection[];
   finalMode: FinalMode | null;
-  finalGrade: number | null; finalPeriodKey: string | null;
+  /** The designated period's key under the 'period' rule (it gets a flag); null otherwise. */
+  finalPeriodKey: string | null;
   scale: GradeScale | null; transmutationOn: boolean;
   lab: { has: boolean; lec: number; lab: number };
+  view?: 'all' | 'final';
+  combine?: ((own: (number | null)[]) => (number | null)[]) | null;
 }) {
   const [whatIf, setWhatIf] = useState(false);
   const [wif, setWif] = useState<Record<string, number>>({});
@@ -40,7 +49,11 @@ export default function GradeSummary({ periods, projections, finalMode, finalGra
   }))), [periods, whatIf, wif]);
   const wifProj = useMemo(() => (!whatIf ? projections : wifPeriods.map(projectPeriod)), [whatIf, wifPeriods, projections]);
   const periodValues = wifProj.map(p => p.current);
-  const shownFinal = !whatIf ? finalGrade : subjectFinal(wifPeriods, finalMode, finalPeriodKey);
+  /* The final column: each period's grade (combined with the lab when linked) and their mean. With no edits this equals
+     the header's Final grade tile exactly; in what-if it follows the typed values. */
+  const finalValues = combine ? combine(periodValues) : periodValues;
+  const shownFinal = meanOf(finalValues);
+  const showFinal = finalMode === 'average';
   /* Hint for an empty input: the period's current, else the mean of graded periods. Display only. */
   const graded = projections.map(p => p.current).filter((v): v is number => v !== null);
   const fallback = graded.length ? graded.reduce((s, v) => s + v, 0) / graded.length : null;
@@ -59,15 +72,18 @@ export default function GradeSummary({ periods, projections, finalMode, finalGra
           {transmutationOn && <span className="sp-chip sp-chip--blue">transmuted</span>}
           {whatIf && <span className="sp-chip sp-chip--pink">what if</span>}
         </h2>
-        {whatIf && <button type="button" className="sp-btn sp-btn--quiet sp-focus-ring" onClick={() => setWif({})}><RotateCcw size={14} /> Reset</button>}
-        <button type="button" aria-pressed={whatIf} className={`sp-btn ${whatIf ? 'sp-btn--dark' : 'sp-btn--ghost'} sp-focus-ring`} onClick={() => { setWhatIf(v => !v); setWif({}); }}>
-          {whatIf ? 'Exit what-if' : 'What if?'}
-        </button>
+        {/* The what-if inputs live in the period columns, so the controls go with them (the final view has none). */}
+        {whatIf && view === 'all' && <button type="button" className="sp-btn sp-btn--quiet sp-focus-ring" onClick={() => setWif({})}><RotateCcw size={14} /> Reset</button>}
+        {view === 'all' && (
+          <button type="button" aria-pressed={whatIf} className={`sp-btn ${whatIf ? 'sp-btn--dark' : 'sp-btn--ghost'} sp-focus-ring`} onClick={() => { setWhatIf(v => !v); setWif({}); }}>
+            {whatIf ? 'Exit what-if' : 'What if?'}
+          </button>
+        )}
       </div>
-      {whatIf && <p className="sp-sum__note sp-sum__note--lead">Adjust category averages. Empty fields are ungraded and don&apos;t count until you type a value. Weights stay fixed and nothing is saved. For item-by-item planning, use the Target planner.</p>}
+      {whatIf && view === 'all' && <p className="sp-sum__note sp-sum__note--lead">Adjust category averages. Empty fields are ungraded and don&apos;t count until you type a value. Weights stay fixed and nothing is saved. For item-by-item planning, use the Target planner.</p>}
 
-      <div className="sp-sum__grid sp-num">
-        {periods.map((p, pi) => {
+      <div className={`sp-sum__grid sp-num${view === 'final' ? ' sp-sum__grid--final' : ''}`}>
+        {view === 'all' && periods.map((p, pi) => {
           const v = periodValues[pi];
           return (
             <div key={p.key} className="sp-item sp-sum__col">
@@ -82,7 +98,7 @@ export default function GradeSummary({ periods, projections, finalMode, finalGra
                   const hint = projections[pi].current ?? fallback;
                   return (
                     <div key={c.key} className="sp-sum__row">
-                      <span><b>{c.name}</b><small>{c.weight}%</small></span>
+                      <span><b>{c.name}</b><CategoryInfo cat={c} /><small>{c.weight}%</small></span>
                       {whatIf ? (
                         <input className="sp-input sp-input--sm" type="number" min={0} max={100} step={0.5} aria-label={`${c.name} average`}
                           value={c.key in wif ? wif[c.key] : avg === null ? '' : r1(avg)}
@@ -101,14 +117,22 @@ export default function GradeSummary({ periods, projections, finalMode, finalGra
             </div>
           );
         })}
+        {showFinal && (
+          <div className="sp-item sp-sum__col sp-sum__col--final">
+            <div className="sp-eyebrow sp-sum__colhead"><Flag size={11} aria-hidden /> Final grade · average of periods</div>
+            <div className={`sp-sum__big ${TONE[gradeTone(shownFinal)]}`}>{shownFinal === null ? '—' : dp(shownFinal)}</div>
+            <div className={`sp-sum__lt ${TONE[gradeTone(shownFinal)]}`}>{letterLine(shownFinal, scale) || (shownFinal === null ? 'No grades yet' : '')}</div>
+            <div className="sp-sum__rows">
+              {periods.map((p, pi) => (
+                <div key={p.key} className="sp-sum__row">
+                  <span><b>{p.name}</b>{combine && <small>lecture + lab</small>}</span>
+                  <span className="sp-sum__val"><b className={TONE[gradeTone(finalValues[pi] ?? null)]}>{finalValues[pi] == null ? '—' : dp(finalValues[pi] as number)}</b>{finalValues[pi] == null && <small>not graded yet</small>}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
-
-      {finalMode === 'average' && (
-        <div className="sp-sum__final sp-num">
-          <span className="sp-tone-muted sp-sum__final-label"><Flag size={14} aria-hidden /> Final grade · average of periods</span>
-          <span><b className={`sp-sum__final-val ${TONE[gradeTone(shownFinal)]}`}>{shownFinal === null ? '—' : dp(shownFinal)}</b> <span className="sp-tone-muted">{letterLine(shownFinal, scale)}</span></span>
-        </div>
-      )}
       {lab.has && <p className="sp-sum__note">Lab subject: overall = Lecture × {lab.lec}% + Lab × {lab.lab}%</p>}
     </section>
   );

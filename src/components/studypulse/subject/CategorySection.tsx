@@ -1,13 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, Link2, Plus } from 'lucide-react';
+import { ChevronDown, Plus } from 'lucide-react';
 import type { TransmutationTable } from '@/lib/transmutation';
 import type { EntryRow } from '@/lib/studypulse/types';
+import type { CategoryInput } from '@/lib/studypulse/projection';
 import { averageOf, entryHasGrade } from '@/lib/studypulse/periodModel';
 import { f1, gradeTone } from '@/lib/studypulse/ui/format';
 import EntryTable, { newRowKey, type EntryPersistence, type EntryRowsChange, type TypeColumn } from './EntryTable';
 import SingletonScore from './SingletonScore';
+import CategoryInfo from './CategoryInfo';
 
 export interface CategorySectionProps {
   name: string;
@@ -22,13 +24,16 @@ export interface CategorySectionProps {
   defaultType?: string;
   transTable: TransmutationTable | null;
   transmutationOn: boolean;
-  sharedFrom?: { periodName: string; grade: number } | null;
+  /** This category in the period model (custom presets). Its average includes earlier periods' carried or reused
+      work, which the ⓘ explains; the table itself only ever lists this period's own rows. */
+  model?: CategoryInput | null;
 }
 
 export default function CategorySection(p: CategorySectionProps) {
   const [open, setOpen] = useState(true);
   const table = p.transmutationOn ? p.transTable : null;
-  const avg = averageOf(p.entries, table);
+  const g = p.model?.graded;
+  const avg = g ? (g.length ? g.reduce((s, v) => s + v, 0) / g.length : null) : averageOf(p.entries, table);
   const graded = p.entries.filter(entryHasGrade).length;
   const tone = gradeTone(avg);
 
@@ -45,6 +50,7 @@ export default function CategorySection(p: CategorySectionProps) {
       <div className="sp-cat__head">
         <span className="sp-cat__name"><span className="sp-cat__swatch" style={{ background: p.color }} aria-hidden />{p.name}</span>
         {p.weight !== null && <span className="sp-chip sp-chip--blue sp-num">{p.weight}%</span>}
+        {p.model && <CategoryInfo cat={p.model} />}
         <span className="sp-cat__prog sp-num">{p.singleton ? 'single score' : `${graded} of ${p.entries.length} graded`}</span>
         <div className="sp-cat__right">
           <span className={`sp-avg sp-avg--${tone} sp-num`}>{avg === null ? 'Not yet' : <>{f1(avg)}<small>avg</small></>}</span>
@@ -56,9 +62,6 @@ export default function CategorySection(p: CategorySectionProps) {
           )}
         </div>
       </div>
-      {p.sharedFrom && !p.entries.some(entryHasGrade) && (
-        <div className="sp-shared"><Link2 size={14} aria-hidden /> Using {p.sharedFrom.periodName}&apos;s score ({f1(p.sharedFrom.grade)}). Add your own to override it for this period.</div>
-      )}
       {p.singleton ? (
         <SingletonScore name={p.name} entries={p.entries} onChange={p.onChange} persistence={p.persistence} transTable={p.transTable} transmutationOn={p.transmutationOn} />
       ) : (

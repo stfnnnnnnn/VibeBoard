@@ -1,25 +1,29 @@
 'use client';
 
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { CalendarDays } from 'lucide-react';
+import { CalendarDays, Flag } from 'lucide-react';
 import { f1, gradeTone } from '@/lib/studypulse/ui/format';
 
-export type PeriodSelection = number | 'all';
+export type PeriodSelection = number | 'all' | 'final';
 
 type Ind = { x: number; y: number; w: number; h: number; ready: boolean };
 
-/** Single-select period filter plus "Both"/"All" with a sliding indicator (spec §6.3).
+/** Single-select period filter plus "Both"/"All" with a sliding indicator (spec §6.3), and a "Final grade" view after it
+    when the final grade is the average of the periods (spec §5.3).
     A group of toggle buttons (aria-pressed), not a tablist: "All" shows several period sections at once,
     which a tab (one tab, one panel) can't express. Arrow keys, Home and End still move the selection. */
-export default function PeriodTabs({ periods, value, onChange }: {
+export default function PeriodTabs({ periods, final = null, value, onChange }: {
   periods: Array<{ id: number; name: string; current: number | null }>;
+  /** Set for the 'average' final rule: adds the Final grade tab with this grade. */
+  final?: { current: number | null } | null;
   value: PeriodSelection;
   onChange: (v: PeriodSelection) => void;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
   const [ind, setInd] = useState<Ind>({ x: 0, y: 0, w: 0, h: 0, ready: false });
-  const order: PeriodSelection[] = [...periods.map(p => p.id), 'all'];
+  const hasFinal = final !== null;
+  const order: PeriodSelection[] = [...periods.map(p => p.id), 'all', ...(hasFinal ? ['final' as const] : [])];
   const active = Math.max(0, order.indexOf(value));
   const lastActive = useRef<number | null>(null);
 
@@ -41,7 +45,7 @@ export default function PeriodTabs({ periods, value, onChange }: {
     const ro = new ResizeObserver(() => measure(false));
     if (wrap.current) ro.observe(wrap.current);
     return () => ro.disconnect();
-  }, [active, periods]);
+  }, [active, periods, hasFinal]);
 
   const onKey = (e: KeyboardEvent, i: number) => {
     const last = order.length - 1;
@@ -74,6 +78,16 @@ export default function PeriodTabs({ periods, value, onChange }: {
         className="sp-ptab sp-focus-ring" onClick={() => onChange('all')} onKeyDown={e => onKey(e, periods.length)}>
         {periods.length === 2 ? 'Both' : 'All'}
       </button>
+      {final && (
+        <>
+          <span className="sp-ptab-sep" aria-hidden />
+          <button ref={el => { tabs.current[periods.length + 1] = el; }} type="button" aria-pressed={value === 'final'}
+            className="sp-ptab sp-ptab--final sp-focus-ring" onClick={() => onChange('final')} onKeyDown={e => onKey(e, periods.length + 1)}>
+            <Flag size={15} aria-hidden />Final grade
+            <span className="sp-ptab__g sp-num">{final.current === null ? '—' : f1(final.current)}</span>
+          </button>
+        </>
+      )}
     </div>
   );
 }

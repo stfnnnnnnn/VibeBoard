@@ -29,9 +29,19 @@ export const rowKey = (r: EntryRow) => r._key ?? `id-${r.id}`;
 /** Replace the row with key `key` (and only it) by `fn(row)`; a row deleted meanwhile is left alone. */
 const patchByKey = (key: string, fn: (r: EntryRow) => EntryRow) => (prev: EntryRow[]) => prev.map(r => (rowKey(r) === key ? fn(r) : r));
 
+/** Row editing for the entry tables and the single-score row. No alert()/confirm(): a failed or invalid save leaves an
+    inline error on the row (`errorFor`), and deleting a saved row takes a second, inline confirmation (`askDelete`). */
 export function useEntryEditing(entries: EntryRow[], onChange: EntryRowsChange, persistence: EntryPersistence) {
   const [editingIds, setEditingIds] = useState<Set<number>>(new Set());
   const [snapshots, setSnapshots] = useState<Record<number, EntryRow>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const setError = (key: string, msg: string | null) => setErrors(prev => {
+    if (!msg && !(key in prev)) return prev;
+    const n = { ...prev };
+    if (msg) n[key] = msg; else delete n[key];
+    return n;
+  });
   const clearEdit = (id: number) => {
     setEditingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
     setSnapshots(prev => { const n = { ...prev }; delete n[id]; return n; });
@@ -39,9 +49,7 @@ export function useEntryEditing(entries: EntryRow[], onChange: EntryRowsChange, 
 
   const setField = useCallback((idx: number, field: keyof EntryRow, val: string) => {
     const row = entries[idx];
-    if (field === 'score' && row.canvas_linked) {
-      if (!window.confirm('This score comes from Canvas. It will be overwritten by Canvas on the next sync — edit anyway?')) return;
-    }
+    setError(rowKey(row), null);
     onChange(patchByKey(rowKey(row), r => {
       const next = { ...r, [field]: val };
       if (field === 'score' || field === 'items') {
@@ -58,14 +66,15 @@ export function useEntryEditing(entries: EntryRow[], onChange: EntryRowsChange, 
     const today = todayManila();
     const validAc = row.accomplished_at && row.accomplished_at <= today ? row.accomplished_at : null;
     const doneAt = row.status === 'Done' ? (validAc || today) : null;
-    if (!row.name.trim()) { alert('Please enter a name.'); return false; }
+    if (!row.name.trim()) { setError(key, 'Enter a name first.'); return false; }
+    setError(key, null);
     onChange(patchByKey(key, r => ({ ...r, saving: true })));
     try {
       const id = await persistence.save(row, doneAt);
       onChange(patchByKey(key, r => ({ ...r, id, saving: false, accomplished_at: doneAt ?? '' })));
       return true;
     } catch (err) {
-      alert('Save failed: ' + (err as Error).message);
+      setError(key, `Couldn't save: ${(err as Error).message}`);
       onChange(patchByKey(key, r => ({ ...r, saving: false })));
       return false;
     }
@@ -73,6 +82,7 @@ export function useEntryEditing(entries: EntryRow[], onChange: EntryRowsChange, 
 
   const enterEdit = (idx: number) => {
     const row = entries[idx];
+    setConfirming(null);
     setEditingIds(prev => new Set([...prev, row.id]));
     setSnapshots(prev => ({ ...prev, [row.id]: { ...row } }));
   };
@@ -80,21 +90,34 @@ export function useEntryEditing(entries: EntryRow[], onChange: EntryRowsChange, 
     const row = entries[idx];
     const snap = snapshots[row.id];
     if (snap) onChange(patchByKey(rowKey(row), () => snap));
+    setError(rowKey(row), null);
     clearEdit(row.id);
   };
   const saveAndExit = async (idx: number) => { const id = entries[idx].id; if (await saveRow(idx)) clearEdit(id); };
+  /** An unsaved row is dropped at once; a saved one first asks inline (see isConfirming / deleteRow). */
+  const askDelete = (idx: number) => {
+    const row = entries[idx];
+    if (!row.id) { const key = rowKey(row); onChange(prev => prev.filter(r => rowKey(r) !== key)); return; }
+    setConfirming(rowKey(row));
+  };
+  const cancelDelete = () => setConfirming(null);
   const deleteRow = async (idx: number) => {
     const row = entries[idx];
     const key = rowKey(row);
-    const drop = (prev: EntryRow[]) => prev.filter(r => rowKey(r) !== key);
-    if (!row.id) { onChange(drop); return; }
-    if (!confirm('Delete this entry?')) return;
-    await persistence.remove(row);
-    onChange(drop);
+    setConfirming(null);
+    try {
+      if (row.id) await persistence.remove(row);
+      setError(key, null);
+      onChange(prev => prev.filter(r => rowKey(r) !== key));
+    } catch (err) {
+      setError(key, `Couldn't delete: ${(err as Error).message}`);
+    }
   };
   const isEditing = (row: EntryRow) => row.id === 0 || editingIds.has(row.id);
+  const isConfirming = (row: EntryRow) => confirming === rowKey(row);
+  const errorFor = (row: EntryRow) => errors[rowKey(row)] ?? null;
 
-  return { setField, saveRow, enterEdit, cancelEdit, saveAndExit, deleteRow, isEditing };
+  return { setField, saveRow, enterEdit, cancelEdit, saveAndExit, askDelete, cancelDelete, deleteRow, isEditing, isConfirming, errorFor };
 }
 
 export default function EntryTable({
@@ -131,12 +154,17 @@ export default function EntryTable({
             const due = dueNote(row.deadline, today, done);
             const ac = row.accomplished_at && row.accomplished_at <= today ? row.accomplished_at : '';
             const sub = submittedNote(row.deadline, ac);
+            const confirming = ed.isConfirming(row);
+            const err = ed.errorFor(row);
             return (
-              <tr key={rowKey(row)} className={editing ? 'is-editing' : undefined}>
+              <tr key={rowKey(row)} className={editing ? 'is-editing' : confirming ? 'is-confirming' : undefined}>
                 <td>
                   {editing
                     ? <input className="sp-input sp-input--sm" aria-label="Name" value={row.name} placeholder="Name…" onChange={e => ed.setField(idx, 'name', e.target.value)} />
-                    : <span className="sp-en">{row.name || '—'}{row.canvas_linked && <span className="sp-src">Canvas</span>}</span>}
+                    // The badge sits inline after the last word of the name, never in a column of its own (spec §5.6).
+                    : <span className="sp-en"><span className="sp-en__name">{row.name || '—'}{row.canvas_linked && <span className="sp-src">Canvas</span>}</span></span>}
+                  {editing && row.canvas_linked && <small className="sp-row-note">From Canvas: the next sync overwrites the score.</small>}
+                  {err && <small className="sp-row-err" role="alert">{err}</small>}
                 </td>
                 {typeColumn && (
                   <td>
@@ -173,10 +201,16 @@ export default function EntryTable({
                         </button>
                         <button type="button" className="sp-icon-btn sp-focus-ring" aria-label="Cancel" onClick={() => (row.id === 0 ? ed.deleteRow(idx) : ed.cancelEdit(idx))}><X size={15} /></button>
                       </>
+                    ) : confirming ? (
+                      <>
+                        {/* Focus moves here so the confirmation is announced and Enter completes it. */}
+                        <button type="button" autoFocus className="sp-confirm-del sp-focus-ring" aria-label={`Confirm delete ${row.name}`} onClick={() => ed.deleteRow(idx)}>Delete</button>
+                        <button type="button" className="sp-icon-btn sp-focus-ring" aria-label="Keep entry" onClick={ed.cancelDelete}><X size={15} /></button>
+                      </>
                     ) : (
                       <>
                         <button type="button" className="sp-icon-btn sp-focus-ring" aria-label={`Edit ${row.name}`} onClick={() => ed.enterEdit(idx)}><Pencil size={14} /></button>
-                        <button type="button" className="sp-icon-btn sp-icon-btn--danger sp-focus-ring" aria-label={`Delete ${row.name}`} onClick={() => ed.deleteRow(idx)}><Trash2 size={14} /></button>
+                        <button type="button" className="sp-icon-btn sp-icon-btn--danger sp-focus-ring" aria-label={`Delete ${row.name}`} onClick={() => ed.askDelete(idx)}><Trash2 size={14} /></button>
                       </>
                     )}
                   </span>

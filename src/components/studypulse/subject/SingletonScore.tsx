@@ -31,6 +31,8 @@ export default function SingletonScore({
   const ed = useEntryEditing(rows, change, persistence);
   const row = rows[0];
   const editing = ed.isEditing(row);
+  const confirming = ed.isConfirming(row);
+  const err = ed.errorFor(row);
   const today = todayManila();
 
   return (
@@ -53,12 +55,23 @@ export default function SingletonScore({
           <span className="sp-frac">{row.score || '—'} <span>/ {row.items || '—'}</span></span>
           <GradePill row={row} transTable={transTable} transmutationOn={transmutationOn} />
           <span className="sp-row-actions">
-            <button type="button" className="sp-icon-btn sp-focus-ring" aria-label={`Edit ${name}`} onClick={() => ed.enterEdit(0)}><Pencil size={14} /></button>
-            <button type="button" className="sp-icon-btn sp-icon-btn--danger sp-focus-ring" aria-label={`Delete ${name}`} onClick={() => ed.deleteRow(0)}><Trash2 size={14} /></button>
+            {confirming ? (
+              <>
+                <button type="button" autoFocus className="sp-confirm-del sp-focus-ring" aria-label={`Confirm delete ${name} score`} onClick={() => ed.deleteRow(0)}>Delete</button>
+                <button type="button" className="sp-icon-btn sp-focus-ring" aria-label="Keep score" onClick={ed.cancelDelete}><X size={15} /></button>
+              </>
+            ) : (
+              <>
+                <button type="button" className="sp-icon-btn sp-focus-ring" aria-label={`Edit ${name}`} onClick={() => ed.enterEdit(0)}><Pencil size={14} /></button>
+                <button type="button" className="sp-icon-btn sp-icon-btn--danger sp-focus-ring" aria-label={`Delete ${name}`} onClick={() => ed.askDelete(0)}><Trash2 size={14} /></button>
+              </>
+            )}
           </span>
         </>
       )}
       {row.deadline && !editing && <span className="sp-single__note sp-tone-muted">Scheduled {shortDate(row.deadline, today)}</span>}
+      {editing && row.canvas_linked && <small className="sp-row-note sp-single__msg">From Canvas: the next sync overwrites the score.</small>}
+      {err && <small className="sp-row-err sp-single__msg" role="alert">{err}</small>}
     </div>
   );
 }

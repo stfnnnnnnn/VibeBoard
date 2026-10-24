@@ -55,8 +55,8 @@ export default function SubjectToolbar({
           </button>
           {menu && (
             <ul id="sp-canvas-links" className="sp-menu__pop" aria-label="Canvas">
-              <li><Link className="sp-menu__item sp-focus-ring" href={`/studypulse/canvas?subject=${userSubjectId}&view=activity`}><Inbox size={15} aria-hidden /> Activity Bank</Link></li>
-              <li><Link className="sp-menu__item sp-focus-ring" href={`/studypulse/canvas?subject=${userSubjectId}&view=announcements`}><Megaphone size={15} aria-hidden /> Announcements</Link></li>
+              <li><Link className="sp-menu__item sp-focus-ring" href={`/studypulse/canvas?tab=bank&subject=${userSubjectId}`}><Inbox size={15} aria-hidden /> Activity Bank</Link></li>
+              <li><Link className="sp-menu__item sp-focus-ring" href={`/studypulse/canvas?tab=announcements&subject=${userSubjectId}`}><Megaphone size={15} aria-hidden /> Announcements</Link></li>
             </ul>
           )}
         </div>
