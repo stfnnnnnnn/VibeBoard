@@ -1,64 +1,57 @@
 'use client';
 
-import { Suspense, useState, useEffect, useCallback } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { GraduationCap, Home, ArrowLeft } from 'lucide-react';
-import CanvasConnectPanel, { type ConnectionStatus } from '@/components/studypulse/CanvasConnectPanel';
-import CanvasCourseMapping from '@/components/studypulse/CanvasCourseMapping';
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import HubHeader, { panelId, tabId } from '@/components/studypulse/canvas/HubHeader';
+import CanvasOverview from '@/components/studypulse/canvas/CanvasOverview';
+import UndoToast from '@/components/studypulse/canvas/UndoToast';
+import { useUndoToast } from '@/components/studypulse/canvas/useUndoToast';
+import {
+  subjectCode, sumCounts,
+  type CanvasCourse, type ConnectionStatus, type HubSubject, type HubTab, type PendingCounts,
+} from '@/components/studypulse/canvas/types';
+// Temporary: Tasks 13 and 14 replace these two with the hub's own Activity Bank and Announcements.
 import CanvasActivityBank from '@/components/studypulse/CanvasActivityBank';
 import CanvasAnnouncementBank, { type AnnouncementItem } from '@/components/studypulse/CanvasAnnouncementBank';
 
-export default function CanvasClientShell(props: {
-  initialConnection: ConnectionStatus;
-  existingSubjects: { user_subject_id: number; subject_name: string }[];
-}) {
-  return (
-    <Suspense fallback={<div className="vb-bg" style={{ minHeight: '100vh' }} />}>
-      <CanvasClientShellInner {...props} />
-    </Suspense>
-  );
-}
-
-function CanvasClientShellInner({
-  initialConnection, existingSubjects,
-}: {
-  initialConnection: ConnectionStatus;
-  existingSubjects: { user_subject_id: number; subject_name: string }[];
+/**
+ * The Canvas hub (spec §6): one header row, then the active view's panel. The view and the subject filter live in the
+ * URL (?tab=, ?subject=) via router.replace without scrolling, so a reload or a link from a subject page lands on the
+ * same view. Counts come from the server; every change calls router.refresh() so they stay current.
+ */
+export default function CanvasClientShell({ connection, subjects, initialCourses, counts, initialTab, initialSubject }: {
+  connection: ConnectionStatus;
+  subjects: HubSubject[];
+  initialCourses: CanvasCourse[];
+  counts: PendingCounts;
+  initialTab: HubTab;
+  initialSubject: number | null;
 }) {
   const router = useRouter();
-  const [connection] = useState(initialConnection);
-  const [courses, setCourses]     = useState<never[]>([]);
+  const toast = useUndoToast();
+  const [tab, setTab] = useState<HubTab>(initialTab);
+  const [subject, setSubject] = useState<number | null>(initialSubject);
+  const [courses, setCourses] = useState<CanvasCourse[]>(initialCourses);
   const [bankItems, setBankItems] = useState<never[]>([]);
   const [announcementItems, setAnnouncementItems] = useState<AnnouncementItem[]>([]);
 
-  const searchParams = useSearchParams();
-  const subjectParam = searchParams.get('subject');
-  const subjectId    = subjectParam && /^\d+$/.test(subjectParam) ? subjectParam : null;
-  const subjectName  = subjectId
-    ? existingSubjects.find(s => String(s.user_subject_id) === subjectId)?.subject_name ?? null
-    : null;
+  const syncUrl = (t: HubTab, s: number | null) => {
+    const q = new URLSearchParams({ tab: t });
+    if (s !== null) q.set('subject', String(s));
+    router.replace(`/studypulse/canvas?${q.toString()}`, { scroll: false });
+  };
+  const changeTab = (t: HubTab) => { if (t === tab) return; setTab(t); syncUrl(t, subject); };
+  const changeSubject = (s: number | null) => { setSubject(s); syncUrl(tab, s); };
 
-  // Task/announcement review only happens per-subject, via a subject page's dedicated
-  // "Activity Bank" / "Announcements" button — each shows only its own panel. The general,
-  // un-scoped page (no subjectId) shows neither: it's just Connect Canvas + New Canvas
-  // Courses, so dumping every pending item from every subject doesn't clutter it.
-  const viewParam         = searchParams.get('view');
-  const showActivityBank  = subjectId != null && viewParam !== 'announcements';
-  const showAnnouncements = subjectId != null && viewParam === 'announcements';
-
+  // Same endpoints as before; only the active view's data is fetched.
   const refresh = useCallback(async () => {
     try {
-      const bankUrl = subjectId
-        ? `/api/canvas/bank?status=pending&user_subject_id=${subjectId}`
-        : '/api/canvas/bank?status=pending';
-      const announcementsUrl = subjectId
-        ? `/api/canvas/announcements?user_subject_id=${subjectId}`
-        : '/api/canvas/announcements';
-      // Skip fetching whichever panel this view won't render at all.
+      const sid = subject !== null ? `user_subject_id=${subject}` : '';
       const [coursesRes, bankRes, announcementsRes] = await Promise.all([
-        subjectId ? Promise.resolve(null) : fetch('/api/canvas/courses'),
-        showActivityBank ? fetch(bankUrl) : Promise.resolve(null),
-        showAnnouncements ? fetch(announcementsUrl) : Promise.resolve(null),
+        tab === 'overview' ? fetch('/api/canvas/courses') : Promise.resolve(null),
+        tab === 'bank' ? fetch(`/api/canvas/bank?status=pending${sid ? `&${sid}` : ''}`) : Promise.resolve(null),
+        tab === 'announcements' ? fetch(`/api/canvas/announcements${sid ? `?${sid}` : ''}`) : Promise.resolve(null),
       ]);
       if (coursesRes?.ok) setCourses((await coursesRes.json()).courses);
       if (bankRes?.ok) setBankItems((await bankRes.json()).items);
@@ -66,74 +59,60 @@ function CanvasClientShellInner({
     } catch (err) {
       console.error('Failed to refresh Canvas data:', err);
     }
-  }, [subjectId, showActivityBank, showAnnouncements]);
+  }, [tab, subject]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    // The Overview's courses arrive with the page; the other views load on entry.
+    if (!connection.connected || tab === 'overview') return;
+    refresh();
+  }, [refresh, connection.connected, tab]);
+
+  const onChange = useCallback(() => {
+    refresh();
+    router.refresh();
+  }, [refresh, router]);
+
+  const scoped = subject !== null ? subjects.find(s => s.user_subject_id === subject) ?? null : null;
+  const inSubject = (m: Record<string, number>) => (subject === null ? sumCounts(m) : m[String(subject)] ?? 0);
+  const tabCounts = { bank: inSubject(counts.bank), announcements: inSubject(counts.announcements) };
+  const showTabs = connection.connected;
+  const view: HubTab = showTabs ? tab : 'overview';
 
   return (
-    <div className="vb-bg" style={{ margin: 0, fontFamily: "'Inter', sans-serif", minHeight: '100vh', color: '#333' }}>
-      <style jsx>{`
-        .cvs-pill:hover { background: rgba(255,255,255,0.85) !important; }
-      `}</style>
-      <div style={{ maxWidth: '900px', padding: '32px', width: '100%', margin: '0 auto' }}>
+    <div className="vb-bg sp-page">
+      <div className="sp-wrap">
+        <HubHeader tab={view} onTab={changeTab} counts={tabCounts} showTabs={showTabs}
+          subjects={subjects} subject={subject} onSubject={changeSubject} />
 
-        {/* ── Header ── */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px 14px', marginBottom: '20px' }}>
-          <h1 className="gradient-text" style={{
-            fontSize: 'clamp(1.5rem, 3vw, 2rem)', fontWeight: 800, margin: 0,
-            fontFamily: "'DM Sans', 'Segoe UI', sans-serif", letterSpacing: '-0.01em',
-            display: 'flex', alignItems: 'center', gap: '10px',
-          }}>
-            <GraduationCap size={24} strokeWidth={2.4} /> Canvas Integration
-          </h1>
-          <button
-            className="cvs-pill"
-            onClick={() => router.push('/studypulse')}
-            style={{
-              marginLeft: 'auto', background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.45)',
-              borderRadius: '999px', padding: '8px 15px', cursor: 'pointer', display: 'flex', alignItems: 'center',
-              gap: '6px', fontSize: '0.82rem', fontWeight: 700, color: '#5c6b80',
-            }}
-          >
-            <Home size={14} color="#74bcd9" strokeWidth={2.2} /> Study Pulse
-          </button>
-        </div>
-
-        {subjectId && (
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px',
-            background: 'rgba(116,188,217,0.14)', border: '1px solid rgba(116,188,217,0.3)',
-            borderRadius: '16px', padding: '11px 18px', marginBottom: '20px',
-            fontSize: '0.84rem', color: '#2a7fa8', fontWeight: 600,
-          }}>
-            <span>
-              Showing {showAnnouncements && !showActivityBank ? 'announcements' : 'pending items'} for {subjectName ?? 'this subject'}
-            </span>
-            <button
-              className="cvs-pill"
-              onClick={() => router.push(`/studypulse/${subjectId}`)}
-              style={{
-                background: 'transparent', border: 'none', color: '#2a7fa8', fontSize: '0.8rem', fontWeight: 700,
-                cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 8px', borderRadius: '999px',
-              }}
-            >
-              <ArrowLeft size={13} /> Back to subject
+        {scoped && view !== 'overview' && (
+          <div className="sp-scoped" role="note">
+            <span>Showing <ScopedCode subject={scoped} /> only</span>
+            <button type="button" className="sp-btn sp-btn--quiet sp-btn--sm sp-focus-ring" onClick={() => changeSubject(null)}>
+              Show all subjects
             </button>
           </div>
         )}
 
-        <CanvasConnectPanel connection={connection} onChange={refresh} />
-        {connection.connected && (
-          <>
-            {/* Scoped to one subject, this view shows only the panel its entry button asked
-                for — the New Canvas Courses mapping list is unrelated once you're already
-                inside a subject, regardless of which panel is showing. */}
-            {!subjectId && <CanvasCourseMapping courses={courses} existingSubjects={existingSubjects} onChange={refresh} />}
-            {showActivityBank && <CanvasActivityBank items={bankItems} onChange={refresh} />}
-            {showAnnouncements && <CanvasAnnouncementBank items={announcementItems} onChange={refresh} />}
-          </>
-        )}
+        <div id={panelId(view)} role={showTabs ? 'tabpanel' : undefined} aria-labelledby={showTabs ? tabId(view) : undefined}
+          className="sp-hub-panel">
+          {view === 'overview' && (
+            <CanvasOverview connection={connection} courses={courses} subjects={subjects} counts={counts}
+              onChange={onChange} toast={toast.show} />
+          )}
+          {view === 'bank' && <CanvasActivityBank items={bankItems} onChange={onChange} />}
+          {view === 'announcements' && <CanvasAnnouncementBank items={announcementItems} onChange={onChange} />}
+        </div>
       </div>
+      <UndoToast api={toast} />
     </div>
+  );
+}
+
+/** The scoped subject's code, linking back to its page (the old bar's "Back to subject"). */
+function ScopedCode({ subject }: { subject: HubSubject }) {
+  return (
+    <Link className="sp-scoped__code sp-focus-ring" href={`/studypulse/${subject.user_subject_id}`} title={`Open ${subject.subject_name}`}>
+      {subjectCode(subject)}
+    </Link>
   );
 }
