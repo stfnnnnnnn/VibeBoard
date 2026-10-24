@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Loader2, X } from 'lucide-react';
 import type { GradingConfig } from '@/lib/studypulse/types';
 import {
@@ -15,9 +15,9 @@ import LabStep, { useLab } from './LabStep';
 import ReviewStep, { type Scope, type SummaryItem } from './ReviewStep';
 import ChoosePreset, { ModePicker, type EntryMode, type NewKind, type PresetOption } from './ChoosePreset';
 import { useMoves } from './useMoves';
+import { focusOrder, inertOthers, tabTarget } from './focusTrap';
 
 const STEPS = ['Scale', 'Periods & categories', 'Final grade', 'Linked lab', 'Review'] as const;
-const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 const sig = (d: SetupDraft) => JSON.stringify(draftToPayload(d));
 
 export interface SavedInfo { entriesMoved: boolean; labChanged: boolean }
@@ -51,8 +51,13 @@ export default function GradingSetup({ userSubjectId, config, existingPresets, e
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const nextRef = useRef<HTMLButtonElement>(null);
+  /** A control to focus after the next render, when the one that had focus is about to unmount. */
+  const pendingFocus = useRef<'cancel' | 'next' | null>(null);
 
   const editing = mode === 'edit' && !!editDraft;
   const draft = editing ? editDraft! : newDraft;
@@ -69,15 +74,40 @@ export default function GradingSetup({ userSubjectId, config, existingPresets, e
   }, [current]);
   const shared = (usage?.length ?? 0) > 1;
 
-  /* Focus in on open, back to the opener on close; the page behind does not scroll. */
+  /* Modal behaviour. On open: focus the title, lock page scroll, make everything outside the sheet inert, and take
+     Esc / Tab at the document (capture), so they work wherever focus is, even on <body> after a control unmounted.
+     On close: undo all of it and return focus to the opener. */
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    const undoInert = rootRef.current ? inertOthers(rootRef.current) : () => {};
     panelRef.current?.querySelector<HTMLElement>('#gs-title')?.focus({ preventScroll: true });
-    return () => { document.body.style.overflow = prev; if (opener?.isConnected) opener.focus({ preventScroll: true }); };
+    const onKey = (e: KeyboardEvent) => keyRef.current(e);
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      undoInert();
+      document.body.style.overflow = prev;
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
   }, []);
-  useEffect(() => { if (confirming) keepRef.current?.focus(); }, [confirming]);
+  /* After every render: a requested hand-off first, else if the focused control unmounted (focus fell to <body>),
+     bring focus back to the title so the keyboard stays inside the sheet. */
+  useEffect(() => {
+    const want = pendingFocus.current === 'cancel' ? cancelRef.current : pendingFocus.current === 'next' ? nextRef.current : null;
+    pendingFocus.current = null;
+    if (want) { want.focus(); return; }
+    const panel = panelRef.current;
+    if (panel && !panel.contains(document.activeElement)) panel.querySelector<HTMLElement>('#gs-title')?.focus({ preventScroll: true });
+  });
+  const wasConfirming = useRef(false);
+  useEffect(() => {
+    if (confirming) keepRef.current?.focus();
+    else if (wasConfirming.current) cancelRef.current?.focus(); // the bar's buttons are gone; Cancel sits where they were
+    wasConfirming.current = confirming;
+  }, [confirming]);
 
   const errors = useMemo(() => ({ ...validateDraft(draft), ...lab.errors }), [draft, lab.errors]);
   const gradingDirty = mode === 'new' || (editing && sig(editDraft!) !== editBase);
@@ -105,14 +135,18 @@ export default function GradingSetup({ userSubjectId, config, existingPresets, e
   const canSave = !saving && !moves.loading && problems.length === 0 && !nothingToSave;
 
   const requestClose = () => { if (saving) return; if (dirty) setConfirming(true); else onClose(); };
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Escape') { e.stopPropagation(); if (confirming) setConfirming(false); else requestClose(); return; }
-    if (e.key !== 'Tab' || !panelRef.current) return;
-    const nodes = [...panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(n => n.offsetParent !== null);
-    if (!nodes.length) return;
-    const first = nodes[0], last = nodes[nodes.length - 1];
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  keyRef.current = (e: KeyboardEvent) => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    if (e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation();
+      if (confirming) setConfirming(false); else requestClose();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const order = focusOrder(panel, panel.querySelector<HTMLElement>('#gs-title'));
+    const target = tabTarget<HTMLElement>(order, document.activeElement as HTMLElement | null, e.shiftKey);
+    if (target) { e.preventDefault(); target.focus(); }
   };
 
   const switchMode = (m: EntryMode) => { setMode(m); setStep(0); setFormError(null); };
@@ -163,9 +197,9 @@ export default function GradingSetup({ userSubjectId, config, existingPresets, e
   const showSteps = mode !== 'another';
 
   return (
-    <div className="sp-gs-root">
+    <div ref={rootRef} className="sp-gs-root">
       <div className="sp-gs-scrim" aria-hidden onMouseDown={requestClose} />
-      <div ref={panelRef} className="sp-gs" role="dialog" aria-modal="true" aria-labelledby="gs-title" onKeyDown={onKeyDown}>
+      <div ref={panelRef} className="sp-gs" role="dialog" aria-modal="true" aria-labelledby="gs-title" tabIndex={-1}>
         <header className="sp-gs__head">
           <div className="sp-gs__titles">
             <h2 id="gs-title" tabIndex={-1}>Grading system</h2>
@@ -222,13 +256,13 @@ export default function GradingSetup({ userSubjectId, config, existingPresets, e
             </div>
           ) : (
             <>
-              <button type="button" className="sp-btn sp-btn--quiet sp-focus-ring" onClick={requestClose} disabled={saving}>Cancel</button>
+              <button ref={cancelRef} type="button" className="sp-btn sp-btn--quiet sp-focus-ring" onClick={requestClose} disabled={saving}>Cancel</button>
               <div className="sp-gs__foot-right">
                 {showSteps && step > 0 && (
-                  <button type="button" className="sp-btn sp-btn--ghost sp-focus-ring" onClick={() => goStep(step - 1)}><ArrowLeft size={15} aria-hidden /> Back</button>
+                  <button type="button" className="sp-btn sp-btn--ghost sp-focus-ring" onClick={() => { if (step === 1) pendingFocus.current = 'next'; goStep(step - 1); }}><ArrowLeft size={15} aria-hidden /> Back</button>
                 )}
                 {showSteps && step < 4 ? (
-                  <button type="button" className="sp-btn sp-btn--primary sp-focus-ring" onClick={() => goStep(step + 1)}>Next <ArrowRight size={15} aria-hidden /></button>
+                  <button ref={nextRef} type="button" className="sp-btn sp-btn--primary sp-focus-ring" onClick={() => goStep(step + 1)}>Next <ArrowRight size={15} aria-hidden /></button>
                 ) : (
                   <button type="button" className="sp-btn sp-btn--primary sp-focus-ring" onClick={save} disabled={!canSave} aria-busy={saving}>
                     {saving ? <Loader2 size={15} className="sp-spin" aria-hidden /> : <Check size={15} aria-hidden />}

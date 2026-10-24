@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { GradingPresetFull } from '@/lib/studypulse/types';
 import {
   toDraft, linkAcross, renameLinked, periodSum, validateDraft, draftToPayload,
-  feuTemplate, blankDraft, deletedCategories, prefillMap, describeChanges, stepOfError, type UiCategory,
+  feuTemplate, blankDraft, deletedCategories, prefillMap, describeChanges, stepOfError, setSingleton, type UiCategory,
 } from '../draft';
 
 const PRESET: GradingPresetFull = {
@@ -230,4 +230,22 @@ test('describeChanges lists what the review step shows', () => {
   assert.ok(lines.some(l => /Removed/.test(l) && /Finals · Tasks/.test(l)));
   assert.ok(lines.some(l => /Added/.test(l) && /Finals · Recitation/.test(l)));
   assert.deepEqual(describeChanges(PRESET, toDraft(PRESET)), []);
+});
+
+test('setSingleton mirrors the single-score flag to every category in the link group (R11)', () => {
+  const d = toDraft(PRESET);
+  // Quizzes is linked ('q') in both periods; Finals' copy includes earlier entries.
+  const single = setSingleton(d, 0, 0, true);
+  assert.equal(single.periods[0].categories[0].is_singleton, true);
+  assert.equal(single.periods[1].categories[0].is_singleton, true);
+  assert.equal(single.periods[1].categories[0].include_earlier, false); // only a multi-entry flag
+  assert.equal(single.periods[0].categories[1].is_singleton, false); // Tasks untouched
+  const back = setSingleton(single, 1, 0, false);
+  assert.deepEqual(back.periods.map(p => p.categories[0].is_singleton), [false, false]);
+  // An unlinked category changes alone.
+  const solo = setSingleton(d, 1, 3, false);
+  assert.equal(solo.periods[1].categories[3].is_singleton, false);
+  assert.equal(solo.periods[0].categories[2].is_singleton, true);
+  // The input is not mutated.
+  assert.equal(d.periods[1].categories[0].is_singleton, false);
 });

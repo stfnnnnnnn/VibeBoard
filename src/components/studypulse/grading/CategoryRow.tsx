@@ -1,8 +1,9 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { Check, Circle, Layers, X } from 'lucide-react';
-import { linkAcross, renameLinked, type FieldErrors, type SetupDraft, type UiCategory } from './draft';
+import { linkAcross, renameLinked, setSingleton, type FieldErrors, type SetupDraft, type UiCategory } from './draft';
+import { focusNeighbour } from './focusTrap';
 
 export function FieldError({ id, children }: { id: string; children: ReactNode }) {
   return <div id={id} className="sp-field__err" role="alert">{children}</div>;
@@ -47,10 +48,15 @@ export default function CategoryRow({ draft, pi, ci, onChange, errors, shown, on
     ...draft,
     periods: draft.periods.map((p, i) => i !== pi ? p : { ...p, categories: p.categories.map((o, j) => j === ci ? { ...o, ...fields } : o) }),
   });
-  const remove = () => onChange({
-    ...draft,
-    periods: draft.periods.map((p, i) => i !== pi ? p : { ...p, categories: p.categories.filter((_, j) => j !== ci) }),
-  });
+  // Focus the neighbouring row's name first: the X being clicked leaves the DOM with this row.
+  const remove = (e: MouseEvent<HTMLButtonElement>) => {
+    const row = e.currentTarget.closest('.sp-gs-crow');
+    focusNeighbour(row, '.sp-gs-crow', 'input', row?.parentElement?.querySelector<HTMLElement>('.sp-gs-addcat') ?? null);
+    onChange({
+      ...draft,
+      periods: draft.periods.map((p, i) => i !== pi ? p : { ...p, categories: p.categories.filter((_, j) => j !== ci) }),
+    });
+  };
   const described = [nameErr && `${id}-nerr`, groupErr && `${id}-gerr`].filter(Boolean).join(' ') || undefined;
 
   return (
@@ -79,7 +85,7 @@ export default function CategoryRow({ draft, pi, ci, onChange, errors, shown, on
       <div className="sp-gs-flags" role="group" aria-label={`Options for ${c.name.trim() || 'this category'}`}>
         {c.cat_id == null
           ? <Flag on={c.is_singleton} label={c.is_singleton ? 'Single score' : 'Multiple entries'}
-              onToggle={() => set({ is_singleton: !c.is_singleton, include_earlier: false })} />
+              onToggle={() => onChange(setSingleton(draft, pi, ci, !c.is_singleton))} />
           : <Flag on={c.is_singleton} label={c.is_singleton ? 'Single score' : 'Multiple entries'}
               icon={c.is_singleton ? <Check size={12} strokeWidth={3} aria-hidden /> : <Layers size={12} aria-hidden />} />}
         {multi && (

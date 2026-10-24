@@ -2,6 +2,7 @@
 
 import { Plus, Trash2 } from 'lucide-react';
 import CategoryRow, { FieldError } from './CategoryRow';
+import { focusNeighbour } from './focusTrap';
 import { newCategory, newPeriod, periodSum, removePeriod, type FieldErrors, type SetupDraft } from './draft';
 
 /** Step 2: one card per period (name, live weight total, categories with their flags). */
@@ -43,7 +44,11 @@ export default function PeriodsStep({ draft, onChange, errors, shown, onTouch }:
                 aria-label={`Weights total ${sum} percent${ok ? '' : ', needs 100'}`}>{sum}%</span>
               {draft.periods.length > 1 && (
                 <button type="button" className="sp-icon-btn sp-gs-remove sp-focus-ring"
-                  aria-label={`Remove period ${p.name.trim() || pi + 1}`} onClick={() => onChange(removePeriod(draft, pi))}>
+                  aria-label={`Remove period ${p.name.trim() || pi + 1}`} onClick={e => {
+                    const card = e.currentTarget.closest('.sp-gs-pcol');
+                    focusNeighbour(card, '.sp-gs-pcol', '.sp-gs-pcol__name', card?.parentElement?.querySelector<HTMLElement>('.sp-gs-addperiod') ?? null);
+                    onChange(removePeriod(draft, pi));
+                  }}>
                   <Trash2 size={15} aria-hidden />
                 </button>
               )}
@@ -60,7 +65,7 @@ export default function PeriodsStep({ draft, onChange, errors, shown, onTouch }:
           </div>
         );
       })}
-      <button type="button" className="sp-btn sp-btn--ghost sp-focus-ring" onClick={() => onChange({ ...draft, periods: [...draft.periods, newPeriod('')] })}>
+      <button type="button" className="sp-btn sp-btn--ghost sp-focus-ring sp-gs-addperiod" onClick={() => onChange({ ...draft, periods: [...draft.periods, newPeriod('')] })}>
         <Plus size={15} aria-hidden /> Add period
       </button>
     </section>

@@ -128,6 +128,17 @@ export function renameLinked(draft: SetupDraft, pi: number, ci: number, name: st
   return mapCats(draft, (c, i, j) => (i === pi && j === ci) || (g && c.link_group === g) ? { ...c, name } : c);
 }
 
+/** Sets "Single score" on a category; a linked one sets it on its whole group (R11), so one group never mixes
+    single-score and multi-entry members. A single score never includes earlier entries. */
+export function setSingleton(draft: SetupDraft, pi: number, ci: number, on: boolean): SetupDraft {
+  const src = draft.periods[pi]?.categories[ci];
+  if (!src) return draft;
+  const g = src.link_group;
+  return mapCats(draft, (c, i, j) => (i === pi && j === ci) || (g && c.link_group === g)
+    ? { ...c, is_singleton: on, include_earlier: on ? false : c.include_earlier }
+    : c);
+}
+
 /** Removes a period and keeps the final period pointing at the same period (or clears it if that one went). */
 export function removePeriod(draft: SetupDraft, pi: number): SetupDraft {
   const fi = draft.final_period_index;
