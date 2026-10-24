@@ -66,7 +66,7 @@ export default function BankRow({
         <div className={`sp-brow${selected ? ' is-sel' : ''}`}>
           {view === 'pending' ? (
             <label className="sp-brow__chk">
-              <input type="checkbox" className="sp-check sp-focus-ring" checked={selected} disabled={leaving}
+              <input type="checkbox" className="sp-check sp-focus-ring" checked={selected} disabled={leaving || busy}
                 onChange={e => onSelect(e.target.checked)} aria-labelledby={nameId} />
             </label>
           ) : <span aria-hidden />}

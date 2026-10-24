@@ -16,7 +16,10 @@ export default function UndoToast({ api }: { api: UndoToastApi }) {
   const { toast, dismiss, pause, resume, runUndo } = api;
   return (
     <div className="sp-toast-host">
-      <span className="sp-sr-only" role="status" aria-live="polite">{toast && !toast.leaving ? toast.message : ''}</span>
+      <span className="sp-sr-only" role="status" aria-live="polite">
+        {/* Keyed per toast: a new text node each time, so an identical repeat message ("Ignored. …" twice) is re-announced. */}
+        {toast && !toast.leaving && <span key={toast.id}>{toast.message}</span>}
+      </span>
       {toast && (
         <div
           key={toast.id}

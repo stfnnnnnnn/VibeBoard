@@ -226,11 +226,14 @@ export default function ActivityBank({ subject, subjects, toast, onCountsChange 
   const bulkAdd = async () => {
     const skipped = chosen.length - addable.length;
     setBulkBusy(true);
+    // Every queued row is busy from the start (not just when the loop reaches it), so nothing can Ignore or Add a row
+    // that this run is about to include. Each row is released as its own request finishes.
+    mark(setBusy, addable.map(x => x.id), true);
     const done: number[] = [];
     let failed = 0;
     for (const item of addable) {
       const t = suggestedTarget(item.suggestion)!;
-      mark(setBusy, [item.id], true); setError(item.id, null);
+      setError(item.id, null);
       try {
         const res = await post(`/api/canvas/bank/${item.id}/include`, includeBody(t));
         if (res.ok) done.push(item.id);
@@ -256,9 +259,10 @@ export default function ActivityBank({ subject, subjects, toast, onCountsChange 
   const bulkIgnore = async () => {
     const ids = chosen.map(x => x.id);
     setBulkBusy(true);
+    mark(setBusy, ids, true); // queued rows are locked for the whole run, as in bulkAdd
     const done: number[] = [];
     for (const id of ids) {
-      mark(setBusy, [id], true); setError(id, null);
+      setError(id, null);
       try {
         const res = await post(`/api/canvas/bank/${id}/ignore`);
         if (res.ok) done.push(id); else setError(id, await errorOf(res, 'Couldn’t ignore this item. Try again.'));
