@@ -5,14 +5,14 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import HubHeader, { panelId, tabId } from '@/components/studypulse/canvas/HubHeader';
 import CanvasOverview from '@/components/studypulse/canvas/CanvasOverview';
+import ActivityBank from '@/components/studypulse/canvas/ActivityBank';
 import UndoToast from '@/components/studypulse/canvas/UndoToast';
 import { useUndoToast } from '@/components/studypulse/canvas/useUndoToast';
 import {
   subjectCode, sumCounts,
   type CanvasCourse, type ConnectionStatus, type HubSubject, type HubTab, type PendingCounts,
 } from '@/components/studypulse/canvas/types';
-// Temporary: Tasks 13 and 14 replace these two with the hub's own Activity Bank and Announcements.
-import CanvasActivityBank from '@/components/studypulse/CanvasActivityBank';
+// Temporary: Task 14 replaces this with the hub's own Announcements.
 import CanvasAnnouncementBank, { type AnnouncementItem } from '@/components/studypulse/CanvasAnnouncementBank';
 
 /**
@@ -33,7 +33,6 @@ export default function CanvasClientShell({ connection, subjects, initialCourses
   const [tab, setTab] = useState<HubTab>(initialTab);
   const [subject, setSubject] = useState<number | null>(initialSubject);
   const [courses, setCourses] = useState<CanvasCourse[]>(initialCourses);
-  const [bankItems, setBankItems] = useState<never[]>([]);
   const [announcementItems, setAnnouncementItems] = useState<AnnouncementItem[]>([]);
 
   const syncUrl = (t: HubTab, s: number | null) => {
@@ -44,17 +43,15 @@ export default function CanvasClientShell({ connection, subjects, initialCourses
   const changeTab = (t: HubTab) => { if (t === tab) return; setTab(t); syncUrl(t, subject); };
   const changeSubject = (s: number | null) => { setSubject(s); syncUrl(tab, s); };
 
-  // Same endpoints as before; only the active view's data is fetched.
+  // Same endpoints as before; only the active view's data is fetched. The Activity Bank loads its own lists.
   const refresh = useCallback(async () => {
     try {
       const sid = subject !== null ? `user_subject_id=${subject}` : '';
-      const [coursesRes, bankRes, announcementsRes] = await Promise.all([
+      const [coursesRes, announcementsRes] = await Promise.all([
         tab === 'overview' ? fetch('/api/canvas/courses') : Promise.resolve(null),
-        tab === 'bank' ? fetch(`/api/canvas/bank?status=pending${sid ? `&${sid}` : ''}`) : Promise.resolve(null),
         tab === 'announcements' ? fetch(`/api/canvas/announcements${sid ? `?${sid}` : ''}`) : Promise.resolve(null),
       ]);
       if (coursesRes?.ok) setCourses((await coursesRes.json()).courses);
-      if (bankRes?.ok) setBankItems((await bankRes.json()).items);
       if (announcementsRes?.ok) setAnnouncementItems((await announcementsRes.json()).items);
     } catch (err) {
       console.error('Failed to refresh Canvas data:', err);
@@ -62,8 +59,8 @@ export default function CanvasClientShell({ connection, subjects, initialCourses
   }, [tab, subject]);
 
   useEffect(() => {
-    // The Overview's courses arrive with the page; the other views load on entry.
-    if (!connection.connected || tab === 'overview') return;
+    // The Overview's courses arrive with the page and the Activity Bank loads its own lists; Announcements loads on entry.
+    if (!connection.connected || tab !== 'announcements') return;
     refresh();
   }, [refresh, connection.connected, tab]);
 
@@ -71,6 +68,8 @@ export default function CanvasClientShell({ connection, subjects, initialCourses
     refresh();
     router.refresh();
   }, [refresh, router]);
+
+  const refreshCounts = useCallback(() => router.refresh(), [router]);
 
   const scoped = subject !== null ? subjects.find(s => s.user_subject_id === subject) ?? null : null;
   const inSubject = (m: Record<string, number>) => (subject === null ? sumCounts(m) : m[String(subject)] ?? 0);
@@ -99,7 +98,9 @@ export default function CanvasClientShell({ connection, subjects, initialCourses
             <CanvasOverview connection={connection} courses={courses} subjects={subjects} counts={counts}
               onChange={onChange} toast={toast.show} />
           )}
-          {view === 'bank' && <CanvasActivityBank items={bankItems} onChange={onChange} />}
+          {view === 'bank' && (
+            <ActivityBank subject={subject} subjects={subjects} toast={toast.show} onCountsChange={refreshCounts} />
+          )}
           {view === 'announcements' && <CanvasAnnouncementBank items={announcementItems} onChange={onChange} />}
         </div>
       </div>

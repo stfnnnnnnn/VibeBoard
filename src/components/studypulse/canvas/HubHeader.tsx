@@ -78,12 +78,13 @@ export default function HubHeader({ tab, onTab, counts, showTabs, subjects, subj
       {showTabs && (
         <div ref={wrap} className="sp-hub-tabs" role="tablist" aria-label="Canvas views">
           <span className={`sp-pind${ind.ready ? ' is-ready' : ''}`} style={{ width: ind.w, height: ind.h, transform: `translate(${ind.x}px, ${ind.y}px)` }} aria-hidden />
+          {/* Only the active view's panel is rendered, so only its tab names it in aria-controls. */}
           {VIEWS.map((v, i) => {
             const n = v.id === 'overview' ? null : counts[v.id];
             const on = v.id === tab;
             return (
               <button key={v.id} ref={el => { tabs.current[i] = el; }} id={tabId(v.id)} type="button" role="tab"
-                aria-selected={on} aria-controls={panelId(v.id)} tabIndex={on ? 0 : -1}
+                aria-selected={on} aria-controls={on ? panelId(v.id) : undefined} tabIndex={on ? 0 : -1}
                 className="sp-hub-tab sp-focus-ring" onClick={() => onTab(v.id)} onKeyDown={e => onKey(e, i)}>
                 {v.label}
                 {n !== null && (

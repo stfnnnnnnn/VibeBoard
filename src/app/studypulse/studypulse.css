@@ -887,3 +887,88 @@
   .sp-toast, .sp-toast.is-leaving { transition-duration: 1ms; transform: none; }
   .sp-hub-back:active, .sp-toast__btn:active:not(:disabled) { transform: none; }
 }
+
+/* ── Canvas hub: Activity Bank (spec §6 C3, mockup canvas-hub-v1c bank()) ── */
+.sp-bank { overflow: visible; }
+.sp-bank__tools { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-height: 58px; padding: 12px 16px; border-bottom: 1px solid var(--sp-hair); }
+.sp-bank__seg .sp-seg__opt { display: inline-flex; align-items: center; gap: 6px; }
+.sp-bank__n { font: 800 12px var(--sp-font-ui); padding: 1px 6px; border-radius: var(--sp-r-pill); background: var(--sp-neutral-bg); }
+.sp-bank__hint { margin: 0 0 0 auto; font-size: 13px; line-height: 1.45; color: var(--sp-text-muted); }
+.sp-bank__bulk { margin-left: auto; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; color: var(--sp-text); animation: sp-hub-fade 160ms var(--sp-ease); }
+
+/* A real checkbox, drawn to the mockup's .chk: 18px box, blue when on, a blue dash when partly on. */
+.sp-check { appearance: none; -webkit-appearance: none; flex-shrink: 0; width: 18px; height: 18px; margin: 0; border-radius: 6px; border: 1.5px solid var(--sp-text-subtle); background: var(--sp-surface) center / 12px 12px no-repeat; cursor: pointer; transition: background-color var(--sp-dur-fast) var(--sp-ease), border-color var(--sp-dur-fast) var(--sp-ease); }
+.sp-check:checked { background-color: var(--sp-blue-strong); border-color: var(--sp-blue-strong); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E"); }
+.sp-check:indeterminate { background-color: var(--sp-blue-bg); border-color: var(--sp-blue-strong); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232a7fa8' stroke-width='3.2' stroke-linecap='round'%3E%3Cpath d='M6 12h12'/%3E%3C/svg%3E"); }
+.sp-check:disabled { opacity: 0.5; cursor: default; }
+.sp-brow__chk { display: grid; place-items: center; width: 32px; height: 32px; margin: -7px; cursor: pointer; }
+/* In a row the box sits on the name's first line, not the middle of a row that long names make tall. */
+.sp-brow > .sp-brow__chk { align-self: start; margin-top: -6px; }
+
+.sp-bank__list { list-style: none; margin: 0; padding: 0; }
+/* Leaving: fade + collapse the grid row together (180ms), so the rows below close the gap instead of jumping. */
+.sp-brow-shell { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 180ms var(--sp-ease), opacity 180ms var(--sp-ease); }
+.sp-brow-shell.is-leaving { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
+.sp-brow-shell:focus-visible { outline: 2px solid var(--sp-focus); outline-offset: -2px; border-radius: var(--sp-r-md); }
+.sp-brow-clip { min-height: 0; overflow: hidden; }
+.sp-brow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px 14px; padding: 14px 16px; border-bottom: 1px solid var(--sp-hair); transition: background-color var(--sp-dur) var(--sp-ease); }
+.sp-bank__list > li:last-child .sp-brow { border-bottom: 0; }
+.sp-brow.is-sel { background: rgba(116, 188, 217, 0.1); }
+.sp-brow__main { min-width: 0; }
+.sp-brow__name { font: 700 14px/1.35 var(--sp-font-ui); color: var(--sp-text); overflow-wrap: anywhere; }
+.sp-brow__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; font: 600 12.5px var(--sp-font-ui); color: var(--sp-text-muted); }
+.sp-brow__code { display: inline-block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.sp-brow__due { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.sp-brow__score { color: var(--sp-text); }
+.sp-brow__acts { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.sp-brow__err { grid-column: 2 / -1; margin: 0; font: 600 12.5px/1.45 var(--sp-font-ui); color: var(--sp-danger); }
+
+.sp-dest { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; }
+.sp-dest__to { font: 700 12.5px var(--sp-font-ui); color: var(--sp-text-muted); }
+.sp-dest__path { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font: 800 12.5px/1.35 var(--sp-font-ui); color: var(--sp-violet); background: var(--sp-violet-bg); padding: 3px 9px; border-radius: var(--sp-r-sm); overflow-wrap: anywhere; }
+.sp-dest__spot { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.sp-dest__tail { display: inline-flex; align-items: baseline; gap: 8px; }
+.sp-dest__dot { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--sp-warn-fill); }
+.sp-dest .sp-info { margin-left: -2px; }
+.sp-dest__prev { font: 700 12.5px var(--sp-font-ui); color: var(--sp-text); }
+.sp-dest__none { font: 600 12.5px/1.45 var(--sp-font-ui); color: var(--sp-text-muted); }
+.sp-dest__tipguess { color: var(--sp-warn-soft); font-weight: 700; }
+
+/* Change…: the inline picker under the row (mockup .picker). */
+.sp-picker { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-radius: var(--sp-r-lg); background: rgba(255, 255, 255, 0.7); border: 1px solid var(--sp-hair); animation: sp-hub-fade 160ms var(--sp-ease); }
+.sp-picker__sel { width: auto; min-width: 0; max-width: 240px; cursor: pointer; }
+.sp-picker__btns { display: inline-flex; gap: 6px; }
+.sp-picker__msg { display: inline-flex; align-items: center; gap: 6px; font: 600 13px var(--sp-font-ui); color: var(--sp-text-muted); }
+.sp-picker__msg--err { color: var(--sp-danger); }
+
+.sp-bank__empty { padding: 44px 20px; text-align: center; }
+.sp-bank__empty h2 { font: 800 17px var(--sp-font-head); margin: 12px 0 4px; color: var(--sp-text); }
+.sp-bank__empty p { margin: 0; color: var(--sp-text-muted); font-size: 13.5px; }
+.sp-bank__empty-ic { width: 52px; height: 52px; margin: 0 auto; border-radius: 16px; display: grid; place-items: center; background: var(--sp-success-bg); color: var(--sp-success); }
+.sp-bank__empty-ic.is-quiet { background: var(--sp-neutral-bg); color: var(--sp-text-muted); }
+.sp-bank__state { display: grid; justify-items: center; gap: 10px; padding: 36px 20px; text-align: center; font: 600 13.5px var(--sp-font-ui); color: var(--sp-danger); }
+.sp-bank__state p { margin: 0; }
+
+/* Loading: three placeholder rows in the real row's grid, so nothing shifts when the list arrives. */
+.sp-brow--skel .sp-brow__main { display: grid; gap: 12px; padding: 2px 0; }
+.sp-skel { display: block; border-radius: 6px; background: var(--sp-neutral-bg); animation: sp-skel 900ms var(--sp-ease) infinite alternate; }
+.sp-skel--box { width: 18px; height: 18px; align-self: start; margin-top: 1px; }
+.sp-skel--name { width: min(320px, 70%); height: 14px; }
+.sp-skel--meta { width: min(220px, 50%); height: 12px; }
+.sp-skel--dest { width: min(260px, 60%); height: 20px; }
+.sp-skel--btn { width: 150px; height: 32px; border-radius: var(--sp-r-md); }
+@keyframes sp-skel { to { opacity: 0.45; } }
+
+@media (max-width: 640px) {
+  .sp-bank__tools { padding: 12px; }
+  .sp-bank__hint, .sp-bank__bulk { margin-left: 0; width: 100%; }
+  .sp-brow { grid-template-columns: auto minmax(0, 1fr); padding: 14px 12px; }
+  .sp-brow__acts { grid-column: 2; justify-content: flex-start; flex-wrap: wrap; }
+  .sp-picker__sel { flex: 1 1 140px; max-width: none; }
+  .sp-skel--btn { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sp-brow-shell { transition-duration: 1ms; }
+  .sp-picker, .sp-bank__bulk { animation: none; }
+  .sp-skel { animation: none; }
+}
