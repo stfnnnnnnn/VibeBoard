@@ -18,18 +18,18 @@ const SCALE_4PT = [
   { min:  0, point: 0.5, letter: 'F',  description: 'Failed'       },
 ] as const;
 
-/* 1.0-highest scale (5-pt grade, second table) */
+/* 1.0-highest scale (5-pt grade, second table). Letters use U+2212 for the minus. */
 const SCALE_1PT = [
-  { min: 96, point: 1.00, description: 'Excellent' },
-  { min: 94, point: 1.25, description: 'Very Good' },
-  { min: 92, point: 1.50, description: 'Very Good' },
-  { min: 89, point: 1.75, description: 'Good'      },
-  { min: 87, point: 2.00, description: 'Good'      },
-  { min: 84, point: 2.25, description: 'Good'      },
-  { min: 82, point: 2.50, description: 'Fair'      },
-  { min: 79, point: 2.75, description: 'Fair'      },
-  { min: 75, point: 3.00, description: 'Passed'    },
-  { min:  0, point: 5.00, description: 'Failed'    },
+  { min: 96, point: 1.00, letter: 'A+', description: 'Excellent' },
+  { min: 94, point: 1.25, letter: 'A',  description: 'Very Good' },
+  { min: 92, point: 1.50, letter: 'A−', description: 'Very Good' },
+  { min: 89, point: 1.75, letter: 'B+', description: 'Good'      },
+  { min: 87, point: 2.00, letter: 'B',  description: 'Good'      },
+  { min: 84, point: 2.25, letter: 'B−', description: 'Good'      },
+  { min: 82, point: 2.50, letter: 'C+', description: 'Fair'      },
+  { min: 79, point: 2.75, letter: 'C',  description: 'Fair'      },
+  { min: 75, point: 3.00, letter: 'C−', description: 'Passed'    },
+  { min:  0, point: 5.00, letter: 'F',  description: 'Failed'    },
 ] as const;
 
 export function toGradeInfo(pct: number, scale: GradeScale): GradeInfo {
@@ -38,7 +38,7 @@ export function toGradeInfo(pct: number, scale: GradeScale): GradeInfo {
     return { point: row.point, letter: row.letter, description: row.description };
   }
   const row = SCALE_1PT.find(r => pct >= r.min) ?? SCALE_1PT[SCALE_1PT.length - 1];
-  return { point: row.point, letter: row.point.toFixed(2), description: row.description };
+  return { point: row.point, letter: row.letter, description: row.description };
 }
 
 /** The minimum raw % needed to achieve a given grade point (for target reverse-lookup). */
