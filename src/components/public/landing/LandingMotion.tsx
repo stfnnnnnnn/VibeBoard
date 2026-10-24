@@ -36,7 +36,9 @@ export default function LandingMotion() {
 
     const x = document.querySelector('[data-xchips]');
     if (x) {
-      x.classList.add('is-armed');
+      // Only arm the 12px offset while the list is still below the fold; chips already on screen at hydration
+      // would visibly jump to the offset. Those just fade to 60% when the observer fires.
+      if (x.getBoundingClientRect().top >= window.innerHeight) x.classList.add('is-armed');
       const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) { x.classList.add('is-in'); io.disconnect(); } }, { threshold: 0.6 });
       io.observe(x);
       cleanups.push(() => { io.disconnect(); x.classList.remove('is-armed'); });

@@ -99,8 +99,9 @@ export default function LoginForm() {
         </FormAlert>
       )}
 
-      {/* While a Google credential is being exchanged, the whole Google area is inert (GIS draws in an iframe). */}
-      <div className="auth-google" aria-busy={googleBusy} aria-disabled={googleBusy || undefined}>
+      {/* While a Google credential is being exchanged, the whole Google area is inert: no pointer, keyboard (including
+          the GIS iframe) or assistive-tech access until it settles. */}
+      <div className="auth-google" inert={googleBusy}>
         <GooglePersonalized onCredential={onGoogleCredential} />
         <p className="auth-center"><UseAnother disabled={googleBusy} /></p>
       </div>

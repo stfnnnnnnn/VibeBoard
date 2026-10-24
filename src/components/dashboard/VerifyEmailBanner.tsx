@@ -25,7 +25,7 @@ export default function VerifyEmailBanner() {
           : 'Confirm your email so you can always reset your password.'}
       </span>
       <span style={{ display: 'flex', gap: 14 }}>
-        {(state === 'idle' || state === 'error') && <button type="button" onClick={resend} style={{ background: 'none', border: 0, color: '#d9628c', fontWeight: 700, cursor: 'pointer', fontSize: 15, minHeight: 44 }}>Resend</button>}
+        {(state === 'idle' || state === 'error') && <button type="button" onClick={resend} style={{ background: 'none', border: 0, color: '#ab4069', fontWeight: 700, cursor: 'pointer', fontSize: 15, minHeight: 44 }}>Resend</button>}
         <button type="button" onClick={() => { try { sessionStorage.setItem('vb-verify-dismissed', '1'); } catch { /* storage blocked */ } setHidden(true); }}
           style={{ background: 'none', border: 0, color: '#6b6478', cursor: 'pointer', fontSize: 15, minHeight: 44 }}>Dismiss</button>
       </span>

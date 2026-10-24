@@ -123,6 +123,7 @@ html[data-daypart="night"] .auth-h1 em { color: #f2a7c0; }
 .auth-hint.is-error { color: var(--pub-red); }
 .auth-hint.is-warn { color: var(--pub-amber); }
 html[data-daypart="night"] .auth-hint.is-error { color: #ff9aab; }
+html[data-daypart="night"] .auth-hint.is-warn { color: #e8b46a; } /* 8.6:1 on the night card */
 .auth-hint button, .auth-hint a { font: inherit; font-weight: 700; color: var(--pub-pink-ink); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: none; }
 .auth-meter { display: flex; gap: 4px; margin-top: 8px; }
 .auth-meter i { flex: 1; height: 4px; border-radius: 9px; background: var(--pub-line); }
@@ -156,7 +157,8 @@ html[data-daypart="night"] .auth-link, html[data-daypart="night"] .auth-hint :is
 .auth-fine a { color: var(--pub-ink); font-weight: 600; text-decoration: none; }
 .auth-center { text-align: center; margin-top: 10px; }
 .pub-gis { display: flex; justify-content: center; min-height: 44px; position: relative; z-index: 1; }
-.auth-google[aria-busy="true"] { pointer-events: none; opacity: .6; transition: opacity .15s var(--pub-ease); }
+/* `inert` (LoginForm) blocks pointer, keyboard and AT while a Google credential is exchanged; this only dims it. */
+.auth-google[inert] { opacity: .6; transition: opacity .15s var(--pub-ease); }
 
 /* ── Alerts, identity card, steps, year picker, badge icon ── */
 .auth-alert { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.45; border-radius: 12px; padding: 11px 12px; margin-bottom: 16px; }
@@ -172,6 +174,7 @@ html[data-daypart="night"] .auth-link, html[data-daypart="night"] .auth-hint :is
 .auth-ident .who b { display: block; font-size: 14px; overflow-wrap: anywhere; }
 .auth-ident .auth-link--quiet { flex: 0 0 auto; white-space: nowrap; }
 .auth-ident .who span { font-size: 12.5px; color: #23784e; font-weight: 600; }
+html[data-daypart="night"] .auth-ident .who span { color: #7fd4a6; } /* 9.1:1 on the night card */
 .auth-steps { display: flex; gap: 6px; margin-bottom: 14px; }
 .auth-steps i { width: 24px; height: 4px; border-radius: 9px; background: var(--pub-line); }
 .auth-steps i.on { background: var(--pub-pink); }
