@@ -153,6 +153,10 @@ test('final grade: period, average, none', () => {
   assert.equal(subjectFinal([MIDTERM, FINALS], 'period', 'nope'), null);
   near(subjectOverall([MIDTERM, FINALS], null, null), 81.6);
   near(subjectOverall([MIDTERM, FINALS], 'period', 'p2'), 68.0);
+  near(subjectOverall([MIDTERM], null, null), 95.2);
+  const emptyPeriod: PeriodInput = { key: 'z', name: 'Z', target: 85, categories: [cat({ key: 'a', weight: 100 })] };
+  assert.equal(subjectOverall([emptyPeriod], null, null), null);
+  near(subjectFinal([MIDTERM, emptyPeriod], 'average', null), 95.2);
 });
 
 test('normalizeFinalMode maps legacy collective to average, unknown to null', () => {
