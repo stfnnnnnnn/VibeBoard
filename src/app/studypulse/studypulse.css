@@ -449,14 +449,29 @@
 .sp-sum__row b { font-weight: 700; }
 .sp-sum__row small { display: block; font-size: 12px; color: var(--sp-text-muted); font-weight: 600; }
 .sp-sum__row input { width: 72px; text-align: right; }
-.sp-sum__val { text-align: right; }
+.sp-sum__name { min-width: 0; }
+/* The category value (spec §5.4): the lead number is the one the toggle picked, the line under it is the other unit.
+   Tabular numerals (.sp-num on the grid) keep the right-aligned columns steady when the toggle swaps them. */
+.sp-sum__val { text-align: right; flex-shrink: 0; }
+.sp-sum__val > b { font-size: 14px; font-weight: 800; }
+.sp-sum__of { color: var(--sp-text-muted); font-weight: 600; }
+.sp-sum__dash { color: var(--sp-text-faint); }
+.sp-sum__in { display: inline-flex; align-items: center; gap: 4px; color: var(--sp-text-muted); font-weight: 700; }
+.sp-sum__row .sp-sum__raw { width: 70px; padding-left: 8px; padding-right: 8px; }
+.sp-sum__val small { margin-top: 2px; }
+/* The "x of y pts earned" ⓘ hangs off the number's right edge, so the number itself stays centred. */
+.sp-sum__bignum { position: relative; display: inline-block; }
+.sp-sum__bigtip { position: absolute; left: 100%; top: 50%; transform: translateY(-50%); margin-left: 2px; display: flex; line-height: 1; }
+.sp-sum__fg { color: var(--sp-pink-ink); }
+.sp-sum__wifbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: -6px 0 14px; }
+.sp-sum__wiflabel { font: 700 12.5px var(--sp-font-ui); color: var(--sp-text-muted); }
+.sp-sum__note--inline { margin: 0; flex-basis: 100%; }
 .sp-sum__col--final { background: linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(253, 228, 239, 0.7)); border: 1px solid rgba(240, 103, 157, 0.35); }
 .sp-sum__col--final .sp-sum__colhead { color: var(--sp-pink-ink); display: flex; align-items: center; justify-content: center; gap: 5px; }
 /* The Final grade tab shows the final column alone. */
 .sp-sum__grid--final { grid-template-columns: minmax(0, 520px); }
 .sp-sum__row b + .sp-info { margin-left: 6px; }
 .sp-sum__note { margin: 12px 0 0; font-size: 12.5px; color: var(--sp-text-muted); }
-.sp-sum__note--lead { margin: -6px 0 14px; }
 
 /* ── Target planner (spec §6.5, mockup v4 §4) ── */
 .sp-tp-shell { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 280ms var(--sp-ease); }
