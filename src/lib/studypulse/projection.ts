@@ -206,13 +206,14 @@ function meanOfCurrents(periods: PeriodInput[]): number | null {
 }
 
 /** The preset's Final Grade (spec §4.4); null when the preset defines none. */
-export function subjectFinal(periods: PeriodInput[], mode: 'average' | 'collective' | null): number | null {
+// 'period' is accepted temporarily (returns null); fixed in Task 4.
+export function subjectFinal(periods: PeriodInput[], mode: 'average' | 'collective' | 'period' | null): number | null {
   if (mode === 'collective') return collectiveCurrent(periods);
   if (mode === 'average') return meanOfCurrents(periods);
   return null;
 }
 
 /** One number for a subject card: the Final Grade when defined, else the mean of period currents. */
-export function subjectOverall(periods: PeriodInput[], mode: 'average' | 'collective' | null): number | null {
+export function subjectOverall(periods: PeriodInput[], mode: 'average' | 'collective' | 'period' | null): number | null { // 'period': fixed in Task 4
   return mode ? subjectFinal(periods, mode) : meanOfCurrents(periods);
 }

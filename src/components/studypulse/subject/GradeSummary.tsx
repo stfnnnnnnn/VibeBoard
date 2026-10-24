@@ -22,7 +22,8 @@ const contribution = (c: ContribCat, gw: number) => (c.avg === null || gw <= 0 |
 /** Custom-preset summary: per-period current (graded-only, spec D11) with a category breakdown and an optional what-if. */
 export default function GradeSummary({ periods, projections, finalMode, finalGrade, finalPeriodKey, scale, transmutationOn, lab }: {
   periods: PeriodInput[]; projections: PeriodProjection[];
-  finalMode: 'average' | 'collective' | null; finalGrade: number | null; finalPeriodKey: string | null;
+  finalMode: 'average' | 'collective' | 'period' | null; // 'period': fixed in Task 4
+  finalGrade: number | null; finalPeriodKey: string | null;
   scale: GradeScale | null; transmutationOn: boolean;
   lab: { has: boolean; lec: number; lab: number };
 }) {

@@ -2,48 +2,14 @@
 
 import { useState } from 'react';
 
-export interface GradingCategory {
-  name:         string;
-  weight:       number;
-  is_singleton: boolean;
-  link_group?:  string | null;
-  /** Singleton + linked only: reuse a linked sibling's score until this period has its own. Defaults true. */
-  carry_score?: boolean;
-}
+import type { GradingCategory, GradingPeriod, GradingPresetFull, GradeScale } from '@/lib/studypulse/types';
 
-export interface GradingPeriod {
-  name:       string;
-  categories: GradingCategory[];
-}
+/** Legacy wizard choice; the wizard is replaced in Task 8. */
+type WizardFinalMode = 'average' | 'collective';
 
-export type GradeScale = '4pt' | '1pt';
-export type FinalMode  = 'average' | 'collective';
-
-export interface GradingPresetFull {
-  preset_id:       number;
-  name:            string;
-  is_default:      number;
-  has_lab:         number;
-  lec_weight:      number;
-  lab_weight:      number;
-  grade_scale:     GradeScale;
-  final_period_id: number | null;
-  final_mode:      FinalMode | null;
-  periods:     Array<{
-    period_id:  number;
-    name:       string;
-    sort_order: number;
-    categories: Array<{
-      cat_id:       number;
-      name:         string;
-      weight:       number;
-      is_singleton: number;
-      sort_order:   number;
-      link_group:   string | null;
-      carry_score:  number;
-    }>;
-  }>;
-}
+// The shared preset types now live in src/lib/studypulse/types.ts; re-exported so existing imports
+// keep compiling until this file is removed (grading-system plan, Task 8).
+export type { GradingCategory, GradingPeriod, GradeScale, FinalMode, GradingPresetFull } from '@/lib/studypulse/types';
 
 const GLASS: React.CSSProperties = {
   background:          'rgba(255,255,255,0.92)',
@@ -125,7 +91,7 @@ export default function GradingSetupWizard({
   const [periods, setPeriods] = useState<GradingPeriod[]>(DEFAULT_FEU);
   const [finalEnabled,    setFinalEnabled]    = useState(false);
   const [finalPeriodIdx,  setFinalPeriodIdx]  = useState<number | null>(null);
-  const [finalMode,       setFinalMode]       = useState<FinalMode>('average');
+  const [finalMode,       setFinalMode]       = useState<WizardFinalMode>('average');
   const [hasLab,  setHasLab] = useState(false);
   const [lecW,    setLecW]   = useState(70);
   const [labW,    setLabW]   = useState(30);

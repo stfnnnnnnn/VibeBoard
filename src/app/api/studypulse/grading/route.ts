@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import pool from '@/lib/db';
-import { ensureGradeScale, ensureFinalGrade, ensureCategoryLinking } from '@/lib/migrate';
+import { ensureGradeScale, ensureFinalGrade, ensureCategoryLinking, ensureGradingV2Schema } from '@/lib/migrate';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
 
@@ -9,6 +9,7 @@ import type { PoolConnection } from 'mysql2/promise';
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  await ensureGradingV2Schema();
   const userId = parseInt(session.user.id);
 
   const [presets] = await pool.execute<RowDataPacket[]>(
@@ -28,6 +29,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  await ensureGradingV2Schema();
   const userId = parseInt(session.user.id);
 
   const {

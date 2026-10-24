@@ -974,3 +974,40 @@ export async function ensureAuthV2Schema(): Promise<void> {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
   _ranAuthV2 = true;
 }
+
+let _ranGradingV2 = false;
+let _ranEntryNote = false;
+
+/** Grading v2 (spec 2026-10-24 §3.1): cumulative flag, final-mode values, lab links, announcement seen_at. */
+export async function ensureGradingV2Schema(): Promise<void> {
+  if (_ranGradingV2) return;
+  await ensureCategoryLinking();
+  await ensureFinalGrade();
+  try { await pool.query(`ALTER TABLE grading_categories ADD COLUMN include_earlier TINYINT(1) NOT NULL DEFAULT 0`); }
+  catch (err: unknown) { if ((err as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw err; }
+  await pool.query(`UPDATE grading_presets SET final_mode='average' WHERE final_mode='collective'`);
+  await pool.query(`UPDATE grading_presets SET final_mode='period' WHERE final_mode IS NULL AND final_period_id IS NOT NULL`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS subject_links (
+      lecture_user_subject_id INT NOT NULL PRIMARY KEY,
+      lab_user_subject_id     INT NOT NULL UNIQUE,
+      lecture_weight          DECIMAL(5,2) NOT NULL DEFAULT 70.00,
+      created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+  // canvas_announcement_bank is created by ensureCanvasSchema; ensure it exists so the run-once
+  // flag can never be set while seen_at is still missing.
+  await ensureCanvasSchema();
+  try { await pool.query(`ALTER TABLE canvas_announcement_bank ADD COLUMN seen_at DATETIME NULL`); }
+  catch (err: unknown) { if ((err as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw err; }
+  _ranGradingV2 = true;
+}
+
+/** Notes on school tasks (spec 2026-10-24 §6.1): note column on the Workboard academic overlay. */
+export async function ensureEntryNoteSchema(): Promise<void> {
+  if (_ranEntryNote) return;
+  // workboard_entry_meta is created by ensureWorkboardV2Schema.
+  await ensureWorkboardV2Schema();
+  try { await pool.query(`ALTER TABLE workboard_entry_meta ADD COLUMN note TEXT NULL`); }
+  catch (err: unknown) { if ((err as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw err; }
+  _ranEntryNote = true;
+}

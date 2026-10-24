@@ -2,7 +2,7 @@
    /studypulse/[id]. Imports the DB pool, so it is excluded from scripts/sp-test.mjs. */
 import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
-import { ensureSubjectSection } from '@/lib/migrate';
+import { ensureGradingV2Schema, ensureSubjectSection } from '@/lib/migrate';
 import { buildCustomPeriods, buildLegacyPeriods } from './periodModel';
 import { projectPeriod, subjectOverall } from './projection';
 import { EMPTY_PREFS } from './prefs';
@@ -11,6 +11,7 @@ import type { EntryRow, GradingConfig, SubjectCardData } from './types';
 /** The subject's custom grading config, or null (no config, or grading tables not created yet). */
 export async function loadGradingConfig(userSubjectId: number): Promise<GradingConfig | null> {
   try {
+    await ensureGradingV2Schema();
     const [sgRows] = await pool.execute<RowDataPacket[]>('SELECT * FROM subject_grading WHERE user_subject_id=?', [userSubjectId]);
     if (!sgRows.length) return null;
     const sg = sgRows[0];

@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import pool from '@/lib/db';
+import { ensureGradingV2Schema } from '@/lib/migrate';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
 
@@ -11,6 +12,7 @@ export async function GET(
 ) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  await ensureGradingV2Schema();
   const userId   = parseInt(session.user.id);
   const { id }   = await props.params;
   const presetId = parseInt(id);
@@ -48,6 +50,7 @@ export async function PUT(
 ) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  await ensureGradingV2Schema();
   const userId   = parseInt(session.user.id);
   const { id }   = await props.params;
   const presetId = parseInt(id);
@@ -110,6 +113,7 @@ export async function DELETE(
 ) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  await ensureGradingV2Schema();
   const userId   = parseInt(session.user.id);
   const { id }   = await props.params;
   const presetId = parseInt(id);

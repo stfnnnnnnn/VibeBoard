@@ -1,6 +1,63 @@
 /* Shared StudyPulse types. Moved out of SubjectCardView.tsx so server code and pure libs can use them. */
 import type { GradeScale } from '@/lib/gradeScale';
-import type { GradingPresetFull } from '@/components/studypulse/GradingSetupWizard';
+
+export type { GradeScale };
+
+/** Draft category used while building a preset (wizard / grading editor). */
+export interface GradingCategory {
+  name:         string;
+  weight:       number;
+  is_singleton: boolean;
+  link_group?:  string | null;
+  /** Singleton + linked only: reuse a linked sibling's score until this period has its own. Defaults true. */
+  carry_score?: boolean;
+  /** Linked, non-singleton, not the first period: also average in earlier periods' graded entries. Defaults false. */
+  include_earlier?: boolean;
+}
+
+/** Draft period used while building a preset. */
+export interface GradingPeriod {
+  name:       string;
+  categories: GradingCategory[];
+}
+
+/** How the subject's final grade is formed: one designated period, or the average of all periods. */
+export type FinalMode = 'period' | 'average';
+
+/** A persisted grading preset as returned by the grading API routes. */
+export interface GradingPresetFull {
+  preset_id:       number;
+  name:            string;
+  is_default:      number;
+  has_lab:         number;
+  lec_weight:      number;
+  lab_weight:      number;
+  grade_scale:     GradeScale;
+  final_period_id: number | null;
+  final_mode:      FinalMode | null;
+  periods:     Array<{
+    period_id:  number;
+    name:       string;
+    sort_order: number;
+    categories: Array<{
+      cat_id:          number;
+      name:            string;
+      weight:          number;
+      is_singleton:    number;
+      sort_order:      number;
+      link_group:      string | null;
+      carry_score:     number;
+      include_earlier: number;
+    }>;
+  }>;
+}
+
+/** A lecture subject linked to its separate lab subject (spec 2026-10-24 §3.1, table subject_links). */
+export interface SubjectLink {
+  lecture_user_subject_id: number;
+  lab_user_subject_id:     number;
+  lecture_weight:          number;
+}
 
 export type Urgency = 'High' | 'Medium' | 'Low';
 export type EntryStatus = 'Pending' | 'Done';

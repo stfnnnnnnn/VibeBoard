@@ -16,13 +16,13 @@ const PRESET: PresetLike = {
   final_mode: 'average', final_period_id: null,
   periods: [
     { period_id: 1, name: 'Midterm', sort_order: 0, categories: [
-      { cat_id: 10, name: 'Quizzes', weight: 36, is_singleton: 0, sort_order: 0, link_group: null, carry_score: 1 },
-      { cat_id: 11, name: 'Tasks', weight: 24, is_singleton: 0, sort_order: 1, link_group: null, carry_score: 1 },
-      { cat_id: 12, name: 'Midterm Exam', weight: 40, is_singleton: 1, sort_order: 2, link_group: 'lg-1', carry_score: 1 },
+      { cat_id: 10, name: 'Quizzes', weight: 36, is_singleton: 0, sort_order: 0, link_group: null, carry_score: 1, include_earlier: 0 },
+      { cat_id: 11, name: 'Tasks', weight: 24, is_singleton: 0, sort_order: 1, link_group: null, carry_score: 1, include_earlier: 0 },
+      { cat_id: 12, name: 'Midterm Exam', weight: 40, is_singleton: 1, sort_order: 2, link_group: 'lg-1', carry_score: 1, include_earlier: 0 },
     ] },
     { period_id: 2, name: 'Finals', sort_order: 1, categories: [
-      { cat_id: 20, name: 'Quizzes', weight: 36, is_singleton: 0, sort_order: 0, link_group: null, carry_score: 1 },
-      { cat_id: 22, name: 'Midterm Exam', weight: 15, is_singleton: 1, sort_order: 1, link_group: 'lg-1', carry_score: 1 },
+      { cat_id: 20, name: 'Quizzes', weight: 36, is_singleton: 0, sort_order: 0, link_group: null, carry_score: 1, include_earlier: 0 },
+      { cat_id: 22, name: 'Midterm Exam', weight: 15, is_singleton: 1, sort_order: 1, link_group: 'lg-1', carry_score: 1, include_earlier: 0 },
     ] },
   ],
 };

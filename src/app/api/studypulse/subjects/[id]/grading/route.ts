@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import pool from '@/lib/db';
+import { ensureGradingV2Schema } from '@/lib/migrate';
 import type { RowDataPacket } from 'mysql2';
 
 /* GET /api/studypulse/subjects/[id]/grading
@@ -11,6 +12,7 @@ export async function GET(
 ) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  await ensureGradingV2Schema();
   const userId        = parseInt(session.user.id);
   const { id }        = await props.params;
   const userSubjectId = parseInt(id);
@@ -73,6 +75,7 @@ export async function POST(
 ) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  await ensureGradingV2Schema();
   const userId        = parseInt(session.user.id);
   const { id }        = await props.params;
   const userSubjectId = parseInt(id);
