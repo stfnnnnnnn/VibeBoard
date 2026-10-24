@@ -74,6 +74,8 @@ export interface EntryRow {
   items: string;
   grade: number | null;
   canvas_linked?: boolean;
+  /** The school task's note from the Workboard overlay (spec 2026-10-24 §6.1). Read-only here: edited in Workboard. */
+  note?: string | null;
   saving?: boolean;
   /** Client-only identity for a row created on this page (id 0 until saved). Never sent to the server. */
   _key?: string;

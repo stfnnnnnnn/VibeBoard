@@ -57,13 +57,17 @@ export function Field({ label, children, hint, error }: { label: string; childre
   );
 }
 
+/** The academic overlay's `note` cap (`ENTRY_NOTE_MAX` in academicWrites.ts, which this
+ *  client file cannot import: that module imports `@/lib/db`). Both routes 400 past it. */
+export const ACADEMIC_NOTE_MAX = 1000;
+
 /** Only fields this endpoint accepts: PATCH /api/workboard/academic/[source]/[id] rejects
  *  any other field's source. It cannot rename an academic item, so no title input is
  *  rendered for one — a title field that silently fails to save must not exist. */
 export function AcademicEditFields({
   item, workStatus, setWorkStatus, dueAt, setDueAt, deadlineTime, setDeadlineTime,
   priority, setPriority,
-  estimatedHours, setEstimatedHours, startDate, setStartDate, firstFieldRef,
+  estimatedHours, setEstimatedHours, startDate, setStartDate, note, setNote, firstFieldRef,
 }: {
   item: WorkItem;
   workStatus: WorkStatus; setWorkStatus: (v: WorkStatus) => void;
@@ -72,6 +76,7 @@ export function AcademicEditFields({
   priority: WorkPriority; setPriority: (v: WorkPriority) => void;
   estimatedHours: string; setEstimatedHours: (v: string) => void;
   startDate: string; setStartDate: (v: string) => void;
+  note: string; setNote: (v: string) => void;
   firstFieldRef: RefObject<HTMLSelectElement | null>;
 }) {
   return (
@@ -128,6 +133,19 @@ export function AcademicEditFields({
           />
         </Field>
       </div>
+
+      {/* Lives on the Workboard overlay, like Estimated hours; Study Pulse shows it read-only
+          on the entry (spec 2026-10-24 §6.1). */}
+      <Field label="Note" hint="Shown on the entry in Study Pulse.">
+        <textarea
+          className="wb-focus-ring"
+          style={{ ...FIELD_INPUT, minHeight: 72, resize: 'vertical' }}
+          value={note}
+          onChange={e => setNote(e.target.value)}
+          placeholder="Optional details…"
+          maxLength={ACADEMIC_NOTE_MAX}
+        />
+      </Field>
     </>
   );
 }
@@ -459,12 +477,13 @@ export function ScheduleFields({
   return (
     <>
       {/* POST /api/workboard/academic/create takes only { title, target_type, cat_id?,
-          period_id?, deadline, priority } — Deadline time, Start date, Estimated hours and
-          Note have no column on that path, so they are disabled and this says why. */}
+          period_id?, deadline, priority, note? } — Deadline time, Start date and Estimated
+          hours have no column on that path, so they are disabled and this says why. Note is
+          written to the overlay row for the new entry (spec 2026-10-24 §6.1). */}
       {isNewGradedPath && (
         <p style={{ ...HINT_P, marginTop: 0 }}>
-          Study Pulse doesn’t have a place for Deadline time, Start date, Estimated
-          hours, or Note yet — only Due date and Priority are saved for graded work.
+          Study Pulse doesn’t have a place for Deadline time, Start date, or Estimated
+          hours yet — only Due date, Priority and Note are saved for graded work.
         </p>
       )}
 
@@ -519,7 +538,8 @@ export function ScheduleFields({
           value={note}
           onChange={e => setNote(e.target.value)}
           placeholder="Optional details…"
-          disabled={isNewGradedPath}
+          // Owned notes are TEXT with no cap; the graded path's overlay note has one.
+          maxLength={isNewGradedPath ? ACADEMIC_NOTE_MAX : undefined}
         />
       </Field>
     </>

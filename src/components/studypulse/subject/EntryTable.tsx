@@ -1,12 +1,13 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { Check, Loader2, Pencil, Trash2, X } from 'lucide-react';
+import { Check, Loader2, Pencil, StickyNote, Trash2, X } from 'lucide-react';
 import type { TransmutationTable } from '@/lib/transmutation';
 import type { EntryRow } from '@/lib/studypulse/types';
 import { calcGrade } from '@/lib/studypulse/grades';
 import { dueNote, shortDate, submittedNote, todayManila } from '@/lib/studypulse/ui/format';
 import GradePill from './GradePill';
+import InfoTip from '../ui/InfoTip';
 
 export interface EntryPersistence {
   /** Create or update; resolves to the entry id. Throws with a message on failure. */
@@ -162,7 +163,19 @@ export default function EntryTable({
                   {editing
                     ? <input className="sp-input sp-input--sm" aria-label="Name" value={row.name} placeholder="Name…" onChange={e => ed.setField(idx, 'name', e.target.value)} />
                     // The badge sits inline after the last word of the name, never in a column of its own (spec §5.6).
-                    : <span className="sp-en"><span className="sp-en__name">{row.name || '—'}{row.canvas_linked && <span className="sp-src">Canvas</span>}</span></span>}
+                    // The note icon follows it the same way; notes are read-only here and edited in Workboard (spec §6.1).
+                    : <span className="sp-en"><span className="sp-en__name">{row.name || '—'}{(row.canvas_linked || !!row.note) && (
+                        <span className="sp-en__tags">
+                          {row.canvas_linked && <span className="sp-src">Canvas</span>}
+                          {row.note && (
+                            <InfoTip label="Note" icon={<StickyNote size={16} aria-hidden />}>
+                              <span className="sp-tip__note">{row.note}</span>
+                              {/* The leading space keeps the description from reading "…hashing).Edit" to a screen reader. */}
+                              <span className="sp-tip__muted"> Edit in Workboard</span>
+                            </InfoTip>
+                          )}
+                        </span>
+                      )}</span></span>}
                   {editing && row.canvas_linked && <small className="sp-row-note">From Canvas: the next sync overwrites the score.</small>}
                   {err && <small className="sp-row-err" role="alert">{err}</small>}
                 </td>

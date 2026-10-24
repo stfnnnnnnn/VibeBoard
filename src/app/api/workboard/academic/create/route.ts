@@ -2,8 +2,10 @@ import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
-import { ensureWorkboardV3Schema } from '@/lib/migrate';
+import { ensureWorkboardV3Schema, ensureEntryNoteSchema } from '@/lib/migrate';
 import { checkReferences } from '@/lib/workboard/ownership';
+import { ACADEMIC_TABLES } from '@/lib/workboard/workItems';
+import { parseEntryNote } from '@/lib/workboard/academicWrites';
 import {
   insertActivityEntry, insertQuizEntry, insertExamEntry, insertGradeEntry,
 } from '@/lib/studypulseEntries';
@@ -38,6 +40,8 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   await ensureWorkboardV3Schema();
+  // The overlay's `note` column, written below when a note is sent (spec 2026-10-24 §6.1).
+  await ensureEntryNoteSchema();
   const userId = parseInt(session.user.id);
 
   const body = await req.json();
@@ -71,6 +75,10 @@ export async function POST(req: NextRequest) {
   ) {
     return Response.json({ error: 'A deadline (YYYY-MM-DD) is required' }, { status: 400 });
   }
+  // Optional. Validated with the other fields, before anything is written, so an over-long
+  // note can never leave a Study Pulse row behind with no overlay.
+  const parsedNote = parseEntryNote(body.note);
+  if (!parsedNote.ok) return Response.json({ error: parsedNote.error }, { status: 400 });
   // `checkReferences` skips keys whose value is null/undefined, so an omitted or
   // non-numeric `user_subject_id` would sail straight past it and land a Study Pulse row
   // with a null subject. Everything below — the grading-mode lookup, the category
@@ -149,11 +157,35 @@ export async function POST(req: NextRequest) {
     score: null, items: null, grade: null, accomplishedAt: null,
   };
 
+  // The entry and its overlay note are one write: a transaction, so a failed note insert
+  // never leaves a note-less entry the user asked to carry one.
+  const conn = await pool.getConnection();
   let entryId: number;
-  if (target_type === 'activities')     entryId = (await insertActivityEntry(common)).entryId;
-  else if (target_type === 'quizzes')   entryId = (await insertQuizEntry(common)).entryId;
-  else if (target_type === 'exams')     entryId = (await insertExamEntry(common)).entryId;
-  else entryId = (await insertGradeEntry({ ...common, catId: cat_id, periodId: period_id, isLab: false })).entryId;
+  try {
+    await conn.beginTransaction();
+    if (target_type === 'activities')     entryId = (await insertActivityEntry(common, conn)).entryId;
+    else if (target_type === 'quizzes')   entryId = (await insertQuizEntry(common, conn)).entryId;
+    else if (target_type === 'exams')     entryId = (await insertExamEntry(common, conn)).entryId;
+    else entryId = (await insertGradeEntry({ ...common, catId: cat_id, periodId: period_id, isLab: false }, conn)).entryId;
+
+    // The Canvas Include route's shape: the overlay has a UNIQUE key per entry column, so
+    // this upserts the row for the new entry. A fresh entry has no overlay row yet, so the
+    // ON DUPLICATE branch is only a guard.
+    if (parsedNote.note !== null) {
+      const metaCol = ACADEMIC_TABLES.find(s => s.source === target_type)!.metaCol;
+      await conn.execute(
+        `INSERT INTO workboard_entry_meta (user_id, \`${metaCol}\`, note) VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE note = VALUES(note)`,
+        [userId, entryId, parsedNote.note],
+      );
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
 
   return Response.json({ status: 'success', source: target_type, entry_id: entryId });
 }

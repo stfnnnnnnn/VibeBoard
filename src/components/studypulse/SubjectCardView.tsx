@@ -45,7 +45,7 @@ export type GradeMode   = 'finals' | 'midterm' | 'whatif';
 export type SectionType = 'activities' | 'quizzes' | 'exams';
 
 /** This subject's grade entries grouped by cat_id, re-read after the setup sheet moved entries between categories.
-    Same row shape the page builds (canvas_linked is not in this route's rows; the caller carries it over by id). */
+    Same row shape the page builds (canvas_linked and note are not in this route's rows; the caller carries them over by id). */
 async function fetchCatEntries(userSubjectId: number): Promise<Record<number, EntryRow[]> | null> {
   try {
     const res = await fetch(`/api/studypulse/grade-entries?subject_id=${userSubjectId}`);
@@ -250,7 +250,7 @@ function SubjectCardViewInner({
         for (const p of newConfig.preset.periods) {
           for (const c of p.categories) {
             init[c.cat_id] = fresh
-              ? (fresh[c.cat_id] ?? []).map(r => ({ ...r, canvas_linked: byId.get(r.id)?.canvas_linked ?? r.canvas_linked }))
+              ? (fresh[c.cat_id] ?? []).map(r => ({ ...r, canvas_linked: byId.get(r.id)?.canvas_linked ?? r.canvas_linked, note: byId.get(r.id)?.note ?? null }))
               : prev[c.cat_id] ?? [];
           }
         }

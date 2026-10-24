@@ -1,8 +1,10 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
-import { ensureWorkboardV4Schema } from '@/lib/migrate';
+import { ensureWorkboardV4Schema, ensureEntryNoteSchema } from '@/lib/migrate';
 import { ACADEMIC_SOURCES, type AcademicSource } from '@/lib/workboard/workItems';
-import { patchAcademicItem, AcademicItemNotFoundError, AcademicItemGradedError, type AcademicPatch } from '@/lib/workboard/academicWrites';
+import {
+  patchAcademicItem, parseEntryNote, AcademicItemNotFoundError, AcademicItemGradedError, type AcademicPatch,
+} from '@/lib/workboard/academicWrites';
 import { isStageLegal } from '@/lib/workboard/workContexts';
 import { TIME_PATTERN } from '@/lib/workboard/dates';
 
@@ -15,6 +17,8 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ source:
   // V2 creates `workboard_entry_meta`; V3 adds `work_stage`/`deadline_time` and V4 adds
   // `blocked_reason`/`blocked_since`, all written here. V4 chains V3 and V2.
   await ensureWorkboardV4Schema();
+  // The overlay's `note` column (spec 2026-10-24 §6.1, Ruling R2).
+  await ensureEntryNoteSchema();
 
   const { source, id } = await props.params;
   if (!ACADEMIC_SOURCES.includes(source as AcademicSource)) {
@@ -48,6 +52,11 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ source:
   if ('blocked_reason' in body && body.blocked_reason !== null && typeof body.blocked_reason !== 'string') {
     return Response.json({ error: 'blocked_reason must be a string or null' }, { status: 400 });
   }
+  // Same presence rule as `deadline_time`: the key present with null or '' clears the note.
+  const parsedNote = parseEntryNote(body.note);
+  if ('note' in body && !parsedNote.ok) {
+    return Response.json({ error: parsedNote.error }, { status: 400 });
+  }
 
   const patch: AcademicPatch = {};
   if ('work_status' in body)     patch.work_status     = body.work_status;
@@ -58,6 +67,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ source:
   if ('estimated_hours' in body) patch.estimated_hours = body.estimated_hours ?? null;
   if ('start_date' in body)      patch.start_date      = body.start_date || null;
   if ('blocked_reason' in body)  patch.blocked_reason  = body.blocked_reason;
+  if ('note' in body && parsedNote.ok) patch.note = parsedNote.note;
 
   if (Object.keys(patch).length === 0) {
     return Response.json({ error: 'No fields to update' }, { status: 400 });

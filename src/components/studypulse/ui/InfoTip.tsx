@@ -17,9 +17,10 @@ type Pos = { top: number; left: number; place: 'above' | 'below'; arrow: number 
  * The popover is portalled to <body> with fixed positioning, so it is never clipped by a card's overflow or trapped by
  * a glass panel's backdrop-filter. It sits above the button, or below when there is no room, measured on open (and
  * again on scroll or resize while open). Closes on Esc, an outside press, and when focus leaves the button.
+ * `icon` swaps the ⓘ dot for a plain icon trigger (the entry table's note, spec 2026-10-24 §6.1); the popover is the same.
  */
-export default function InfoTip({ label, children, tone = 'violet' }: {
-  label: string; children: ReactNode; tone?: 'violet' | 'pink';
+export default function InfoTip({ label, children, tone = 'violet', icon }: {
+  label: string; children: ReactNode; tone?: 'violet' | 'pink'; icon?: ReactNode;
 }) {
   const id = useId();
   const popId = `${id}-tip`;
@@ -82,9 +83,9 @@ export default function InfoTip({ label, children, tone = 'violet' }: {
 
   return (
     <span className={`sp-info sp-info--${tone}`}>
-      <button ref={btn} type="button" className="sp-info__btn sp-focus-ring" aria-label={label} aria-expanded={open}
-        aria-describedby={open ? popId : undefined} onClick={toggle} onBlur={() => setOpen(false)}>
-        <span aria-hidden>i</span>
+      <button ref={btn} type="button" className={`sp-info__btn${icon ? ' sp-info__btn--icon' : ''} sp-focus-ring`} aria-label={label}
+        aria-expanded={open} aria-describedby={open ? popId : undefined} onClick={toggle} onBlur={() => setOpen(false)}>
+        {icon ?? <span aria-hidden>i</span>}
       </button>
       {open && createPortal(
         <span ref={pop} id={popId} role="tooltip" className={`sp-tip sp-tip--${pos?.place ?? 'above'}`}

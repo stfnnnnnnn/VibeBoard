@@ -4,7 +4,7 @@ import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
 import SubjectCardView from '@/components/studypulse/SubjectCardView';
 import type { EntryRow, GradingConfig, LabLinkData } from '@/components/studypulse/SubjectCardView';
-import { ensureCanvasSchema, ensureGradingV2Schema, ensureSubjectSection } from '@/lib/migrate';
+import { ensureCanvasSchema, ensureEntryNoteSchema, ensureGradingV2Schema, ensureSubjectSection } from '@/lib/migrate';
 import { loadGradingConfig, loadSubjectGradeModel } from '@/lib/studypulse/subjectCards';
 import { projectPeriod } from '@/lib/studypulse/projection';
 import { periodNamesMatch } from '@/lib/studypulse/labLink';
@@ -54,6 +54,10 @@ export default async function SubjectCardPage(
   const userId        = parseInt(session.user.id);
   const userSubjectId = parseInt(id);
 
+  // Every entry query below LEFT JOINs the Workboard overlay for its note (spec 2026-10-24 §6.1, Ruling R2). The join is
+  // scoped to this user, so another user's overlay row can never surface here.
+  await ensureEntryNoteSchema();
+
   await ensureSubjectSection();
   const [subjects] = await pool.execute<RowDataPacket[]>(`
     SELECT s.subject_name, s.course_code, s.section, s.units, s.year_level, s.trimester
@@ -82,6 +86,7 @@ export default async function SubjectCardPage(
       items:        r.items != null ? String(r.items) : '',
       grade:        r.grade != null ? Number(r.grade)  : null,
       canvas_linked: !!r.canvas_linked,
+      note:         r.note ? String(r.note) : null,
     };
   }
 
@@ -92,16 +97,18 @@ export default async function SubjectCardPage(
     try {
       const entries = await selectEntries(
         `SELECT ge.entry_id AS id, ge.name, '' AS specificType, ge.urgency, ge.status, ge.deadline,
-                ge.score, ge.items, ge.grade, ge.cat_id, ge.is_lab, ge.accomplished_at,
+                ge.score, ge.items, ge.grade, ge.cat_id, ge.is_lab, ge.accomplished_at, m.note,
                 (cel.grade_entry_id IS NOT NULL) AS canvas_linked
          FROM grade_entries ge
          LEFT JOIN canvas_entry_links cel ON cel.grade_entry_id = ge.entry_id
+         LEFT JOIN workboard_entry_meta m ON m.grade_entry_id = ge.entry_id AND m.user_id = ?
          WHERE ge.user_subject_id=? ORDER BY ge.entry_id ASC`,
         `SELECT ge.entry_id AS id, ge.name, '' AS specificType, ge.urgency, ge.status, ge.deadline,
-                ge.score, ge.items, ge.grade, ge.cat_id, ge.is_lab, ge.accomplished_at
+                ge.score, ge.items, ge.grade, ge.cat_id, ge.is_lab, ge.accomplished_at, m.note
          FROM grade_entries ge
+         LEFT JOIN workboard_entry_meta m ON m.grade_entry_id = ge.entry_id AND m.user_id = ?
          WHERE ge.user_subject_id=? ORDER BY ge.entry_id ASC`,
-        [userSubjectId]
+        [userId, userSubjectId]
       );
       for (const e of entries) (initialGradeEntries[e.cat_id as number] ??= []).push(toEntry(e));
     } catch {
@@ -192,44 +199,53 @@ export default async function SubjectCardPage(
     const actRows = await selectEntries(`
       SELECT a.activity_id AS id, a.activity_name AS name, a.activity_type AS specificType,
              a.urgency, a.status, a.deadline, a.score, a.items, a.grade, a.accomplished_at,
-             (cel.activity_id IS NOT NULL) AS canvas_linked
+             m.note, (cel.activity_id IS NOT NULL) AS canvas_linked
       FROM activities a
       LEFT JOIN canvas_entry_links cel ON cel.activity_id = a.activity_id
+      LEFT JOIN workboard_entry_meta m ON m.activity_id = a.activity_id AND m.user_id = ?
       WHERE a.user_subject_id=? ORDER BY a.activity_id ASC
     `, `
       SELECT a.activity_id AS id, a.activity_name AS name, a.activity_type AS specificType,
-             a.urgency, a.status, a.deadline, a.score, a.items, a.grade, a.accomplished_at
+             a.urgency, a.status, a.deadline, a.score, a.items, a.grade, a.accomplished_at,
+             m.note
       FROM activities a
+      LEFT JOIN workboard_entry_meta m ON m.activity_id = a.activity_id AND m.user_id = ?
       WHERE a.user_subject_id=? ORDER BY a.activity_id ASC
-    `, [userSubjectId]);
+    `, [userId, userSubjectId]);
 
     const quizRows = await selectEntries(`
       SELECT q.quiz_id AS id, q.quiz_name AS name, q.quiz_number AS specificType,
              q.urgency, q.status, q.deadline, q.score, q.items, q.grade, q.accomplished_at,
-             (cel.quiz_id IS NOT NULL) AS canvas_linked
+             m.note, (cel.quiz_id IS NOT NULL) AS canvas_linked
       FROM quizzes q
       LEFT JOIN canvas_entry_links cel ON cel.quiz_id = q.quiz_id
+      LEFT JOIN workboard_entry_meta m ON m.quiz_id = q.quiz_id AND m.user_id = ?
       WHERE q.user_subject_id=? ORDER BY q.quiz_number ASC
     `, `
       SELECT q.quiz_id AS id, q.quiz_name AS name, q.quiz_number AS specificType,
-             q.urgency, q.status, q.deadline, q.score, q.items, q.grade, q.accomplished_at
+             q.urgency, q.status, q.deadline, q.score, q.items, q.grade, q.accomplished_at,
+             m.note
       FROM quizzes q
+      LEFT JOIN workboard_entry_meta m ON m.quiz_id = q.quiz_id AND m.user_id = ?
       WHERE q.user_subject_id=? ORDER BY q.quiz_number ASC
-    `, [userSubjectId]);
+    `, [userId, userSubjectId]);
 
     const examRows = await selectEntries(`
       SELECT e.exam_id AS id, e.exam_name AS name, e.exam_type AS specificType,
              e.urgency, e.status, e.deadline, e.score, e.items, e.grade, e.accomplished_at,
-             (cel.exam_id IS NOT NULL) AS canvas_linked
+             m.note, (cel.exam_id IS NOT NULL) AS canvas_linked
       FROM exams e
       LEFT JOIN canvas_entry_links cel ON cel.exam_id = e.exam_id
+      LEFT JOIN workboard_entry_meta m ON m.exam_id = e.exam_id AND m.user_id = ?
       WHERE e.user_subject_id=? ORDER BY e.exam_id ASC
     `, `
       SELECT e.exam_id AS id, e.exam_name AS name, e.exam_type AS specificType,
-             e.urgency, e.status, e.deadline, e.score, e.items, e.grade, e.accomplished_at
+             e.urgency, e.status, e.deadline, e.score, e.items, e.grade, e.accomplished_at,
+             m.note
       FROM exams e
+      LEFT JOIN workboard_entry_meta m ON m.exam_id = e.exam_id AND m.user_id = ?
       WHERE e.user_subject_id=? ORDER BY e.exam_id ASC
-    `, [userSubjectId]);
+    `, [userId, userSubjectId]);
 
     initialActivities = actRows.map(r  => toEntry(r));
     initialQuizzes    = quizRows.map((r, i) => toEntry(r, String(i + 1)));

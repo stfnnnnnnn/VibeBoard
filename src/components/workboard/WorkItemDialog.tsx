@@ -720,6 +720,8 @@ export default function WorkItemDialog({ open, instant = false, target, projects
       period_id?:      number;
       deadline:        string;
       priority:        WorkPriority;
+      /** Written to the new entry's overlay row (spec 2026-10-24 §6.1). */
+      note:            string | null;
     } | null = null;
 
     if (!isAcademicEdit) {
@@ -804,6 +806,7 @@ export default function WorkItemDialog({ open, instant = false, target, projects
             period_id:       gradingPeriodId,
             deadline:        dueAt,
             priority,
+            note:            note.trim() || null,
           };
         } else {
           // `gradingTarget` is a three-value union with a default, so there is no "unpicked"
@@ -817,6 +820,7 @@ export default function WorkItemDialog({ open, instant = false, target, projects
             target_type:     gradingTarget,
             deadline:        dueAt,
             priority,
+            note:            note.trim() || null,
           };
         }
       }
@@ -843,14 +847,18 @@ export default function WorkItemDialog({ open, instant = false, target, projects
             priority,
             estimated_hours: estimatedHours === '' ? null : Number(estimatedHours),
             start_date:      startDate || null,
+            // Always sent, for the same presence reason as `deadline_time`: clearing the
+            // textarea has to clear the overlay's note, not leave yesterday's behind.
+            note:            note.trim() || null,
           }),
         });
       } else if (gradedBody !== null) {
-        // Path 2. Note what is NOT sent: no status, note, start date, estimated hours or
-        // project. This endpoint writes a Study Pulse row, whose columns are the ones in
-        // `gradedBody` and nothing else — the common fields below belong to
-        // `workboard_work_items`, a table this path never touches. (An overlay row to carry
-        // them can be PATCHed onto the created item afterwards, from the edit dialog.)
+        // Path 2. Note what is NOT sent: no status, start date, estimated hours or project.
+        // This endpoint writes a Study Pulse row, whose columns are the ones in `gradedBody`
+        // and nothing else — the common fields below belong to `workboard_work_items`, a
+        // table this path never touches. The one exception is `note`, which the route writes
+        // to the new entry's overlay row (spec 2026-10-24 §6.1). (An overlay row to carry the
+        // rest can be PATCHed onto the created item afterwards, from the edit dialog.)
         res = await fetch('/api/workboard/academic/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -970,6 +978,7 @@ export default function WorkItemDialog({ open, instant = false, target, projects
             priority={priority} setPriority={setPriority}
             estimatedHours={estimatedHours} setEstimatedHours={setEstimatedHours}
             startDate={startDate} setStartDate={setStartDate}
+            note={note} setNote={setNote}
             firstFieldRef={firstFieldRef}
           />
         ) : (

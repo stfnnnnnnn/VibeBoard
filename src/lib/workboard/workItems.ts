@@ -7,6 +7,7 @@ import type { WorkContext, WorkStage, LifeArea } from '@/lib/workboard/workConte
 import { isRevisionStage, isStageLegal, isWaitingStage, normaliseStage } from '@/lib/workboard/workContexts';
 import type { OrganizationSummary } from '@/lib/workboard/organizations';
 import { listOrganizations } from '@/lib/workboard/organizations';
+import { ensureEntryNoteSchema } from '@/lib/migrate';
 
 export type WorkStatus   = 'todo' | 'in_progress' | 'done';
 export type WorkPriority = 'high' | 'normal' | 'low';
@@ -206,6 +207,9 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
     timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(todayInManilaAsUtcDate());
   const cutoff = addDays(today, -14);   // done items older than this are out of the payload
+  // The academic SELECT below reads the overlay's `note` (spec 2026-10-24 §6.1). Ensured here,
+  // not at each call site, so every reader of this payload gets the column (Ruling R2).
+  await ensureEntryNoteSchema();
 
   const [projectRows] = await pool.execute<RowDataPacket[]>(
     `SELECT id, name, color, status, context, user_subject_id, organization_id
@@ -287,7 +291,7 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
               t.urgency, t.status, t.deadline, t.accomplished_at,
               s.course_code,
               m.in_progress, m.estimated_hours, m.start_date, m.deadline_time, m.work_stage,
-              m.blocked_reason, m.blocked_since,
+              m.blocked_reason, m.blocked_since, m.note,
               (SELECT COUNT(*) FROM workboard_item_links l WHERE l.\`${spec.metaCol}\` = t.\`${spec.pk}\`) AS link_count,
               (SELECT COUNT(*) FROM workboard_subtasks st WHERE st.\`${spec.metaCol}\` = t.\`${spec.pk}\`) AS subtask_total,
               (SELECT COUNT(*) FROM workboard_subtasks st WHERE st.\`${spec.metaCol}\` = t.\`${spec.pk}\` AND st.is_done = 1) AS subtask_done
@@ -333,7 +337,8 @@ export async function getWorkItems(userId: number): Promise<WorkItemsPayload> {
         // entry must not read as completed.
         completed_at:    normaliseStage(stage) === 'done' && r.accomplished_at
                            ? String(r.accomplished_at).slice(0, 10) : null,
-        note:            null,
+        // School-task notes live on the overlay; Study Pulse shows them read-only (spec §6.1).
+        note:            r.note ?? null,
         life_area:       null,
         organization_id: null,
         organization_name: null,

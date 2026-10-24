@@ -44,12 +44,32 @@ export interface AcademicPatch {
   start_date?:       string | null;
   /** The revision note for `submitted` ("For Revision"); ignored outside a waiting stage. */
   blocked_reason?:   string | null;
+  /** The school task's note (spec 2026-10-24 §6.1). Overlay-only, like `estimated_hours`:
+   *  Study Pulse has no column for it and only shows it read-only. Already normalised by
+   *  `parseEntryNote` (trimmed, '' → null). */
+  note?:             string | null;
+}
+
+/** `workboard_entry_meta.note` is TEXT, but the Canvas Include route and the convert form
+ *  cap a note at 1,000 characters (spec §6.1); every write path holds the same line. */
+export const ENTRY_NOTE_MAX = 1000;
+
+/** The request-body rule both academic routes share: absent or null clears, a string is
+ *  trimmed (empty → null), anything else or over `ENTRY_NOTE_MAX` is a 400. */
+export function parseEntryNote(raw: unknown): { ok: true; note: string | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, note: null };
+  if (typeof raw !== 'string') return { ok: false, error: 'note must be a string or null' };
+  const note = raw.trim();
+  if (note.length > ENTRY_NOTE_MAX) {
+    return { ok: false, error: `A note of at most ${ENTRY_NOTE_MAX} characters is required` };
+  }
+  return { ok: true, note: note === '' ? null : note };
 }
 
 /**
  * Routes each field of a patch to its correct home: done-ness and deadline and urgency go
  * back to the Study Pulse entry itself (it remains the source of truth); work_stage,
- * in_progress, deadline_time, estimated_hours and start_date go to the
+ * in_progress, deadline_time, estimated_hours, start_date and note go to the
  * workboard_entry_meta overlay, because Study Pulse has no columns for them and its
  * schema is deliberately not being changed.
  *
@@ -136,7 +156,7 @@ export async function patchAcademicItem(
   // `getWorkItems`'s academic predicate. So this must gate the entry table UPDATE as a whole,
   // not only the status branch below — `touchesEntryTable` is true whenever ANY of the three
   // entry-table-affecting fields would produce a `SET` clause. Overlay-only fields
-  // (`deadline_time`/`estimated_hours`/`start_date`/`work_stage`) never reach this table at
+  // (`deadline_time`/`estimated_hours`/`start_date`/`work_stage`/`note`) never reach this table at
   // all (they write `workboard_entry_meta` instead) and are correctly unaffected by this guard.
   const touchesEntryTable = statusChanging || patch.due_at !== undefined || patch.priority !== undefined;
   if (spec.hasGradedTrigger && isGraded && touchesEntryTable) {
@@ -201,6 +221,9 @@ export async function patchAcademicItem(
     }
     if (patch.start_date !== undefined) {
       overlayCols.push('start_date'); overlayVals.push(patch.start_date);
+    }
+    if (patch.note !== undefined) {
+      overlayCols.push('note'); overlayVals.push(patch.note);
     }
 
     // blocked_reason / blocked_since: the same transition rules as the work-items PATCH

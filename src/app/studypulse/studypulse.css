@@ -33,6 +33,7 @@
   --sp-ink: #2d3748;
   --sp-ink-top: #3b4a63;
   --sp-on-ink: #ffffff;
+  --sp-on-ink-muted: rgba(255, 255, 255, 0.72); /* secondary text on --sp-ink: 7.1:1 */
   --sp-surface: #ffffff;
   --sp-hair: rgba(160, 172, 196, 0.28);
   --sp-field-border: rgba(160, 172, 196, 0.45);
@@ -272,6 +273,8 @@
 @media (hover: none) { .sp-row-actions { opacity: 1; } }
 /* Not a flex row: the Canvas badge is an inline box after the last word, so it wraps with the name (spec §5.6). */
 .sp-en { display: block; font-weight: 600; color: var(--sp-text); overflow-wrap: anywhere; }
+/* The badge and the note icon wrap as one unit, so the icon never sits alone on a line. */
+.sp-en__tags { white-space: nowrap; }
 .sp-src { display: inline-block; margin-left: 6px; vertical-align: 1px; font: 700 12px/20px var(--sp-font-ui); color: var(--sp-blue-ink); background: var(--sp-blue-bg); padding: 0 6px; border-radius: 6px; white-space: nowrap; overflow-wrap: normal; }
 .sp-row-note, .sp-row-err { display: block; margin-top: 4px; font: 600 12px/1.4 var(--sp-font-ui); }
 .sp-row-note { color: var(--sp-blue-ink); }
@@ -413,6 +416,13 @@
 .sp-tip--above::after { top: 100%; border-top-color: var(--sp-ink); }
 .sp-tip--below::after { bottom: 100%; border-bottom-color: var(--sp-ink); }
 @starting-style { .sp-tip { opacity: 0; transform: scale(0.96); } }
+/* The entry note (spec 2026-10-24 §6.1): a plain 16px icon instead of the ⓘ dot, and the note text with its line breaks. */
+.sp-info__btn--icon { width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--sp-text-muted); }
+.sp-info__btn--icon::before { inset: -5px; border-radius: 8px; }
+.sp-info__btn--icon[aria-expanded='true'] { background: var(--sp-neutral-bg); color: var(--sp-text); }
+@media (hover: hover) and (pointer: fine) { .sp-info__btn--icon[aria-expanded='false']:hover { background: var(--sp-neutral-bg); color: var(--sp-text); } }
+.sp-tip__note { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sp-tip__muted { display: block; margin-top: 6px; font-size: 12px; color: var(--sp-on-ink-muted); }
 @media (prefers-reduced-motion: reduce) {
   .sp-tip { transition-duration: 1ms; }
   .sp-info__btn:active { transform: none; }
