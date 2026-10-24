@@ -4,20 +4,31 @@ import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
 import {
   suggestLegacyCategory, suggestCustomCategory, classificationText, suggestDestinations,
+  stripHtml, extractAnnouncementNote, noteSpans,
   type SuggestedCategory, type WorkboardDestination,
 } from '@/lib/canvas/classify';
+import { ensureGradingV2Schema } from '@/lib/migrate';
+
+const STATUSES = ['pending', 'included', 'ignored'] as const;
 
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
+  // Guarantees canvas_announcement_bank.seen_at exists (returned through bank.*).
+  await ensureGradingV2Schema();
+
   const userId = parseInt(session.user.id);
+  const status = req.nextUrl.searchParams.get('status') ?? 'pending';
+  if (!(STATUSES as readonly string[]).includes(status)) {
+    return Response.json({ error: 'Invalid status' }, { status: 400 });
+  }
   const userSubjectIdParam = req.nextUrl.searchParams.get('user_subject_id');
   const userSubjectId = userSubjectIdParam !== null ? parseInt(userSubjectIdParam) : null;
 
   // Same grading-mode join (and same graceful fallback if the grading tables don't exist)
-  // as GET /api/canvas/bank. No status filter here — the Announcement Bank is a persistent
-  // feed, so every status is always returned; filtering is a client-side UI concern.
+  // as GET /api/canvas/bank, and the same `status` filter (pending | included | ignored,
+  // default pending).
   const SELECT_WITH_MODE = `
     SELECT bank.*, cc.name AS course_name, cc.user_subject_id,
            CASE WHEN gp.preset_id IS NOT NULL THEN 'custom' ELSE 'legacy' END AS subject_mode
@@ -26,7 +37,7 @@ export async function GET(req: NextRequest) {
      JOIN canvas_connections conn ON conn.id = bank.connection_id
      LEFT JOIN subject_grading sg ON sg.user_subject_id = cc.user_subject_id
      LEFT JOIN grading_presets gp ON gp.preset_id = sg.preset_id
-     WHERE conn.user_id = ?${userSubjectId !== null ? ' AND cc.user_subject_id = ?' : ''}
+     WHERE conn.user_id = ? AND bank.bank_status = ?${userSubjectId !== null ? ' AND cc.user_subject_id = ?' : ''}
      ORDER BY bank.posted_at IS NULL, bank.posted_at DESC`;
 
   const SELECT_LEGACY_ONLY = `
@@ -34,10 +45,10 @@ export async function GET(req: NextRequest) {
      FROM canvas_announcement_bank bank
      JOIN canvas_courses cc ON cc.id = bank.course_id
      JOIN canvas_connections conn ON conn.id = bank.connection_id
-     WHERE conn.user_id = ?${userSubjectId !== null ? ' AND cc.user_subject_id = ?' : ''}
+     WHERE conn.user_id = ? AND bank.bank_status = ?${userSubjectId !== null ? ' AND cc.user_subject_id = ?' : ''}
      ORDER BY bank.posted_at IS NULL, bank.posted_at DESC`;
 
-  const params = userSubjectId !== null ? [userId, userSubjectId] : [userId];
+  const params = userSubjectId !== null ? [userId, status, userSubjectId] : [userId, status];
 
   let rows: RowDataPacket[];
   try {
@@ -78,7 +89,13 @@ export async function GET(req: NextRequest) {
       suggested = target === 'general' ? { kind: 'general' } : { kind: 'legacy', target };
     }
     const destinations: WorkboardDestination[] = [...suggestDestinations(text, suggested.kind !== 'general')];
-    return { ...row, suggested_category: suggested, suggested_destinations: destinations };
+    // Spec §6.1: the extra-detail sentences, computed from the same stripped body the client
+    // shows, so `note_spans` index into stripHtml(message).
+    const body = stripHtml(row.message as string | null);
+    return {
+      ...row, suggested_category: suggested, suggested_destinations: destinations,
+      suggested_note: extractAnnouncementNote(body), note_spans: noteSpans(body),
+    };
   });
 
   return Response.json({ items });

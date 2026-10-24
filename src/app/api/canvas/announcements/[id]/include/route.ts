@@ -6,7 +6,7 @@ import {
   insertActivityEntry, insertQuizEntry, insertExamEntry, insertGradeEntry,
 } from '@/lib/studypulseEntries';
 import { insertWorkboardItem, insertScheduleOverride } from '@/lib/workboard/items';
-import { ensureWorkboardSchema } from '@/lib/migrate';
+import { ensureWorkboardSchema, ensureEntryNoteSchema } from '@/lib/migrate';
 
 interface AnnouncementRow extends RowDataPacket {
   id: number;
@@ -23,6 +23,7 @@ interface TaskDestination {
   cat_id?: number;
   period_id?: number;
   deadline: string;
+  note?: string | null;
 }
 interface EventDestination {
   type: 'event';
@@ -31,11 +32,13 @@ interface EventDestination {
   starts_at: string;
   ends_at: string;
   user_subject_id?: number | null;
+  note?: string | null;
 }
 interface ReminderDestination {
   type: 'reminder';
   title: string;
   remind_at?: string | null;
+  note?: string | null;
 }
 interface ScheduleChangeDestination {
   type: 'schedule_change';
@@ -45,6 +48,17 @@ interface ScheduleChangeDestination {
   note?: string | null;
 }
 type DestinationInput = TaskDestination | EventDestination | ReminderDestination | ScheduleChangeDestination;
+
+const NOTE_MAX = 1000;
+
+/** Spec §6.1: trimmed; empty means null; over 1,000 characters is rejected. */
+function normalizeNote(raw: unknown): { ok: true; note: string | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, note: null };
+  if (typeof raw !== 'string') return { ok: false, error: 'Invalid note' };
+  const note = raw.trim();
+  if (note.length > NOTE_MAX) return { ok: false, error: 'Note is too long' };
+  return { ok: true, note: note === '' ? null : note };
+}
 
 /** Same check as the Activity Bank's Include route — a subject is "custom" mode when it has
  *  a subject_grading row pointing at a real grading preset. */
@@ -67,6 +81,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   await ensureWorkboardSchema();
+  // The task destination writes workboard_entry_meta.note (Ruling R2).
+  await ensureEntryNoteSchema();
 
   try {
     const { id } = await props.params;
@@ -102,10 +118,15 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     }
 
     const subjectMode = await getSubjectMode(item.user_subject_id);
+    // Normalised notes, index-aligned with `destinations`.
+    const notes: Array<string | null> = [];
     for (const d of destinations) {
       if (d.type !== 'task' && d.type !== 'event' && d.type !== 'reminder' && d.type !== 'schedule_change') {
         return Response.json({ error: 'Invalid destination type' }, { status: 400 });
       }
+      const n = normalizeNote((d as { note?: unknown }).note);
+      if (!n.ok) return Response.json({ error: n.error }, { status: 400 });
+      notes.push(n.note);
       if (d.type === 'task') {
         if (
           d.target_type !== 'activities' && d.target_type !== 'quizzes'
@@ -160,7 +181,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       await conn.beginTransaction();
       const createdEntryIds: number[] = [];
 
-      for (const d of destinations) {
+      for (const [i, d] of destinations.entries()) {
+        const note = notes[i];
         let linkColumn: 'activity_id' | 'quiz_id' | 'exam_id' | 'grade_entry_id' | 'workboard_item_id' | 'schedule_override_id';
         let linkedId: number;
 
@@ -179,24 +201,33 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
             linkedId = (await insertGradeEntry({ ...commonFields, catId: d.cat_id!, periodId: d.period_id!, isLab: false }, conn)).entryId;
             linkColumn = 'grade_entry_id';
           }
+          // School tasks keep their note on the Workboard overlay (spec §6.1). The meta table
+          // has a UNIQUE key on each entry column, so this upserts the row for the new entry.
+          if (note !== null) {
+            await conn.execute(
+              `INSERT INTO workboard_entry_meta (user_id, ${linkColumn}, note) VALUES (?, ?, ?)
+               ON DUPLICATE KEY UPDATE note = VALUES(note)`,
+              [userId, linkedId, note],
+            );
+          }
         } else if (d.type === 'event') {
           linkedId = (await insertWorkboardItem({
             userId, userSubjectId: d.user_subject_id ?? item.user_subject_id, itemType: 'event',
             title: d.title, location: d.location ?? null, startsAt: d.starts_at, endsAt: d.ends_at,
-            remindAt: null, note: null, sourceType: 'canvas_announcement', sourceAnnouncementId: announcementId,
+            remindAt: null, note, sourceType: 'canvas_announcement', sourceAnnouncementId: announcementId,
           }, conn)).itemId;
           linkColumn = 'workboard_item_id';
         } else if (d.type === 'reminder') {
           linkedId = (await insertWorkboardItem({
             userId, userSubjectId: item.user_subject_id, itemType: 'reminder',
             title: d.title, location: null, startsAt: null, endsAt: null,
-            remindAt: d.remind_at ?? null, note: null, sourceType: 'canvas_announcement', sourceAnnouncementId: announcementId,
+            remindAt: d.remind_at ?? null, note, sourceType: 'canvas_announcement', sourceAnnouncementId: announcementId,
           }, conn)).itemId;
           linkColumn = 'workboard_item_id';
         } else {
           linkedId = (await insertScheduleOverride({
             blockId: d.block_id, overrideDate: d.override_date, modality: d.modality ?? null,
-            note: d.note ?? null, room: null, movedDate: null, movedStartTime: null, movedEndTime: null,
+            note, room: null, movedDate: null, movedStartTime: null, movedEndTime: null,
             sourceType: 'canvas_announcement', sourceAnnouncementId: announcementId,
           }, conn)).overrideId;
           linkColumn = 'schedule_override_id';

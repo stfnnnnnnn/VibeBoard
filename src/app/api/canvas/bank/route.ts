@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
+import { suggestBankTarget, suggestLegacyTarget, type BankSuggestion } from '@/lib/canvas/classify';
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -53,5 +54,58 @@ export async function GET(req: NextRequest) {
     console.error('Canvas bank: grading-mode join failed, falling back to legacy mode:', err);
     [rows] = await pool.execute<RowDataPacket[]>(SELECT_LEGACY_ONLY, params);
   }
-  return Response.json({ items: rows });
+
+  // "Goes to Period › Category" suggestions for pending items. Every subject id below comes from
+  // rows already scoped to conn.user_id, so these reads stay inside the caller's own data. Each
+  // distinct custom subject's periods+categories (and its most recent entry's period) is loaded
+  // once, not per row.
+  type PeriodTree = Parameters<typeof suggestBankTarget>[1];
+  const subjectCache = new Map<number, { periods: PeriodTree; recentPeriodId: number | null }>();
+  async function loadSubject(sid: number) {
+    const cached = subjectCache.get(sid);
+    if (cached) return cached;
+    const [cats] = await pool.execute<RowDataPacket[]>(
+      `SELECT gp.period_id, gp.name AS period_name, gc.cat_id, gc.name AS cat_name
+       FROM subject_grading sg
+       JOIN grading_periods gp ON gp.preset_id = sg.preset_id
+       LEFT JOIN grading_categories gc ON gc.period_id = gp.period_id
+       WHERE sg.user_subject_id = ?
+       ORDER BY gp.sort_order, gp.period_id, gc.sort_order, gc.cat_id`,
+      [sid],
+    );
+    const periods: PeriodTree = [];
+    for (const r of cats) {
+      let p = periods.find(x => x.period_id === r.period_id);
+      if (!p) { p = { period_id: r.period_id, name: r.period_name, categories: [] }; periods.push(p); }
+      if (r.cat_id !== null) p.categories.push({ cat_id: r.cat_id, name: r.cat_name });
+    }
+    const [recent] = await pool.execute<RowDataPacket[]>(
+      'SELECT period_id FROM grade_entries WHERE user_subject_id = ? ORDER BY entry_id DESC LIMIT 1',
+      [sid],
+    );
+    const entry = { periods, recentPeriodId: recent.length ? (recent[0].period_id as number) : null };
+    subjectCache.set(sid, entry);
+    return entry;
+  }
+
+  const items = [];
+  for (const row of rows) {
+    let suggestion: BankSuggestion | { legacy: ReturnType<typeof suggestLegacyTarget> } | null = null;
+    if (row.bank_status === 'pending' && row.user_subject_id) {
+      if (row.subject_mode === 'custom') {
+        const { periods, recentPeriodId } = await loadSubject(row.user_subject_id as number);
+        suggestion = suggestBankTarget(row.name as string, periods, recentPeriodId);
+      } else {
+        suggestion = { legacy: suggestLegacyTarget(row.name as string) };
+      }
+    }
+    items.push({
+      ...row,
+      // DECIMAL columns arrive as strings from mysql2; hand the client numbers.
+      points_possible: row.points_possible === null ? null : Number(row.points_possible),
+      submission_score: row.submission_score === null ? null : Number(row.submission_score),
+      suggestion,
+    });
+  }
+  return Response.json({ items });
 }

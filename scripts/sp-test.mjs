@@ -10,8 +10,8 @@ import ts from 'typescript';
 
 const ROOT = 'src';
 const DIRS = ['src/lib', 'src/components/studypulse/grading'];
-// StudyPulse modules, the two shared pure libs they import, and the grading setup's pure helpers (not .tsx).
-const INCLUDE = /^lib\/(studypulse\/.+|gradeScale|transmutation)\.ts$|^components\/studypulse\/grading\/(__tests__\/)?[^/]+\.ts$/;
+// StudyPulse modules, the pure Canvas classifier, the two shared pure libs they import, and the grading setup's pure helpers (not .tsx).
+const INCLUDE = /^lib\/(studypulse\/.+|canvas\/classify(\.test)?|canvas\/__tests__\/.+|gradeScale|transmutation)\.ts$|^components\/studypulse\/grading\/(__tests__\/)?[^/]+\.ts$/;
 // Modules that import the DB pool. Never transpiled; tests may only `import type` from them.
 const SERVER = /^lib\/studypulse\/subjectCards\.ts$/;
 const out = mkdtempSync(join(tmpdir(), 'sp-test-'));
