@@ -4,7 +4,8 @@ import pool from '@/lib/db';
 import type { RowDataPacket } from 'mysql2';
 import { ensureGradingV2Schema, ensureSubjectSection } from '@/lib/migrate';
 import { buildCustomPeriods, buildLegacyPeriods } from './periodModel';
-import { normalizeFinalMode, projectPeriod, subjectOverall } from './projection';
+import { normalizeFinalMode, projectPeriod, subjectOverall, type PeriodInput } from './projection';
+import { combinePeriods, overallOfCurrents, periodNamesMatch } from './labLink';
 import { EMPTY_PREFS } from './prefs';
 import type { EntryRow, GradingConfig, SubjectCardData } from './types';
 
@@ -53,38 +54,89 @@ const lite = (r: RowDataPacket): Lite => ({
 
 type CardGrade = Pick<SubjectCardData, 'current_grade' | 'grade_scale'>;
 
+export interface SubjectGradeModel { periods: PeriodInput[]; config: GradingConfig }
+
+/** Period inputs (raw grades, default prefs) plus the custom grading config for one subject; null when the
+    subject has no custom config (legacy grading). No ownership check: callers verify ownership first. */
+export async function loadSubjectGradeModel(userSubjectId: number): Promise<SubjectGradeModel | null> {
+  const config = await loadGradingConfig(userSubjectId);
+  if (!config) return null;
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    'SELECT cat_id, name, score, items, grade FROM grade_entries WHERE user_subject_id=?', [userSubjectId],
+  );
+  const byCat: Record<number, Lite[]> = {};
+  for (const r of rows) (byCat[r.cat_id as number] ??= []).push(lite(r));
+  return { periods: buildCustomPeriods(config.preset, byCat, EMPTY_PREFS, null), config };
+}
+
+type GradeInfo = CardGrade & { model: SubjectGradeModel | null };
+
 /** Overall current grade for a card. Never throws: a failed query shows the card ungraded instead of failing
     the whole list (this runs per subject inside Promise.all, and Workboard's dialog uses the same API). */
 export async function currentGradeFor(userSubjectId: number): Promise<CardGrade> {
+  const { current_grade, grade_scale } = await gradeInfoFor(userSubjectId);
+  return { current_grade, grade_scale };
+}
+
+async function gradeInfoFor(userSubjectId: number): Promise<GradeInfo> {
   try {
-    return await computeCurrentGrade(userSubjectId);
+    return await computeGradeInfo(userSubjectId);
   } catch (err) {
     console.error(`[studypulse] current grade failed for user_subject_id=${userSubjectId}:`, err);
-    return { current_grade: null, grade_scale: null };
+    return { current_grade: null, grade_scale: null, model: null };
   }
 }
 
 /** Raw grades only: the transmutation table is client-loaded. */
-async function computeCurrentGrade(userSubjectId: number): Promise<CardGrade> {
-  const config = await loadGradingConfig(userSubjectId);
-  if (config) {
-    const [rows] = await pool.execute<RowDataPacket[]>(
-      'SELECT cat_id, name, score, items, grade FROM grade_entries WHERE user_subject_id=?', [userSubjectId],
-    );
-    const byCat: Record<number, Lite[]> = {};
-    for (const r of rows) (byCat[r.cat_id as number] ??= []).push(lite(r));
-    const periods = buildCustomPeriods(config.preset, byCat, EMPTY_PREFS, null);
-    const { final_mode, final_period_id } = config.preset;
+async function computeGradeInfo(userSubjectId: number): Promise<GradeInfo> {
+  const model = await loadSubjectGradeModel(userSubjectId);
+  if (model) {
+    const { final_mode, final_period_id } = model.config.preset;
     return {
-      current_grade: subjectOverall(periods, final_mode ?? null, final_period_id != null ? 'p' + final_period_id : null),
-      grade_scale: config.grade_scale,
+      current_grade: subjectOverall(model.periods, final_mode ?? null, final_period_id != null ? 'p' + final_period_id : null),
+      grade_scale: model.config.grade_scale,
+      model,
     };
   }
   const [acts] = await pool.execute<RowDataPacket[]>('SELECT activity_name AS name, score, items, grade FROM activities WHERE user_subject_id=?', [userSubjectId]);
   const [quizzes] = await pool.execute<RowDataPacket[]>('SELECT quiz_name AS name, score, items, grade FROM quizzes WHERE user_subject_id=?', [userSubjectId]);
   const [exams] = await pool.execute<RowDataPacket[]>('SELECT exam_name AS name, exam_type AS specificType, score, items, grade FROM exams WHERE user_subject_id=?', [userSubjectId]);
   const [overall] = buildLegacyPeriods(acts.map(lite), quizzes.map(lite), exams.map(lite), EMPTY_PREFS, null);
-  return { current_grade: projectPeriod(overall).current, grade_scale: '4pt' };
+  return { current_grade: projectPeriod(overall).current, grade_scale: '4pt', model: null };
+}
+
+/** The user's lecture/lab links. Both sides must be the user's subjects (subject_links has no foreign keys,
+    so orphaned rows stay inert). Never throws: links are an enhancement, the list must still load. */
+async function loadUserLinks(userId: number): Promise<{ lec: number; lab: number; weight: number }[]> {
+  try {
+    await ensureGradingV2Schema();
+    const [rows] = await pool.execute<RowDataPacket[]>(`
+      SELECT sl.lecture_user_subject_id AS lec, sl.lab_user_subject_id AS lab, sl.lecture_weight AS weight
+      FROM subject_links sl
+      JOIN user_subjects ul ON ul.user_subject_id = sl.lecture_user_subject_id AND ul.user_id = ?
+      JOIN user_subjects ub ON ub.user_subject_id = sl.lab_user_subject_id AND ub.user_id = ?
+    `, [userId, userId]);
+    return rows.map(r => ({ lec: Number(r.lec), lab: Number(r.lab), weight: Number(r.weight) }));
+  } catch (err) {
+    console.error(`[studypulse] subject links failed for user_id=${userId}:`, err);
+    return [];
+  }
+}
+
+/** Combined grade for a linked pair: per-period combination, then the lecture subject's final rule.
+    Null when either side lacks a custom model or the period names no longer line up. */
+function combinedGrade(lec: SubjectGradeModel | null, lab: SubjectGradeModel | null, weight: number): CardGrade | null {
+  if (!lec || !lab) return null;
+  if (!periodNamesMatch(lec.periods.map(p => p.name), lab.periods.map(p => p.name))) return null;
+  const currents = (m: SubjectGradeModel) => m.periods.map(p => projectPeriod(p).current);
+  const combined = combinePeriods(currents(lec), currents(lab), weight);
+  const { final_mode, final_period_id } = lec.config.preset;
+  return {
+    current_grade: overallOfCurrents(
+      combined, lec.periods.map(p => p.key), final_mode ?? null, final_period_id != null ? 'p' + final_period_id : null,
+    ),
+    grade_scale: lec.config.grade_scale,
+  };
 }
 
 export async function listSubjectCards(userId: number): Promise<SubjectCardData[]> {
@@ -98,7 +150,7 @@ export async function listSubjectCards(userId: number): Promise<SubjectCardData[
     ORDER BY us.user_subject_id DESC
   `, [userId]);
 
-  return Promise.all(rows.map(async sub => {
+  const cards = await Promise.all(rows.map(async sub => {
     const id = sub.user_subject_id as number;
     const [prog] = await pool.execute<RowDataPacket[]>(`
       SELECT SUM(CASE WHEN status = 'Done' THEN 1 ELSE 0 END) AS completed, COUNT(*) AS total
@@ -122,7 +174,18 @@ export async function listSubjectCards(userId: number): Promise<SubjectCardData[
       completed_tasks: completed,
       total_tasks: total,
       progress_percent: total > 0 ? Math.round((completed / total) * 100) : 0,
-      ...(await currentGradeFor(id)),
+      ...(await gradeInfoFor(id)),
+      lab_tag: null as SubjectCardData['lab_tag'],
     };
   }));
+
+  const byId = new Map(cards.map(c => [c.user_subject_id, c]));
+  for (const link of await loadUserLinks(userId)) {
+    const lec = byId.get(link.lec), lab = byId.get(link.lab);
+    if (!lec || !lab) continue;
+    const grade = combinedGrade(lec.model, lab.model, link.weight);
+    if (!grade) continue;
+    for (const c of [lec, lab]) Object.assign(c, grade, { lab_tag: 'Lec + Lab' as const });
+  }
+  return cards.map(({ model: _model, ...card }) => card);
 }

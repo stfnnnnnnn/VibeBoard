@@ -104,4 +104,6 @@ export interface SubjectCardData {
   /** Overall current grade (spec §6.1); null when nothing is graded. */
   current_grade: number | null;
   grade_scale: GradeScale | null;
+  /** Set when this subject is in a lecture/lab link; current_grade is then the combined grade. */
+  lab_tag?: 'Lec + Lab' | null;
 }
