@@ -17,7 +17,7 @@ const VIEW_LABEL: Record<AnnouncementStatus, string> = { pending: 'To review', i
 const OFFLINE = 'Couldn’t reach the server. Check your connection and try again.';
 
 type Lists = Record<AnnouncementStatus, AnnouncementItem[]>;
-type Busy = { id: number; kind: 'convert' | 'dismiss' | 'restore' } | null;
+type BusyKind = 'convert' | 'dismiss' | 'restore';
 
 async function post(url: string, body?: unknown): Promise<Response> {
   return fetch(url, body === undefined
@@ -72,7 +72,8 @@ export default function Announcements({ subject, subjects, toast, onCountsChange
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [shownId, setShownId] = useState<number | null>(null);
   const [reading, setReading] = useState(false); // phone: the detail replaces the list
-  const [busy, setBusy] = useState<Busy>(null);
+  // Per announcement: a request in flight on A keeps A locked while B is opened and acted on (no duplicate Convert).
+  const [busy, setBusy] = useState<Map<number, BusyKind>>(new Map());
   const [errors, setErrors] = useState<Record<number, string>>({});
   const [leaving, setLeaving] = useState<Set<number>>(new Set());
 
@@ -86,6 +87,7 @@ export default function Announcements({ subject, subjects, toast, onCountsChange
   const detailHead = useRef<HTMLHeadingElement>(null);
   const focusRow = useRef<number | 'seg' | null>(null); // where focus goes once a leaving row is gone, or after Back
   const focusHead = useRef(false);
+  const inflight = useRef(new Set<number>());
 
   const load = useCallback(async (reset: boolean): Promise<void> => {
     const my = ++seq.current;
@@ -183,9 +185,15 @@ export default function Announcements({ subject, subjects, toast, onCountsChange
 
   const comeBack = () => { void load(false); onCountsChange(); };
 
-  const act = async (item: AnnouncementItem, kind: NonNullable<Busy>['kind'], run: () => Promise<void>) => {
-    setBusy({ id: item.id, kind }); setError(item.id, null);
-    try { await run(); } catch { setError(item.id, OFFLINE); } finally { setBusy(null); }
+  const act = async (item: AnnouncementItem, kind: BusyKind, run: () => Promise<void>) => {
+    // A ref, not `busy`: two clicks in the same render must not both get through.
+    if (inflight.current.has(item.id)) return;
+    inflight.current.add(item.id);
+    setBusy(prev => new Map(prev).set(item.id, kind)); setError(item.id, null);
+    try { await run(); } catch { setError(item.id, OFFLINE); } finally {
+      inflight.current.delete(item.id);
+      setBusy(prev => { const n = new Map(prev); n.delete(item.id); return n; });
+    }
   };
 
   const convert = (item: AnnouncementItem, destinations: DestinationPayload[]) => act(item, 'convert', async () => {
@@ -352,7 +360,7 @@ export default function Announcements({ subject, subjects, toast, onCountsChange
         <div className="sp-ann__pane">
           {shown ? (
             <AnnouncementDetail ref={detailHead} item={shown} code={codeOf(shown)} posted={postedLabel(shown.posted_at, now)}
-              busy={busy?.id === shown.id ? busy.kind : null} error={errors[shown.id] ?? null}
+              busy={busy.get(shown.id) ?? null} error={errors[shown.id] ?? null}
               loadPeriods={loadPeriods} loadBlocks={loadBlocks} onBack={back}
               onConvert={d => void convert(shown, d)} onDismiss={() => void dismiss(shown)} onRestore={() => void restore(shown)} />
           ) : null}

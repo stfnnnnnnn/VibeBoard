@@ -14,7 +14,9 @@ import type { AnnouncementItem, PickerPeriod, ScheduleBlockOption } from './type
 export function markedBody(text: string, spans: Array<[number, number]>): ReactNode[] {
   const out: ReactNode[] = [];
   let at = 0;
-  for (const [s, e] of spans) {
+  for (const span of spans) {
+    if (!Array.isArray(span) || span.length !== 2) continue;
+    const [s, e] = span;
     if (!Number.isInteger(s) || !Number.isInteger(e) || s < at || e <= s || e > text.length) continue;
     if (s > at) out.push(text.slice(at, s));
     out.push(<mark key={s} className="sp-ann-pick">{text.slice(s, e)}</mark>);

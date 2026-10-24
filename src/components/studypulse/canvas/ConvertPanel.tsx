@@ -62,7 +62,8 @@ export default function ConvertPanel({ item, loadPeriods, loadBlocks, busy, serv
   const [active, setActive] = useState<Destination>(item.suggested_destinations[0] ?? 'task');
   const [error, setError] = useState<string | null>(null);
 
-  // Task sub-form (legacy/custom picker — same fields as before)
+  // Task sub-form (legacy/custom picker — same fields as before, plus the editable title of ruling R15)
+  const [taskTitle, setTaskTitle] = useState(item.title);
   const [targetType, setTargetType] = useState<LegacyTable>(item.suggested_category.kind === 'legacy' ? item.suggested_category.target : 'activities');
   const [deadline, setDeadline] = useState('');
   const [periods, setPeriods] = useState<PickerPeriod[] | null>(null);
@@ -78,10 +79,10 @@ export default function ConvertPanel({ item, loadPeriods, loadBlocks, busy, serv
   const [blocksErr, setBlocksErr] = useState(false);
 
   // One note per destination, each pre-filled from the announcement (spec §6.1).
-  const [notes, setNotes] = useState<Record<Destination, string>>(() => {
-    const n = fitNote(item.suggested_note);
-    return { task: n, event: n, reminder: n, schedule_change: n };
-  });
+  const [prefill] = useState(() => fitNote(item.suggested_note));
+  const [notes, setNotes] = useState<Record<Destination, string>>(
+    () => ({ task: prefill, event: prefill, reminder: prefill, schedule_change: prefill }),
+  );
 
   useEffect(() => {
     let live = true;
@@ -120,7 +121,7 @@ export default function ConvertPanel({ item, loadPeriods, loadBlocks, busy, serv
   const convert = () => {
     const destinations: DestinationPayload[] = [];
     const fail = (d: Destination | null, msg: string) => { setError(msg); if (d) setActive(d); };
-    const noteOf = (d: Destination) => notes[d] || null;
+    const noteOf = (d: Destination) => notes[d].trim() || null;
     for (const d of DESTINATIONS) {
       if (checked.has(d) && notes[d].trim().length > NOTE_MAX) { fail(d, `The ${DEST_LABEL[d].toLowerCase()} note is over 1,000 characters.`); return; }
     }
@@ -129,9 +130,9 @@ export default function ConvertPanel({ item, loadPeriods, loadBlocks, busy, serv
       if (!deadline) { fail('task', 'Choose a deadline for the Task destination'); return; }
       if (customMode) {
         if (periodId == null || catId == null) { fail('task', 'Choose a grading period and category for the Task destination'); return; }
-        destinations.push({ type: 'task', target_type: 'grade_entries', period_id: periodId, cat_id: catId, deadline, note: noteOf('task') });
+        destinations.push({ type: 'task', target_type: 'grade_entries', period_id: periodId, cat_id: catId, deadline, title: taskTitle, note: noteOf('task') });
       } else {
-        destinations.push({ type: 'task', target_type: targetType, deadline, note: noteOf('task') });
+        destinations.push({ type: 'task', target_type: targetType, deadline, title: taskTitle, note: noteOf('task') });
       }
     }
     if (checked.has('event')) {
@@ -198,6 +199,9 @@ export default function ConvertPanel({ item, loadPeriods, loadBlocks, busy, serv
         {active === 'task' && (
           customMode ? (
             <>
+              <label className="sp-dform__f sp-dform__full">Title
+                <input className="sp-input sp-input--sm sp-focus-ring" maxLength={255} value={taskTitle} onChange={e => setTaskTitle(e.target.value)} />
+              </label>
               <label className="sp-dform__f">Due
                 <input type="date" className="sp-input sp-input--sm sp-focus-ring" value={deadline} onChange={e => setDeadline(e.target.value)} />
               </label>
@@ -223,6 +227,9 @@ export default function ConvertPanel({ item, loadPeriods, loadBlocks, busy, serv
             </>
           ) : (
             <>
+              <label className="sp-dform__f sp-dform__full">Title
+                <input className="sp-input sp-input--sm sp-focus-ring" maxLength={255} value={taskTitle} onChange={e => setTaskTitle(e.target.value)} />
+              </label>
               <label className="sp-dform__f">Due
                 <input type="date" className="sp-input sp-input--sm sp-focus-ring" value={deadline} onChange={e => setDeadline(e.target.value)} />
               </label>
@@ -300,7 +307,7 @@ export default function ConvertPanel({ item, loadPeriods, loadBlocks, busy, serv
         <div className="sp-dform__f sp-dform__full">
           <span className="sp-dform__lbl">
             <label htmlFor={field('note')}>Note</label>
-            {item.suggested_note && <span className="sp-dform__from">From the announcement</span>}
+            {prefill && note === prefill && <span className="sp-dform__from">From the announcement</span>}
             <InfoTip label="Where this note shows">
               {item.suggested_note ? 'Extra details from the announcement, like what to bring or the coverage, land here. ' : 'Anything to remember, like what to bring or the coverage. '}
               {NOTE_WHERE[active]}

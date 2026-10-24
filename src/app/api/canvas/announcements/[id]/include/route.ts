@@ -23,6 +23,8 @@ interface TaskDestination {
   cat_id?: number;
   period_id?: number;
   deadline: string;
+  /** Ruling R15: the entry's name; trimmed, ≤ 255, empty falls back to the announcement title. */
+  title?: string | null;
   note?: string | null;
 }
 interface EventDestination {
@@ -50,6 +52,16 @@ interface ScheduleChangeDestination {
 type DestinationInput = TaskDestination | EventDestination | ReminderDestination | ScheduleChangeDestination;
 
 const NOTE_MAX = 1000;
+const TITLE_MAX = 255; // the entry tables' name column
+
+/** Ruling R15: an optional task title; trimmed; empty means "use the announcement title". */
+function normalizeTitle(raw: unknown): { ok: true; title: string | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, title: null };
+  if (typeof raw !== 'string') return { ok: false, error: 'Invalid title' };
+  const title = raw.trim();
+  if (title.length > TITLE_MAX) return { ok: false, error: 'Title is too long' };
+  return { ok: true, title: title === '' ? null : title };
+}
 
 /** Spec §6.1: trimmed; empty means null; over 1,000 characters is rejected. */
 function normalizeNote(raw: unknown): { ok: true; note: string | null } | { ok: false; error: string } {
@@ -108,7 +120,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       return Response.json({ error: 'This item\'s course is not linked to a subject yet' }, { status: 400 });
     }
     if (item.bank_status === 'included') {
-      return Response.json({ error: 'This announcement has already been included' }, { status: 400 });
+      return Response.json({ error: 'This announcement has already been included' }, { status: 409 });
     }
     if (item.bank_status !== 'pending' && item.bank_status !== 'ignored') {
       return Response.json(
@@ -120,6 +132,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     const subjectMode = await getSubjectMode(item.user_subject_id);
     // Normalised notes, index-aligned with `destinations`.
     const notes: Array<string | null> = [];
+    // Normalised task titles, index-aligned with `destinations` (null for non-tasks or "use the announcement title").
+    const titles: Array<string | null> = [];
     for (const d of destinations) {
       if (d.type !== 'task' && d.type !== 'event' && d.type !== 'reminder' && d.type !== 'schedule_change') {
         return Response.json({ error: 'Invalid destination type' }, { status: 400 });
@@ -127,6 +141,13 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       const n = normalizeNote((d as { note?: unknown }).note);
       if (!n.ok) return Response.json({ error: n.error }, { status: 400 });
       notes.push(n.note);
+      if (d.type === 'task') {
+        const t = normalizeTitle(d.title);
+        if (!t.ok) return Response.json({ error: t.error }, { status: 400 });
+        titles.push(t.title);
+      } else {
+        titles.push(null);
+      }
       if (d.type === 'task') {
         if (
           d.target_type !== 'activities' && d.target_type !== 'quizzes'
@@ -179,6 +200,23 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
+      // Re-read the status under a row lock: two concurrent includes both pass the check above, but only the first
+      // gets here with 'pending'/'ignored'; the second waits on the lock, then sees 'included' and stops.
+      const [locked] = await conn.execute<RowDataPacket[]>(
+        'SELECT bank_status FROM canvas_announcement_bank WHERE id = ? FOR UPDATE', [announcementId],
+      );
+      const lockedStatus = locked[0]?.bank_status as AnnouncementRow['bank_status'] | undefined;
+      if (lockedStatus === 'included') {
+        await conn.rollback();
+        return Response.json({ error: 'This announcement has already been included' }, { status: 409 });
+      }
+      if (lockedStatus !== 'pending' && lockedStatus !== 'ignored') {
+        await conn.rollback();
+        return Response.json(
+          { error: 'This announcement is no longer reported by Canvas and can no longer be included' },
+          { status: 400 },
+        );
+      }
       const createdEntryIds: number[] = [];
 
       for (const [i, d] of destinations.entries()) {
@@ -188,7 +226,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
 
         if (d.type === 'task') {
           const commonFields = {
-            entryId: null, userSubjectId: item.user_subject_id, name: item.title,
+            entryId: null, userSubjectId: item.user_subject_id, name: titles[i] ?? item.title,
             specificType: '', urgency: 'Medium', status: 'Pending', deadline: d.deadline,
             score: null, items: null, grade: null, accomplishedAt: null,
           };
