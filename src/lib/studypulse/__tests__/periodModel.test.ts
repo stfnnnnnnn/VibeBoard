@@ -95,3 +95,56 @@ test('averageOf', () => {
   assert.equal(averageOf([row({ grade: 90 }), row({ grade: 80 }), row({})], null), 85);
   assert.equal(averageOf([row({})], null), null);
 });
+
+const CUM: PresetLike = {
+  final_mode: 'period', final_period_id: 2,
+  periods: [
+    { period_id: 1, name: 'Midterm', sort_order: 0, categories: [
+      { cat_id: 10, name: 'Quizzes', weight: 60, is_singleton: 0, sort_order: 0, link_group: 'q', carry_score: 1, include_earlier: 0 },
+      { cat_id: 12, name: 'Midterm Exam', weight: 40, is_singleton: 1, sort_order: 1, link_group: 'me', carry_score: 1, include_earlier: 0 },
+    ] },
+    { period_id: 2, name: 'Finals', sort_order: 1, categories: [
+      { cat_id: 20, name: 'Quizzes', weight: 85, is_singleton: 0, sort_order: 0, link_group: 'q', carry_score: 1, include_earlier: 1 },
+      { cat_id: 22, name: 'Midterm Exam', weight: 15, is_singleton: 1, sort_order: 1, link_group: 'me', carry_score: 1, include_earlier: 0 },
+    ] },
+  ],
+};
+
+test('cumulative: later period averages own + earlier graded entries; pending earlier is excluded', () => {
+  const [, fin] = buildCustomPeriods(CUM, {
+    10: [row({ grade: 85 }), row({ grade: 90 }), row({ name: 'Quiz 3', grade: null })],
+    12: [row({ score: '40', items: '50', grade: 80 })],
+    20: [row({ grade: 70 }), row({ name: 'Quiz 5', grade: null })],
+    22: [],
+  }, EMPTY_PREFS, null);
+  const q = fin.categories[0];
+  assert.deepEqual(q.graded, [70, 85, 90]);
+  assert.deepEqual(q.pendingNames, ['Quiz 5']);
+  assert.deepEqual(q.carried, { count: 2, from: ['Midterm'], avg: 87.5 });
+});
+
+test('linked single score reuses the earlier raw score at this period\'s weight', () => {
+  const [, fin] = buildCustomPeriods(CUM, { 10: [], 12: [row({ score: '40', items: '50', grade: 80 })], 20: [], 22: [] }, EMPTY_PREFS, null);
+  const me = fin.categories[1];
+  assert.deepEqual(me.graded, [80]);
+  assert.equal(me.weight, 15);
+  assert.deepEqual(me.reused, { score: '40', items: '50', from: 'Midterm', weight: 40 });
+});
+
+test('reuse only flows forward: an ungraded earlier singleton never borrows a later score', () => {
+  const [mid] = buildCustomPeriods(CUM, { 10: [], 12: [], 20: [], 22: [row({ score: '45', items: '50', grade: 90 })] }, EMPTY_PREFS, null);
+  assert.deepEqual(mid.categories[1].graded, []);
+  assert.equal(mid.categories[1].reused ?? null, null);
+});
+
+test('reused value is transmuted from the raw score', () => {
+  const [, fin] = buildCustomPeriods(CUM, { 10: [], 12: [row({ score: '40', items: '50', grade: 80 })], 20: [], 22: [] }, EMPTY_PREFS, { 40: { 50: 88 } });
+  assert.deepEqual(fin.categories[1].graded, [88]);
+});
+
+test('unlinked categories never borrow, even with include_earlier set', () => {
+  const unlinked: PresetLike = { ...CUM, periods: CUM.periods.map(p => ({ ...p, categories: p.categories.map(c => ({ ...c, link_group: null })) })) };
+  const [, fin] = buildCustomPeriods(unlinked, { 10: [row({ grade: 85 })], 12: [row({ score: '40', items: '50', grade: 80 })], 20: [row({ grade: 70 })], 22: [] }, EMPTY_PREFS, null);
+  assert.deepEqual(fin.categories[0].graded, [70]);
+  assert.deepEqual(fin.categories[1].graded, []);
+});

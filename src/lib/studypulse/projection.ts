@@ -16,6 +16,10 @@ export interface CategoryInput {
   singleton: boolean;
   /** Singular noun for planned-slot names ("Quiz" -> "Quiz 5"). */
   noun: string;
+  /** Cumulative category: earlier periods' graded values appended to `graded` (spec §3.2). */
+  carried?: { count: number; from: string[]; avg: number } | null;
+  /** Linked singleton reusing an earlier period's raw score, shown at this period's weight. */
+  reused?: { score: string; items: string; from: string; weight: number } | null;
 }
 
 export interface PeriodInput {

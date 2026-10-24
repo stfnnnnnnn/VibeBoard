@@ -64,30 +64,82 @@ function category(
   };
 }
 
+type Graded = { values: number[]; pending: string[]; firstRaw: EntryLike | null };
+
+function gradedOf(entries: EntryLike[], table: TransmutationTable | null): Graded {
+  const values: number[] = [];
+  const pending: string[] = [];
+  let firstRaw: EntryLike | null = null;
+  for (const e of entries) {
+    if (entryHasGrade(e)) {
+      const v = entryValue(e, table);
+      if (v !== null) { values.push(v); firstRaw ??= e; }
+    } else {
+      pending.push(e.name.trim() || 'Untitled');
+    }
+  }
+  return { values, pending, firstRaw };
+}
+
+/**
+ * Spec §3.2: own graded values first, then (linked, cumulative, pi > 0) earlier periods' graded
+ * values appended; pending earlier entries never count. A linked carry singleton with no score of
+ * its own reuses the first earlier sibling's raw score (transmuted afresh). Only earlier periods
+ * (pj < pi) ever supply values.
+ */
 export function buildCustomPeriods(
   preset: PresetLike,
   catEntries: Record<number, EntryLike[]>,
   prefs: ProjectionPrefs,
   table: TransmutationTable | null,
 ): PeriodInput[] {
-  // Linked carry-forward source: the first category in preset order with its own graded score.
-  const source: Record<string, number> = {};
-  for (const p of preset.periods) for (const c of p.categories) {
-    const { graded } = split(catEntries[c.cat_id] ?? [], table);
-    if (c.link_group && graded.length && !(c.link_group in source)) source[c.link_group] = mean(graded);
-  }
-  return preset.periods.map(p => ({
+  const own = preset.periods.map(p => p.categories.map(c => gradedOf(catEntries[c.cat_id] ?? [], table)));
+  const siblingIndex = (pj: number, group: string) =>
+    preset.periods[pj].categories.findIndex(x => x.link_group === group);
+  return preset.periods.map((p, pi) => ({
     key: `p${p.period_id}`,
     name: p.name,
     target: prefs.targets[`p${p.period_id}`] ?? DEFAULT_TARGET,
-    categories: p.categories.map((c, i) => {
+    categories: p.categories.map((c, ci) => {
       const singleton = Number(c.is_singleton) === 1;
-      let { graded, pending } = split(catEntries[c.cat_id] ?? [], table);
-      if (!graded.length && singleton && Number(c.carry_score) === 1 && c.link_group && c.link_group in source) {
-        graded = [source[c.link_group]];
-        pending = [];
+      let graded = own[pi][ci].values;
+      let pending = own[pi][ci].pending;
+      let carried: CategoryInput['carried'] = null;
+      let reused: CategoryInput['reused'] = null;
+      if (c.link_group && pi > 0) {
+        const group = c.link_group;
+        if (singleton && !graded.length && Number(c.carry_score) === 1) {
+          for (let pj = 0; pj < pi; pj++) {
+            const sj = siblingIndex(pj, group);
+            const src = sj >= 0 ? own[pj][sj].firstRaw : null;
+            if (!src) continue;
+            const v = entryValue(src, table);
+            if (v === null) continue;
+            graded = [v];
+            pending = [];
+            reused = {
+              score: src.score, items: src.items, from: preset.periods[pj].name,
+              weight: Number(preset.periods[pj].categories[sj].weight),
+            };
+            break;
+          }
+        } else if (!singleton && Number(c.include_earlier) === 1) {
+          const extra: number[] = [];
+          const from: string[] = [];
+          for (let pj = 0; pj < pi; pj++) {
+            const sj = siblingIndex(pj, group);
+            if (sj >= 0 && own[pj][sj].values.length) {
+              extra.push(...own[pj][sj].values);
+              from.push(preset.periods[pj].name);
+            }
+          }
+          if (extra.length) {
+            carried = { count: extra.length, from, avg: mean(extra) };
+            graded = [...graded, ...extra];
+          }
+        }
       }
-      return category(`c${c.cat_id}`, c.name, Number(c.weight), i, singleton, graded, pending, prefs);
+      return { ...category(`c${c.cat_id}`, c.name, Number(c.weight), ci, singleton, graded, pending, prefs), carried, reused };
     }),
   }));
 }
