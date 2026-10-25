@@ -9,10 +9,9 @@ import VerifyEmailBanner from '@/components/dashboard/VerifyEmailBanner';
 import { findById } from '@/lib/auth/users';
 
 const MODULES = [
-  { href: '/studypulse',  kind: 'image' as const, src: '/studypulse.png',     alt: 'Study Pulse'     },
-  { href: '/finance',     kind: 'image' as const, src: '/financetracker.png', alt: 'Finance Tracker' },
-  { href: '/habits',      kind: 'image' as const, src: '/habittracker.png',   alt: 'Habit Tracker'   },
-  { href: '/workboard',   kind: 'icon'  as const, alt: 'Workboard' },
+  { href: '/studypulse', src: '/studypulse.png',     alt: 'Study Pulse'     },
+  { href: '/finance',    src: '/financetracker.png', alt: 'Finance Tracker' },
+  { href: '/habits',     src: '/habittracker.png',   alt: 'Habit Tracker'   },
 ];
 
 export default async function DashboardPage() {
@@ -48,28 +47,54 @@ export default async function DashboardPage() {
         >
           {firstName}&apos;s Home
         </h1>
-        <form action={handleSignOut} style={{ margin: 0 }}>
-          <button
-            type="submit"
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '25px' }}>
+          <Link
+            href="/workboard"
+            className="active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:-translate-y-[1px]"
             style={{
-              background:    'linear-gradient(to right, #f2a7c0, #74bcd9)',
-              color:         'rgba(255,255,255,0.97)',
-              border:        '1px solid #ddd',
-              borderRadius:  '20px',
-              boxShadow:     '0 4px 12px rgba(77,171,245,0.3)',
-              padding:       '8px 16px',
-              fontWeight:    700,
-              fontSize:      '1rem',
-              display:       'flex',
-              alignItems:    'center',
-              gap:           '8px',
-              cursor:        'pointer',
-              transition:    'opacity 0.2s',
+              background:     'linear-gradient(to right, #f2a7c0, #74bcd9)',
+              color:          'rgba(255,255,255,0.99)',
+              border:         '1.5px solid rgba(255,255,255,0.95)',
+              borderRadius:   '20px',
+              boxShadow:      '0 0 0 3px rgba(255,255,255,0.45), 0 6px 18px rgba(240,103,157,0.38), 0 4px 12px rgba(77,171,245,0.28)',
+              padding:        '8px 18px',
+              fontWeight:     700,
+              fontSize:       '1rem',
+              display:        'inline-flex',
+              alignItems:     'center',
+              gap:            '8px',
+              textDecoration: 'none',
+              cursor:         'pointer',
+              transition:     'transform 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 200ms cubic-bezier(0.23, 1, 0.32, 1)',
             }}
           >
-            Sign-Out
-          </button>
-        </form>
+            <LayoutDashboard size={18} strokeWidth={2.2} />
+            <span>My Work</span>
+          </Link>
+          <form action={handleSignOut} style={{ margin: 0 }}>
+            <button
+              type="submit"
+              className="active:scale-[0.97]"
+              style={{
+                background:    'linear-gradient(to right, #f2a7c0, #74bcd9)',
+                color:         'rgba(255,255,255,0.97)',
+                border:        '1px solid #ddd',
+                borderRadius:  '20px',
+                boxShadow:     '0 4px 12px rgba(77,171,245,0.3)',
+                padding:       '8px 16px',
+                fontWeight:    700,
+                fontSize:      '1rem',
+                display:       'flex',
+                alignItems:    'center',
+                gap:           '8px',
+                cursor:        'pointer',
+                transition:    'transform 160ms cubic-bezier(0.23, 1, 0.32, 1), opacity 160ms ease',
+              }}
+            >
+              Sign-Out
+            </button>
+          </form>
+        </div>
       </div>
 
       {/* ── Quote + Weather two-col ─────────────── */}
@@ -144,25 +169,15 @@ export default async function DashboardPage() {
                 className="relative w-full overflow-hidden rounded-[14px] aspect-video lg:aspect-auto lg:h-[220px]"
                 style={{ marginBottom: '10px' }}
               >
-                {mod.kind === 'image' ? (
-                  <Image
-                    src={mod.src}
-                    alt={mod.alt}
-                    fill
-                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 400px"
-                    className="object-cover"
-                    style={{ borderRadius: '14px' }}
-                    unoptimized
-                  />
-                ) : (
-                  <div style={{
-                    position: 'absolute', inset: 0, borderRadius: '14px',
-                    background: 'linear-gradient(135deg, #f2a7c0, #74bcd9)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}>
-                    <LayoutDashboard size={64} color="rgba(255,255,255,0.9)" strokeWidth={1.5} />
-                  </div>
-                )}
+                <Image
+                  src={mod.src}
+                  alt={mod.alt}
+                  fill
+                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 400px"
+                  className="object-cover"
+                  style={{ borderRadius: '14px' }}
+                  unoptimized
+                />
               </div>
               <p style={{ textAlign: 'center', fontWeight: 700, color: '#333', margin: 0 }}>{mod.alt}</p>
             </div>
