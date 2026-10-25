@@ -66,6 +66,38 @@ export function validateMoves(
   }
 }
 
+export type SingleScoreError = { error: 'single-score-has-entries' | 'single-score-target'; cat_id: number };
+
+/** F1: a single-score category shows one entry per subject while the period grade averages all of them, so a write
+    must never leave a subject with more than one entry in one. `cats` are the categories as they will be saved
+    (`was_singleton`: the stored flag; equal to `is_singleton` for a category that is not being edited); `counts`
+    are entries per (cat_id, subject) before the write; `moves` maps a source cat_id to its target (or 'delete').
+    Returns the first problem, or null. A 0 -> 1 flip with more than one entry is checked before moves; rows that
+    are already over the limit with nothing moving in are left alone. */
+export function singleScoreError(
+  cats: Array<{ cat_id: number; is_singleton: boolean; was_singleton: boolean }>,
+  counts: Array<{ cat_id: number; user_subject_id: number; n: number }>,
+  moves: Record<number, number | 'delete'>,
+): SingleScoreError | null {
+  const per = new Map<string, number>();
+  const at = (s: number, c: number) => per.get(`${s}:${c}`) ?? 0;
+  for (const r of counts) per.set(`${r.user_subject_id}:${r.cat_id}`, at(r.user_subject_id, r.cat_id) + Number(r.n));
+  const subjects = [...new Set(counts.map(r => r.user_subject_id))];
+  const singles = cats.filter(c => c.is_singleton);
+  for (const c of singles) {
+    if (!c.was_singleton && subjects.some(s => at(s, c.cat_id) > 1)) return { error: 'single-score-has-entries', cat_id: c.cat_id };
+  }
+  for (const c of singles) {
+    const sources = Object.entries(moves).filter(([, to]) => to === c.cat_id).map(([from]) => Number(from));
+    if (!sources.length) continue;
+    for (const s of subjects) {
+      const moved = sources.reduce((n, from) => n + at(s, from), 0);
+      if (moved > 0 && at(s, c.cat_id) + moved > 1) return { error: 'single-score-target', cat_id: c.cat_id };
+    }
+  }
+  return null;
+}
+
 /** For scope 'copy': maps each old cat_id that survives to its position [periodIndex, catIndex] in the draft. */
 export function survivingPositions(draft: DraftPeriod[]): Record<number, [number, number]> {
   const out: Record<number, [number, number]> = {};

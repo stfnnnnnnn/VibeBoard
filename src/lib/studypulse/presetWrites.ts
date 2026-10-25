@@ -6,7 +6,7 @@
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
 import {
-  diffPreset, normalizeDraft, normalizeMoves, resolveFinal, survivingPositions, validateDraft, validateMoves,
+  diffPreset, normalizeDraft, normalizeMoves, resolveFinal, singleScoreError, survivingPositions, validateDraft, validateMoves,
   type DraftCategory, type DraftPeriod, type Move, type PresetDiff,
 } from './presetDiff';
 import { normalizeFinalMode } from './projection';
@@ -14,7 +14,7 @@ import type { FinalMode } from './types';
 
 type Conn = Pick<PoolConnection, 'execute'>;
 
-export interface OldStructure { periods: Array<{ period_id: number; categories: Array<{ cat_id: number }> }> }
+export interface OldStructure { periods: Array<{ period_id: number; categories: Array<{ cat_id: number; is_singleton?: boolean }> }> }
 
 /** What the preset row gets besides its structure. `fallbackIndex` is the draft index of the stored final period
     when that period survives (used when the client sent no index). */
@@ -31,13 +31,14 @@ export async function loadStructure(conn: Conn, presetId: number): Promise<OldSt
   const [periods] = await conn.execute<RowDataPacket[]>(
     'SELECT period_id FROM grading_periods WHERE preset_id=? ORDER BY sort_order, period_id', [presetId]);
   const [cats] = await conn.execute<RowDataPacket[]>(
-    `SELECT gc.cat_id, gc.period_id FROM grading_categories gc
+    `SELECT gc.cat_id, gc.period_id, gc.is_singleton FROM grading_categories gc
      JOIN grading_periods gp ON gp.period_id = gc.period_id
      WHERE gp.preset_id=? ORDER BY gc.sort_order, gc.cat_id`, [presetId]);
   return {
     periods: periods.map(p => ({
       period_id: Number(p.period_id),
-      categories: cats.filter(c => Number(c.period_id) === Number(p.period_id)).map(c => ({ cat_id: Number(c.cat_id) })),
+      categories: cats.filter(c => Number(c.period_id) === Number(p.period_id))
+        .map(c => ({ cat_id: Number(c.cat_id), is_singleton: Number(c.is_singleton) === 1 })),
     })),
   };
 }
@@ -55,6 +56,21 @@ export async function entryCounts(conn: Conn, catIds: number[], userSubjectId?: 
   const out: Record<number, number> = {};
   for (const r of rows) out[Number(r.cat_id)] = Number(r.n);
   return out;
+}
+
+/** Entries per (category, subject), as a locking read, for the single-score check (F1). With `userSubjectId`,
+    only that subject's entries. */
+export async function entryCountsBySubject(
+  conn: Conn, catIds: number[], userSubjectId?: number,
+): Promise<Array<{ cat_id: number; user_subject_id: number; n: number }>> {
+  if (!catIds.length) return [];
+  const marks = catIds.map(() => '?').join(',');
+  const [rows] = await conn.execute<RowDataPacket[]>(
+    `SELECT cat_id, user_subject_id, COUNT(*) AS n FROM grade_entries
+     WHERE cat_id IN (${marks})${userSubjectId != null ? ' AND user_subject_id=?' : ''}
+     GROUP BY cat_id, user_subject_id FOR UPDATE`,
+    userSubjectId != null ? [...catIds, userSubjectId] : catIds);
+  return rows.map(r => ({ cat_id: Number(r.cat_id), user_subject_id: Number(r.user_subject_id), n: Number(r.n) }));
 }
 
 const catValues = (c: DraftCategory) => [
@@ -234,6 +250,19 @@ export async function editPresetTx(conn: Conn, userId: number, presetId: number,
     return bad(code || 'missing-move', { cat_id: Number(catId) });
   }
 
+  // F1: no subject may end up with more than one entry in a single-score category (kept categories only: moves
+  // can only target those, and new categories start empty).
+  const wasSingle = new Map(old.periods.flatMap(p => p.categories.map(c => [c.cat_id, !!c.is_singleton] as const)));
+  const kept = diff.catUpdates.map(c => ({ cat_id: c.cat_id, is_singleton: c.fields.is_singleton, was_singleton: wasSingle.get(c.cat_id) ?? false }));
+  if (kept.some(c => c.is_singleton)) {
+    const moveTargets: Record<number, number | 'delete'> = {};
+    for (const id of diff.catDeletes) { const m = moves[id]; if (m) moveTargets[id] = m === 'delete' ? 'delete' : m.to; }
+    const bySubject = await entryCountsBySubject(conn, [...kept.filter(c => c.is_singleton).map(c => c.cat_id), ...diff.catDeletes],
+      scope === 'copy' ? userSubjectId : undefined);
+    const single = singleScoreError(kept, bySubject, moveTargets);
+    if (single) return bad(single.error, { cat_id: single.cat_id });
+  }
+
   const storedFinal = preset.final_period_id != null ? Number(preset.final_period_id) : null;
   const head: PresetHead = {
     name: String(body.name).trim(),
@@ -273,7 +302,7 @@ export async function setSubjectPresetTx(
 
   if (current.length && Number(current[0].preset_id) !== presetId) {
     const [newCats] = await conn.execute<RowDataPacket[]>(
-      `SELECT gc.cat_id, gc.period_id FROM grading_categories gc
+      `SELECT gc.cat_id, gc.period_id, gc.is_singleton FROM grading_categories gc
        JOIN grading_periods gp ON gp.period_id = gc.period_id WHERE gp.preset_id=?`, [presetId]);
     const periodOf = new Map(newCats.map(c => [Number(c.cat_id), Number(c.period_id)]));
     const [byCat] = await conn.execute<RowDataPacket[]>(
@@ -298,6 +327,14 @@ export async function setSubjectPresetTx(
         },
       };
     }
+    // F1: mapping must not leave this subject with more than one entry in a single-score category.
+    const moveTargets: Record<number, number | 'delete'> = {};
+    for (const r of needed) moveTargets[Number(r.cat_id)] = target(Number(r.cat_id))!;
+    const single = singleScoreError(
+      newCats.map(c => ({ cat_id: Number(c.cat_id), is_singleton: Number(c.is_singleton) === 1, was_singleton: Number(c.is_singleton) === 1 })),
+      byCat.map(r => ({ cat_id: Number(r.cat_id), user_subject_id: userSubjectId, n: Number(r.entry_count) })),
+      moveTargets);
+    if (single) return { status: 400, body: { error: single.error, cat_id: single.cat_id } };
     // Sources are outside the new preset and targets inside it, so these updates cannot chain.
     for (const r of needed) {
       const fromCat = Number(r.cat_id);

@@ -2,7 +2,7 @@
 
 import type { MouseEvent, ReactNode } from 'react';
 import { Check, Circle, Layers, X } from 'lucide-react';
-import { linkAcross, renameLinked, setSingleton, type FieldErrors, type SetupDraft, type UiCategory } from './draft';
+import { linkAcross, renameLinked, setSingleton, singletonLocked, type FieldErrors, type SetupDraft, type UiCategory } from './draft';
 import { focusNeighbour } from './focusTrap';
 
 export function FieldError({ id, children }: { id: string; children: ReactNode }) {
@@ -83,7 +83,7 @@ export default function CategoryRow({ draft, pi, ci, onChange, errors, shown, on
       {nameErr && <FieldError id={`${id}-nerr`}>{nameErr}</FieldError>}
       {weightErr && <FieldError id={`${id}-werr`}>{weightErr}</FieldError>}
       <div className="sp-gs-flags" role="group" aria-label={`Options for ${c.name.trim() || 'this category'}`}>
-        {c.cat_id == null
+        {!singletonLocked(draft, pi, ci)
           ? <Flag on={c.is_singleton} label={c.is_singleton ? 'Single score' : 'Multiple entries'}
               onToggle={() => onChange(setSingleton(draft, pi, ci, !c.is_singleton))} />
           : <Flag on={c.is_singleton} label={c.is_singleton ? 'Single score' : 'Multiple entries'}

@@ -95,8 +95,9 @@ const mapCats = (d: SetupDraft, f: (c: UiCategory, pi: number, ci: number) => Ui
 
 /** Turns "Linked across periods" on or off for draft.periods[pi].categories[ci].
     On: the category gets a link group, and every other period gets exactly one member of it: an unlinked category
-    there with the same name is adopted, otherwise a copy is appended (same name, weight and single-score flag, as
-    the old wizard did). Off: the whole group is unlinked (same names, separate scores); nothing is removed. */
+    there with the same name and the same single-score flag is adopted, otherwise a copy is appended (same name,
+    weight and single-score flag, as the old wizard did). A twin whose flag differs is never adopted (F1): one group
+    must not mix single-score and multi-entry members, and flipping a saved twin could hide its entries. Off: the whole group is unlinked (same names, separate scores); nothing is removed. */
 export function linkAcross(draft: SetupDraft, pi: number, ci: number, on: boolean): SetupDraft {
   const src = draft.periods[pi]?.categories[ci];
   if (!src) return draft;
@@ -111,7 +112,8 @@ export function linkAcross(draft: SetupDraft, pi: number, ci: number, on: boolea
     periods: draft.periods.map((p, i) => {
       if (i === pi) return { ...p, categories: p.categories.map((c, j) => j === ci ? { ...c, link_group: g } : c) };
       if (p.categories.some(c => c.link_group === g)) return p;
-      const twin = p.categories.findIndex(c => !c.link_group && norm(c.name) === norm(src.name) && norm(src.name) !== '');
+      const twin = p.categories.findIndex(c => !c.link_group && norm(c.name) === norm(src.name) && norm(src.name) !== ''
+        && c.is_singleton === src.is_singleton);
       if (twin >= 0) return { ...p, categories: p.categories.map((c, j) => j === twin ? { ...c, link_group: g } : c) };
       return { ...p, categories: [...p.categories, newCategory({
         name: src.name, weight: src.weight, is_singleton: src.is_singleton, link_group: g,
@@ -128,11 +130,22 @@ export function renameLinked(draft: SetupDraft, pi: number, ci: number, name: st
   return mapCats(draft, (c, i, j) => (i === pi && j === ci) || (g && c.link_group === g) ? { ...c, name } : c);
 }
 
+/** F1: the single-score flag is fixed on a saved category, and on a new one whose link group has a saved member:
+    flipping a saved category could hide entries that still count (the server refuses it too). */
+export function singletonLocked(draft: SetupDraft, pi: number, ci: number): boolean {
+  const src = draft.periods[pi]?.categories[ci];
+  if (!src) return true;
+  if (src.cat_id != null) return true;
+  const g = src.link_group;
+  return !!g && draft.periods.some(p => p.categories.some(c => c.link_group === g && c.cat_id != null));
+}
+
 /** Sets "Single score" on a category; a linked one sets it on its whole group (R11), so one group never mixes
-    single-score and multi-entry members. A single score never includes earlier entries. */
+    single-score and multi-entry members. A single score never includes earlier entries. A locked category
+    (singletonLocked) is left as it is. */
 export function setSingleton(draft: SetupDraft, pi: number, ci: number, on: boolean): SetupDraft {
   const src = draft.periods[pi]?.categories[ci];
-  if (!src) return draft;
+  if (!src || singletonLocked(draft, pi, ci)) return draft;
   const g = src.link_group;
   return mapCats(draft, (c, i, j) => (i === pi && j === ci) || (g && c.link_group === g)
     ? { ...c, is_singleton: on, include_earlier: on ? false : c.include_earlier }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { GradingPresetFull } from '@/lib/studypulse/types';
 import {
   toDraft, linkAcross, renameLinked, periodSum, validateDraft, draftToPayload,
-  feuTemplate, blankDraft, deletedCategories, prefillMap, describeChanges, stepOfError, setSingleton, type UiCategory,
+  feuTemplate, blankDraft, deletedCategories, prefillMap, describeChanges, stepOfError, setSingleton, singletonLocked, type UiCategory,
 } from '../draft';
 
 const PRESET: GradingPresetFull = {
@@ -233,8 +233,13 @@ test('describeChanges lists what the review step shows', () => {
 });
 
 test('setSingleton mirrors the single-score flag to every category in the link group (R11)', () => {
-  const d = toDraft(PRESET);
-  // Quizzes is linked ('q') in both periods; Finals' copy includes earlier entries.
+  const d = blankDraft();
+  d.periods = [
+    { key: 'a', name: 'Midterm', categories: [{ key: 'a1', name: 'Quizzes', weight: 60, is_singleton: false, link_group: 'q', carry_score: true, include_earlier: false },
+      { key: 'a2', name: 'Tasks', weight: 40, is_singleton: false, link_group: null, carry_score: true, include_earlier: false }] },
+    { key: 'b', name: 'Finals', categories: [{ key: 'b1', name: 'Quizzes', weight: 60, is_singleton: false, link_group: 'q', carry_score: true, include_earlier: true },
+      { key: 'b2', name: 'Exam', weight: 40, is_singleton: true, link_group: null, carry_score: true, include_earlier: false }] },
+  ];
   const single = setSingleton(d, 0, 0, true);
   assert.equal(single.periods[0].categories[0].is_singleton, true);
   assert.equal(single.periods[1].categories[0].is_singleton, true);
@@ -243,9 +248,52 @@ test('setSingleton mirrors the single-score flag to every category in the link g
   const back = setSingleton(single, 1, 0, false);
   assert.deepEqual(back.periods.map(p => p.categories[0].is_singleton), [false, false]);
   // An unlinked category changes alone.
-  const solo = setSingleton(d, 1, 3, false);
-  assert.equal(solo.periods[1].categories[3].is_singleton, false);
-  assert.equal(solo.periods[0].categories[2].is_singleton, true);
+  const solo = setSingleton(d, 1, 1, false);
+  assert.equal(solo.periods[1].categories[1].is_singleton, false);
+  assert.equal(solo.periods[0].categories[0].is_singleton, false);
   // The input is not mutated.
   assert.equal(d.periods[1].categories[0].is_singleton, false);
+});
+
+/* F1 (b): flipping a saved category could hide entries that still count, so the flag is fixed on any category that
+   is saved or whose link group has a saved member; setSingleton is then a no-op. */
+test('singletonLocked / setSingleton never flip a saved category, alone or through its link group', () => {
+  const d = toDraft(PRESET);
+  assert.equal(singletonLocked(d, 0, 0), true); // saved Midterm Quizzes
+  assert.equal(setSingleton(d, 0, 0, true), d);
+  // A new category linked to the saved Quizzes group: locked, and the saved members keep their flag.
+  const withNew = { ...d, periods: d.periods.map((p, i) => i !== 0 ? p : { ...p, categories: [...p.categories.filter(c => c.link_group !== 'q'),
+    { key: 'n1', name: 'Quizzes', weight: 36, is_singleton: false, link_group: 'q', carry_score: true, include_earlier: false }] }) };
+  const ni = withNew.periods[0].categories.length - 1;
+  assert.equal(singletonLocked(withNew, 0, ni), true);
+  const after = setSingleton(withNew, 0, ni, true);
+  assert.equal(after, withNew);
+  assert.equal(after.periods[1].categories[0].is_singleton, false); // saved Finals Quizzes untouched
+  // A new unlinked category, or a new group with no saved member, stays editable.
+  const fresh = { ...d, periods: d.periods.map((p, i) => i !== 0 ? p : { ...p, categories: [...p.categories,
+    { key: 'n2', name: 'Bonus', weight: 0, is_singleton: false, link_group: null, carry_score: true, include_earlier: false }] }) };
+  const fi = fresh.periods[0].categories.length - 1;
+  assert.equal(singletonLocked(fresh, 0, fi), false);
+  assert.equal(setSingleton(fresh, 0, fi, true).periods[0].categories[fi].is_singleton, true);
+});
+
+/* F1 (c): adopting a twin with a different single-score flag would mix single and multi in one group. */
+test('linkAcross does not adopt a same-name twin whose single-score flag differs; it appends a matching copy', () => {
+  const d = blankDraft();
+  d.periods = [
+    { key: 'a', name: 'Midterm', categories: [{ key: 'a1', name: 'Exam', weight: 100, is_singleton: false, link_group: null, carry_score: true, include_earlier: false }] },
+    { key: 'b', name: 'Finals', categories: [{ key: 'b1', cat_id: 55, name: 'Exam', weight: 100, is_singleton: true, link_group: null, carry_score: true, include_earlier: false }] },
+  ];
+  const out = linkAcross(d, 0, 0, true);
+  const g = out.periods[0].categories[0].link_group;
+  assert.equal(out.periods[1].categories[0].link_group, null); // the saved single-score twin is left alone
+  assert.equal(out.periods[1].categories.length, 2);
+  assert.equal(out.periods[1].categories[1].link_group, g);
+  assert.equal(out.periods[1].categories[1].is_singleton, false);
+  assert.equal(out.periods[1].categories[1].cat_id, undefined);
+  // Same flag: adopted as before.
+  d.periods[1].categories[0].is_singleton = false;
+  const same = linkAcross(d, 0, 0, true);
+  assert.equal(same.periods[1].categories.length, 1);
+  assert.equal(same.periods[1].categories[0].link_group, same.periods[0].categories[0].link_group);
 });

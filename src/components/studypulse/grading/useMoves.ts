@@ -2,7 +2,8 @@
 
 /* Where this subject's entries go when categories disappear, for each entry mode, plus the save calls that send
    those choices: PUT /grading/[id] `moves` (edit), POST /grading then POST subjects/[id]/grading `map` (new),
-   POST subjects/[id]/grading `map` (another system). Choices are strings: a target id, 'delete', or '' (unpicked). */
+   POST subjects/[id]/grading `map` (another system). Choices are strings: a target id, 'delete', or '' (unpicked).
+   Single-score categories are never targets (F1): they show one entry, so moved entries could hide there. */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GradingConfig, GradingPresetFull } from '@/lib/studypulse/types';
 import type { Move } from '@/lib/studypulse/presetDiff';
@@ -13,6 +14,7 @@ import type { EntryMode, PresetOption } from './ChoosePreset';
 
 type Result = { ok: true; moved: boolean } | { ok: false; error: string };
 type Extra = Record<number, { label: string; count: number | null }>;
+type Body = { error?: string; cat_id?: number };
 const norm = (s: string) => s.trim().toLowerCase();
 const sorted = (p: GradingPresetFull) => [...p.periods].sort((a, b) => a.sort_order - b.sort_order)
   .map(x => ({ ...x, categories: [...x.categories].sort((a, b) => a.sort_order - b.sort_order) }));
@@ -44,12 +46,12 @@ export function useMoves({ mode, current, draft, entryCounts, others }: {
       const rows: MoveRow[] = deletedCategories(current.preset, draft)
         .filter(d => entryCounts[d.cat_id] > 0 || extra[d.cat_id])
         .map(d => ({ id: String(d.cat_id), label: `${d.period} · ${d.name}`, count: entryCounts[d.cat_id] > 0 ? entryCounts[d.cat_id] : null }));
-      const targets: Target[] = draft.periods.flatMap(p => p.categories.filter(c => c.cat_id != null)
+      const targets: Target[] = draft.periods.flatMap(p => p.categories.filter(c => c.cat_id != null && !c.is_singleton)
         .map(c => ({ value: String(c.cat_id), label: `${p.name.trim()} · ${c.name.trim()}` })));
       return { rows, targets, defaults };
     }
     if (mode === 'new') {
-      const targets: Target[] = draft.periods.flatMap(p => p.categories.map(c => ({ value: c.key, label: `${p.name.trim() || 'Untitled'} · ${c.name.trim() || 'Untitled'}` })));
+      const targets: Target[] = draft.periods.flatMap(p => p.categories.filter(c => !c.is_singleton).map(c => ({ value: c.key, label: `${p.name.trim() || 'Untitled'} · ${c.name.trim() || 'Untitled'}` })));
       for (const p of current ? current.preset.periods : []) {
         for (const c of p.categories) {
           const same = draft.periods.find(x => norm(x.name) === norm(p.name))?.categories.find(x => norm(x.name) === norm(c.name));
@@ -60,7 +62,7 @@ export function useMoves({ mode, current, draft, entryCounts, others }: {
       return { rows: withEntries, targets, defaults };
     }
     if (mode === 'another' && target) {
-      const targets: Target[] = sorted(target).flatMap(p => p.categories.map(c => ({ value: String(c.cat_id), label: `${p.name} · ${c.name}` })));
+      const targets: Target[] = sorted(target).flatMap(p => p.categories.filter(c => Number(c.is_singleton) !== 1).map(c => ({ value: String(c.cat_id), label: `${p.name} · ${c.name}` })));
       const pre = current ? prefillMap(current.preset, target, entryCounts) : {};
       for (const r of withEntries) defaults[r.id] = String(pre[Number(r.id)] ?? '');
       return { rows: withEntries, targets, defaults };
@@ -87,8 +89,8 @@ export function useMoves({ mode, current, draft, entryCounts, others }: {
   const report = (cats: Array<{ cat_id: number; name: string | null; entry_count?: number }>) =>
     setExtra(x => ({ ...x, ...Object.fromEntries(cats.map(c => [c.cat_id, { label: c.name ?? 'A removed category', count: c.entry_count ?? null }])) }));
 
-  const assign = async (usid: number, presetId: number, map: Record<string, number | 'delete'>): Promise<Result> => {
-    const r = await api<{ categories?: Array<{ cat_id: number; name: string | null; entry_count: number }> }>(
+  const assign = async (usid: number, presetId: number, map: Record<string, number | 'delete'>, names: GradingPresetFull | null): Promise<Result> => {
+    const r = await api<Body & { categories?: Array<{ cat_id: number; name: string | null; entry_count: number }> }>(
       subjectGradingUrl(usid), 'POST',
       { preset_id: presetId, map, has_lab: current?.has_lab ?? 0, lec_weight: current?.lec_weight ?? 100, lab_weight: current?.lab_weight ?? 0 });
     if (r.ok) return { ok: true, moved: Object.keys(map).length > 0 };
@@ -96,13 +98,13 @@ export function useMoves({ mode, current, draft, entryCounts, others }: {
       report(r.data.categories);
       return { ok: false, error: 'Some entries still need a home. Choose where they go, then save again.' };
     }
-    return { ok: false, error: r.data.error ?? 'Could not save. Try again.' };
+    return { ok: false, error: singleScoreMessage(r.data, names) ?? r.data.error ?? 'Could not save. Try again.' };
   };
 
   const saveEdit = async (usid: number, presetId: number, payload: DraftPayload, scope: 'all' | 'copy'): Promise<Result> => {
     const mv: Record<string, Move> = {};
     for (const r of rows) mv[r.id] = choices[r.id] === 'delete' ? 'delete' : { to: Number(choices[r.id]) };
-    const r = await api<{ cat_id?: number }>(`/api/studypulse/grading/${presetId}`, 'PUT', { ...payload, moves: mv, scope, user_subject_id: usid });
+    const r = await api<Body>(`/api/studypulse/grading/${presetId}`, 'PUT', { ...payload, moves: mv, scope, user_subject_id: usid });
     if (r.ok) return { ok: true, moved: rows.length > 0 || scope === 'copy' };
     if (r.data.error === 'missing-move' && r.data.cat_id != null) {
       const gone = current ? deletedCategories(current.preset, draft).find(d => d.cat_id === r.data.cat_id) : undefined;
@@ -110,7 +112,18 @@ export function useMoves({ mode, current, draft, entryCounts, others }: {
       return { ok: false, error: `${gone ? `${gone.period} · ${gone.name}` : 'A removed category'} has entries in other subjects too. Choose where they go.` };
     }
     if (r.data.error === 'bad-move-target') return { ok: false, error: 'Entries can only move into a category that already existed. Pick another one.' };
-    return { ok: false, error: r.data.error ?? 'Could not save. Try again.' };
+    return { ok: false, error: singleScoreMessage(r.data, current?.preset ?? null) ?? r.data.error ?? 'Could not save. Try again.' };
+  };
+
+  /** The F1 refusals, named after the category when it can be found. */
+  const singleScoreMessage = (b: Body, preset: GradingPresetFull | null): string | null => {
+    if (b.error !== 'single-score-target' && b.error !== 'single-score-has-entries') return null;
+    const p = preset?.periods.find(x => x.categories.some(c => Number(c.cat_id) === b.cat_id));
+    const c = p?.categories.find(x => Number(x.cat_id) === b.cat_id);
+    const name = p && c ? `${p.name} · ${c.name}` : 'A single-score category';
+    return b.error === 'single-score-target'
+      ? `${name} holds a single score, so it can take at most one entry per subject. Move these entries somewhere else.`
+      : `${name} has more than one entry in a subject, so it can't become a single score. Keep it as multiple entries.`;
   };
 
   const saveNew = async (usid: number, d: SetupDraft): Promise<Result> => {
@@ -123,8 +136,9 @@ export function useMoves({ mode, current, draft, entryCounts, others }: {
     }
     const id = created.current.id;
     const map: Record<string, number | 'delete'> = {};
+    let made: GradingPresetFull | null = null;
     if (rows.length) {
-      const made = await loadPreset(id);
+      made = await loadPreset(id);
       if (!made) return { ok: false, error: 'Could not load the new grading system' };
       const byKey = new Map<string, number>();
       sorted(made).forEach((p, pi) => p.categories.forEach((c, ci) => { const k = d.periods[pi]?.categories[ci]?.key; if (k) byKey.set(k, Number(c.cat_id)); }));
@@ -135,14 +149,14 @@ export function useMoves({ mode, current, draft, entryCounts, others }: {
         map[r.id] = to;
       }
     }
-    return assign(usid, id, map);
+    return assign(usid, id, map, made);
   };
 
   const saveAnother = async (usid: number): Promise<Result> => {
     if (picked == null) return { ok: false, error: 'Pick a grading system' };
     const map: Record<string, number | 'delete'> = {};
     for (const r of rows) map[r.id] = choices[r.id] === 'delete' ? 'delete' : Number(choices[r.id]);
-    return assign(usid, picked, map);
+    return assign(usid, picked, map, target);
   };
 
   return {
