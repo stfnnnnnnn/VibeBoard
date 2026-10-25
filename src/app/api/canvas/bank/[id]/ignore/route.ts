@@ -1,7 +1,8 @@
 import { auth } from '@/auth';
 import pool from '@/lib/db';
-import type { RowDataPacket } from 'mysql2';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 
+/** Pending → ignored. 409 when the item isn't pending (an included item stays included). */
 export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
@@ -18,6 +19,8 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   );
   if (owned.length === 0) return Response.json({ error: 'Not found' }, { status: 404 });
 
-  await pool.execute(`UPDATE canvas_activity_bank SET bank_status = 'ignored' WHERE id = ?`, [bankId]);
+  const [r] = await pool.execute<ResultSetHeader>(
+    `UPDATE canvas_activity_bank SET bank_status = 'ignored' WHERE id = ? AND bank_status = 'pending'`, [bankId]);
+  if (r.affectedRows === 0) return Response.json({ error: 'Only items still to review can be ignored' }, { status: 409 });
   return Response.json({ status: 'success' });
 }

@@ -99,8 +99,9 @@ export async function POST(req: NextRequest) {
     return Response.json({ status: 'success', preset_id: presetId });
   } catch (err) {
     await conn.rollback();
-    const msg = err instanceof Error ? err.message : String(err);
-    return Response.json({ error: msg }, { status: 500 });
+    // The full error stays in the server log; the client gets a generic message (no DB text).
+    console.error('Create grading system failed:', err);
+    return Response.json({ error: 'Could not create the grading system. Try again.' }, { status: 500 });
   } finally {
     conn.release();
   }

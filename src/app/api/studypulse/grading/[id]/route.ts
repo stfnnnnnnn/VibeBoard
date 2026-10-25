@@ -76,8 +76,9 @@ export async function PUT(
     return Response.json(result.body, { status: result.status });
   } catch (err) {
     await conn.rollback();
-    const msg = err instanceof Error ? err.message : String(err);
-    return Response.json({ error: msg }, { status: 500 });
+    // The full error stays in the server log; the client gets a generic message (no DB text).
+    console.error('Edit grading system failed:', err);
+    return Response.json({ error: 'Could not save the grading system. Try again.' }, { status: 500 });
   } finally {
     conn.release();
   }
@@ -136,8 +137,9 @@ export async function DELETE(
     return Response.json({ status: 'success' });
   } catch (err) {
     await conn.rollback();
-    const msg = err instanceof Error ? err.message : String(err);
-    return Response.json({ error: msg }, { status: 500 });
+    // The full error stays in the server log; the client gets a generic message (no DB text).
+    console.error('Delete grading system failed:', err);
+    return Response.json({ error: 'Could not delete the grading system. Try again.' }, { status: 500 });
   } finally {
     conn.release();
   }

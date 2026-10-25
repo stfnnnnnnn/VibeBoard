@@ -106,8 +106,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   } catch (err) {
     await conn.rollback();
     console.error('Canvas uninclude failed:', err);
-    const message = err instanceof Error ? err.message : String(err);
-    return Response.json({ error: message }, { status: 500 });
+    return Response.json({ error: 'Couldn’t undo that. Try again.' }, { status: 500 });
   } finally {
     conn.release();
   }

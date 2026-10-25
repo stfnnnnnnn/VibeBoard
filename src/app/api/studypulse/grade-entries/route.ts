@@ -88,7 +88,8 @@ export async function POST(req: NextRequest) {
     });
     return Response.json({ status: 'success', entry_id: entryId });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return Response.json({ error: msg }, { status: 500 });
+    // The full error stays in the server log; the client gets a generic message (no DB text).
+    console.error('Save grade entry failed:', err);
+    return Response.json({ error: 'Could not save this entry. Try again.' }, { status: 500 });
   }
 }

@@ -120,8 +120,9 @@ export async function POST(
     return Response.json(result.body, { status: result.status });
   } catch (err) {
     await conn.rollback();
-    const msg = err instanceof Error ? err.message : String(err);
-    return Response.json({ error: msg }, { status: 500 });
+    // The full error stays in the server log; the client gets a generic message (no DB text).
+    console.error('Set subject grading failed:', err);
+    return Response.json({ error: 'Could not save this subject’s grading. Try again.' }, { status: 500 });
   } finally {
     conn.release();
   }
