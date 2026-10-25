@@ -24,9 +24,7 @@ export default function StudyPulseSection() {
         {ROWS.map((r, i) => (
           <div key={r.name} className={`lp-row ${i === 0 ? 'lp-row--first' : ''}`}><span>{r.name} <small>{r.units} units</small></span><b className="lp-num">{r.grade}</b></div>
         ))}
-        <div className="lp-row"><span><b>GWA</b></span><b className="lp-num lp-num--lg">1.47</b></div>
-        <span className="pub-sample">Sample data</span>
-      </div>
+        <div className="lp-row"><span><b>GWA</b></span><b className="lp-num lp-num--lg">1.47</b></div>      </div>
     </section>
   );
 }
