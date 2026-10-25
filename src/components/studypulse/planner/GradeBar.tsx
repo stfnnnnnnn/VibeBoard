@@ -57,7 +57,11 @@ export default function GradeBar({ proj, target, plan, scale }: {
           {f1(cur)} now
         </div>
       )}
-      {hasPlan && <div className="sp-gbar__plan-layer" style={{ transform: `translateX(${barPos(plan)}%)` }}><span className="sp-gbar__plan" /></div>}
+      {hasPlan && (
+        <div className="sp-gbar__plan-clip">
+          <div className="sp-gbar__plan-layer" style={{ transform: `translateX(${barPos(plan)}%)` }}><span className="sp-gbar__plan" /></div>
+        </div>
+      )}
       <span className="sp-gbar__axis0">50</span>
       <div className="sp-gbar__ticks">
         {ticks.map(t => <span key={t.label} className={t.label === hit ? 'is-hit' : undefined} style={{ left: `${barPos(t.min)}%` }}>{t.label}</span>)}
