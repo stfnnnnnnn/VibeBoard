@@ -11,7 +11,7 @@ interface VibeBoardLogoProps {
 
 export function VibeBoardLogo({
   size = 'md',
-  showMark = true,
+  showMark = false,
   showText = true,
   className = '',
   href = '/',
@@ -39,7 +39,7 @@ export function VibeBoardLogo({
 
   const content = (
     <span
-      className={`inline-flex items-center ${gap} select-none ${className} transition-transform duration-150 ease-out active:scale-[0.97]`}
+      className={`inline-flex items-center ${showMark ? gap : ''} select-none ${className} transition-transform duration-150 ease-out active:scale-[0.97]`}
       style={{ textDecoration: 'none' }}
     >
       {showMark && (
