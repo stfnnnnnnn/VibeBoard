@@ -423,12 +423,12 @@ export async function syncConnection(connectionId: number, trigger: 'cron' | 'ma
  * connection not reached this invocation is simply the stalest one on the next.
  */
 export async function syncAllDueConnections(maxConnections = 5): Promise<void> {
+  const limit = Math.max(1, Math.floor(Number(maxConnections) || 5));
   const [due] = await pool.execute<RowDataPacket[]>(
     `SELECT id FROM canvas_connections
       WHERE status = 'active' AND (last_sync_at IS NULL OR last_sync_at < DATE_SUB(NOW(), INTERVAL 30 MINUTE))
       ORDER BY last_sync_at IS NULL DESC, last_sync_at ASC
-      LIMIT ?`,
-    [maxConnections],
+      LIMIT ${limit}`,
   );
   for (const row of due) {
     try {
