@@ -1,10 +1,11 @@
 'use client';
 
-import { Check, Loader2, Pencil, Trash2, X } from 'lucide-react';
+import { Check, Loader2, Pencil, StickyNote, Trash2, X } from 'lucide-react';
 import type { TransmutationTable } from '@/lib/transmutation';
 import type { EntryRow } from '@/lib/studypulse/types';
 import { shortDate, todayManila } from '@/lib/studypulse/ui/format';
 import GradePill from './GradePill';
+import InfoTip from '../ui/InfoTip';
 import { useEntryEditing, type EntryPersistence, type EntryRowsChange } from './EntryTable';
 
 /* A constant client key: the placeholder is rebuilt every render, and updaters must still find it by key. */
@@ -54,6 +55,13 @@ export default function SingletonScore({
         <>
           <span className="sp-frac">{row.score || '—'} <span>/ {row.items || '—'}</span></span>
           <GradePill row={row} transTable={transTable} transmutationOn={transmutationOn} />
+          {/* R-a: the same read-only note icon EntryTable shows (spec §6.1), so an exam note like "Bring a calculator" is visible. */}
+          {row.note && (
+            <InfoTip label="Note" icon={<StickyNote size={16} aria-hidden />}>
+              <span className="sp-tip__note">{row.note}</span>
+              <span className="sp-tip__muted"> Edit in Workboard</span>
+            </InfoTip>
+          )}
           <span className="sp-row-actions">
             {confirming ? (
               <>

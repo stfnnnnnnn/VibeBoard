@@ -340,10 +340,6 @@
 .sp-lg__m { position: relative; top: -0.62em; margin-left: 1px; font-size: 0.56em; font-weight: 800; letter-spacing: 0; }
 .sp-lg__dot { width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: 0.4; flex-shrink: 0; align-self: center; margin-top: 4px; }
 .sp-lg__d { font: 600 14.5px/1 var(--sp-font-ui); color: var(--sp-text-muted); letter-spacing: 0.005em; }
-.sp-lg--inline { gap: 6px; }
-.sp-lg--inline .sp-lg__l { font-size: 1.15em; }
-.sp-lg--inline .sp-lg__d { font-size: 13px; }
-.sp-lg--inline .sp-lg__dot { margin-top: 2px; }
 .sp-tile .sp-lg { gap: 8px; }
 .sp-unit-switch { display: flex; justify-content: flex-end; margin-top: 8px; }
 .sp-sh__error { margin-top: 12px; padding: 10px 14px; border-radius: var(--sp-r-md); background: var(--sp-danger-bg); color: var(--sp-danger); font-size: 13px; font-weight: 600; }

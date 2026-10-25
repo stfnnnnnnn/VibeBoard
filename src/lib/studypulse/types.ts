@@ -3,24 +3,6 @@ import type { GradeScale } from '@/lib/gradeScale';
 
 export type { GradeScale };
 
-/** Draft category used while building a preset (wizard / grading editor). */
-export interface GradingCategory {
-  name:         string;
-  weight:       number;
-  is_singleton: boolean;
-  link_group?:  string | null;
-  /** Singleton + linked only: reuse a linked sibling's score until this period has its own. Defaults true. */
-  carry_score?: boolean;
-  /** Linked, non-singleton, not the first period: also average in earlier periods' graded entries. Defaults false. */
-  include_earlier?: boolean;
-}
-
-/** Draft period used while building a preset. */
-export interface GradingPeriod {
-  name:       string;
-  categories: GradingCategory[];
-}
-
 /** How the subject's final grade is formed: one designated period, or the average of all periods. */
 export type FinalMode = 'period' | 'average';
 
@@ -50,13 +32,6 @@ export interface GradingPresetFull {
       include_earlier: number;
     }>;
   }>;
-}
-
-/** A lecture subject linked to its separate lab subject (spec 2026-10-24 §3.1, table subject_links). */
-export interface SubjectLink {
-  lecture_user_subject_id: number;
-  lab_user_subject_id:     number;
-  lecture_weight:          number;
 }
 
 export type Urgency = 'High' | 'Medium' | 'Low';

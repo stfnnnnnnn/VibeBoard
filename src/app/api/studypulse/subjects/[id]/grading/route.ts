@@ -77,8 +77,8 @@ export async function GET(
       has_lab:     sg.has_lab,
       lec_weight:  sg.lec_weight,
       lab_weight:  sg.lab_weight,
-      grade_scale: preset?.grade_scale ?? '4pt',
-      preset:      preset ? { ...preset, periods: periodsWithCats } : null,
+      grade_scale: preset.grade_scale ?? '4pt',
+      preset:      { ...preset, periods: periodsWithCats },
     }
   });
 }

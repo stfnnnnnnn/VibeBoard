@@ -10,10 +10,17 @@ import { EMPTY_PREFS } from './prefs';
 import type { EntryRow, GradingConfig, SubjectCardData } from './types';
 
 /** The subject's custom grading config, or null (no config, a preset `userId` does not own, or grading tables not
-    created yet). Callers verify the subject belongs to `userId` first. */
+    created yet). Callers verify the subject belongs to `userId` first.
+    F2: a failed schema ensure (it also runs the Canvas DDL, ruling R1) is logged and skipped, not treated as "no
+    config": the grading tables usually exist already, and returning null would quietly turn every custom-graded
+    subject into legacy. Only a failed query means "no config", and that is logged too. */
 export async function loadGradingConfig(userSubjectId: number, userId: number): Promise<GradingConfig | null> {
   try {
     await ensureGradingV2Schema();
+  } catch (err) {
+    console.error('loadGradingConfig: ensureGradingV2Schema failed; reading the grading tables anyway', err);
+  }
+  try {
     const [sgRows] = await pool.execute<RowDataPacket[]>('SELECT * FROM subject_grading WHERE user_subject_id=?', [userSubjectId]);
     if (!sgRows.length) return null;
     const sg = sgRows[0];
@@ -39,7 +46,8 @@ export async function loadGradingConfig(userSubjectId: number, userId: number): 
       grade_scale: ((preset as unknown as Record<string, unknown>).grade_scale as GradingConfig['grade_scale']) ?? '4pt',
       preset: preset as unknown as GradingConfig['preset'],
     };
-  } catch {
+  } catch (err) {
+    console.error(`loadGradingConfig: could not read the grading config of subject ${userSubjectId}`, err);
     return null;
   }
 }

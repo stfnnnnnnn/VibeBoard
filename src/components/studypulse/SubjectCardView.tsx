@@ -387,7 +387,6 @@ function SubjectCardViewInner({
             )}
             <GradeSummary periods={periods} projections={projections} finalMode={rule.mode}
               finalPeriodKey={finalKey} scale={scale} transmutationOn={transmutationOn} transTable={projTable}
-              lab={{ has: config.has_lab === 1, lec: config.lec_weight, lab: config.lab_weight }}
               view={sel === 'final' ? 'final' : 'all'} combine={combine} />
           </>
         )}

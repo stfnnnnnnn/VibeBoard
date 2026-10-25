@@ -58,7 +58,7 @@ const meanOf = (vs: (number | null)[]) => { const xs = vs.filter((v): v is numbe
     With the 'average' final rule a Final grade column lists each period's grade and their mean; `view="final"` (the
     Final grade tab) shows that column alone. `combine` maps this subject's period values to the values the final view
     shows (lecture + lab combined); the period columns themselves stay this subject's own. */
-export default function GradeSummary({ periods, projections, finalMode, finalPeriodKey, scale, transmutationOn, transTable, lab, view = 'all', combine }: {
+export default function GradeSummary({ periods, projections, finalMode, finalPeriodKey, scale, transmutationOn, transTable, view = 'all', combine }: {
   periods: PeriodInput[]; projections: PeriodProjection[];
   finalMode: FinalMode | null;
   /** The designated period's key under the 'period' rule (its card says "Final grade"); null otherwise. */
@@ -66,7 +66,6 @@ export default function GradeSummary({ periods, projections, finalMode, finalPer
   scale: GradeScale | null; transmutationOn: boolean;
   /** The table in force (null when Transmute is off): raw what-if scores are transmuted with it, like real entries. */
   transTable: TransmutationTable | null;
-  lab: { has: boolean; lec: number; lab: number };
   view?: 'all' | 'final';
   combine?: ((own: (number | null)[]) => (number | null)[]) | null;
 }) {
@@ -205,7 +204,6 @@ export default function GradeSummary({ periods, projections, finalMode, finalPer
           </div>
         )}
       </div>
-      {lab.has && <p className="sp-sum__note">Lab subject: overall = Lecture × {lab.lec}% + Lab × {lab.lab}%</p>}
     </section>
   );
 }

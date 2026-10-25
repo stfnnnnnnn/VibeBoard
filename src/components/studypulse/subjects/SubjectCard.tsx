@@ -9,7 +9,7 @@ import type { SubjectCardData } from '@/lib/studypulse/types';
 import GradeRing from './GradeRing';
 
 type CardFields = Pick<SubjectCardData, 'course_code' | 'subject_name' | 'section' | 'year_level' | 'trimester' | 'units' | 'current_grade' | 'grade_scale'>
-  & Partial<Pick<SubjectCardData, 'completed_tasks' | 'total_tasks'>>;
+  & Partial<Pick<SubjectCardData, 'completed_tasks' | 'total_tasks' | 'lab_tag'>>;
 
 const TONE_CLASS = { success: 'sp-tone-success', warn: 'sp-tone-warn', danger: 'sp-tone-danger', none: 'sp-tone-muted' } as const;
 
@@ -57,6 +57,8 @@ export default function SubjectCard({
         {sub.year_level && <span className="sp-chip sp-chip--pink">{sub.year_level}</span>}
         {sub.trimester && <span className="sp-chip sp-chip--blue">{sub.trimester}</span>}
         {sub.section && <span className="sp-chip sp-chip--neutral">Block {sub.section}</span>}
+        {/* Spec §3.5: a linked lecture and lab both show the combined grade, tagged. */}
+        {sub.lab_tag && <span className="sp-chip sp-chip--violet">{sub.lab_tag}</span>}
       </div>
       <div className="sp-card__foot sp-num">
         <span>
