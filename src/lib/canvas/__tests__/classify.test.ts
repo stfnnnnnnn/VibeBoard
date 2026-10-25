@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  suggestBankTarget, suggestLegacyTarget, extractAnnouncementNote, noteSpans,
+  suggestBankTarget, suggestLegacyTarget, extractAnnouncementNote, noteSpans, stripHtml, classificationText,
 } from '../classify';
 
 function period(period_id: number, name: string, cats: string[]) {
@@ -103,4 +103,39 @@ test('no cues: empty note and no spans', () => {
 test('cues are case-insensitive, sentence-initial and whole-word', () => {
   const body = "please BRING your ID. Don't forget the form! Notebooks are optional. We will note attendance.";
   assert.equal(extractAnnouncementNote(body), "please BRING your ID. Don't forget the form!");
+});
+
+/* F6: Canvas sends HTML. stripHtml decodes entities and keeps paragraph breaks as '\n', and note_spans (server) and
+   the reading pane (client) both run on its output, so the highlight still lines up. */
+test('stripHtml decodes named and numeric entities', () => {
+  assert.equal(stripHtml('<p>Hi&nbsp; iTams</p>'), 'Hi iTams');
+  assert.equal(stripHtml('&nbsp; Miss Gelai'), 'Miss Gelai');
+  assert.equal(stripHtml('A &amp; B &lt;3 &gt; &quot;q&quot; it&#39;s it&apos;s'), 'A & B <3 > "q" it\'s it\'s');
+  assert.equal(stripHtml('caf&#233; &#x2014; &#X41;&#8217;s'), 'café — A’s');
+  assert.equal(stripHtml('3&ndash;5 &mdash; &lsquo;a&rsquo; &ldquo;b&rdquo;&hellip;'), '3–5 — ‘a’ “b”…');
+  // Decoding happens after tags are removed, so an escaped tag stays text; unknown or invalid entities stay as written.
+  assert.equal(stripHtml('&lt;b&gt;bold&lt;/b&gt;'), '<b>bold</b>');
+  assert.equal(stripHtml('&copy; &#0; &#x110000; &amp;nbsp;'), '&copy; &#0; &#x110000; &nbsp;');
+  assert.equal(stripHtml('a&#160;&#160;b'), 'a b');
+  assert.equal(stripHtml(null), '');
+  assert.equal(stripHtml('<p>&nbsp;</p>'), '');
+});
+
+test('stripHtml turns block tags into line breaks and collapses the rest', () => {
+  assert.equal(stripHtml('<p>Good day class</p><p>Bring your ID</p>'), 'Good day class\nBring your ID');
+  assert.equal(stripHtml('Line one<br>Line two<br/>Line three<BR />end'), 'Line one\nLine two\nLine three\nend');
+  assert.equal(stripHtml('<h2>Title</h2><ul><li>one</li><li>two</li></ul><div>after</div>'), 'Title\none\ntwo\nafter');
+  assert.equal(stripHtml('<p>a   <strong>b</strong>\n\n  c</p>\n\n<p></p><p>  d </p>'), 'a b c\nd');
+  assert.equal(stripHtml('<span>in</span><span>line</span>'), 'in line');
+});
+
+test('note spans line up with the decoded, line-broken body', () => {
+  const html = '<p>Hi&nbsp; class</p><p>Bring a calculator</p><p>Coverage: trees &amp; graphs</p><p>See you!</p>';
+  const body = stripHtml(html);
+  assert.equal(body, 'Hi class\nBring a calculator\nCoverage: trees & graphs\nSee you!');
+  // Unpunctuated paragraph lines are their own sentences now.
+  assert.deepEqual(noteSpans(body).map(([s, e]) => body.slice(s, e)), ['Bring a calculator', 'Coverage: trees & graphs']);
+  assert.equal(extractAnnouncementNote(body), 'Bring a calculator Coverage: trees & graphs');
+  assert.ok(!extractAnnouncementNote(body).includes('&'.concat('amp;')));
+  assert.equal(classificationText('Quiz', html), `Quiz ${body}`);
 });

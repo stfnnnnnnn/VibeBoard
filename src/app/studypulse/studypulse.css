@@ -1029,7 +1029,8 @@
 .sp-ann__open { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; padding: 4px 2px; border-radius: 6px; color: var(--sp-blue-ink); font-weight: 700; text-decoration: none; }
 @media (hover: hover) and (pointer: fine) { .sp-ann__open:hover { text-decoration: underline; text-underline-offset: 3px; } }
 .sp-ann__title { margin: 0; font: 800 21px/1.25 var(--sp-font-head); color: var(--sp-text); overflow-wrap: anywhere; outline: none; }
-.sp-ann__body { margin: 0; max-height: 170px; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px; border-radius: var(--sp-r-item); background: rgba(255, 255, 255, 0.55); border: 1px solid rgba(255, 255, 255, 0.85); font: 400 14px/1.65 var(--sp-font-ui); color: var(--sp-text); overflow-wrap: anywhere; }
+/* pre-line: stripHtml keeps paragraph breaks as line breaks (F6); note_spans index into that same string. */
+.sp-ann__body { margin: 0; max-height: 170px; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px; border-radius: var(--sp-r-item); background: rgba(255, 255, 255, 0.55); border: 1px solid rgba(255, 255, 255, 0.85); font: 400 14px/1.65 var(--sp-font-ui); color: var(--sp-text); overflow-wrap: anywhere; white-space: pre-line; }
 .sp-ann__body:focus-visible { outline: 2px solid var(--sp-focus); outline-offset: 2px; }
 .sp-ann__body--empty { color: var(--sp-text-muted); font-style: italic; }
 /* The extra-detail sentences ("Bring a calculator."), the same ones the Note is pre-filled with. */

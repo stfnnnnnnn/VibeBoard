@@ -14,10 +14,36 @@ function includesAny(haystack: string, needles: string[]): boolean {
   return needles.some(n => haystack.includes(n));
 }
 
-/** Strips HTML tags for keyword matching — not a sanitizer, output is never rendered as HTML. */
+const NAMED_ENTITIES: Record<string, string> = {
+  nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  // Typography Canvas's editor also writes.
+  ndash: '–', mdash: '—', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', hellip: '…',
+};
+
+/** One pass, so "&amp;nbsp;" becomes the text "&nbsp;". Unknown names and invalid code points stay as written. */
+function decodeEntities(s: string): string {
+  return s.replace(/&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z]+));/g, (m, dec?: string, hex?: string, name?: string) => {
+    if (name) return NAMED_ENTITIES[name] ?? m;
+    const cp = dec ? parseInt(dec, 10) : parseInt(hex!, 16);
+    return cp > 0 && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff) ? String.fromCodePoint(cp) : m;
+  });
+}
+
+/** Canvas HTML as plain text: source whitespace collapses as in HTML, block tags (</p>, <br>, </li>, </div>,
+    <h1>–<h6>) become line breaks, other tags a space, entities are decoded (&nbsp; &amp; &lt; &gt; &quot; &#39;
+    &apos;, a few typographic names, and numeric), runs of spaces collapse, and blank lines drop. Used for keyword matching, note_spans (server) and the reading pane (client, shown with
+    white-space: pre-line), so the spans index into the same string on both sides. Not a sanitizer: the output is
+    only ever rendered as text. */
 export function stripHtml(html: string | null): string {
   if (!html) return '';
-  return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const text = decodeEntities(html
+    .replace(/\s+/g, ' ') // line breaks in HTML source are plain whitespace
+    .replace(/<br\b[^>]*>|<\/(?:p|li|div)\s*>|<\/?h[1-6]\b[^>]*>/gi, '\n')
+    .replace(/<[^>]*>/g, ' '));
+  return text.split(/\r?\n|\r/)
+    .map(line => line.replace(/[^\S\n]+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
 }
 
 export function classificationText(title: string, message: string | null): string {
