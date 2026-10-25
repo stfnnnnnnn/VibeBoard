@@ -46,12 +46,12 @@ export function useMoves({ mode, current, draft, entryCounts, others }: {
       const rows: MoveRow[] = deletedCategories(current.preset, draft)
         .filter(d => entryCounts[d.cat_id] > 0 || extra[d.cat_id])
         .map(d => ({ id: String(d.cat_id), label: `${d.period} · ${d.name}`, count: entryCounts[d.cat_id] > 0 ? entryCounts[d.cat_id] : null }));
-      const targets: Target[] = draft.periods.flatMap(p => p.categories.filter(c => c.cat_id != null && !c.is_singleton)
-        .map(c => ({ value: String(c.cat_id), label: `${p.name.trim()} · ${c.name.trim()}` })));
+      const targets: Target[] = draft.periods.flatMap(p => p.categories.filter(c => c.cat_id != null)
+        .map(c => ({ value: String(c.cat_id), label: `${p.name.trim()} · ${c.name.trim()}`, single: !!c.is_singleton })));
       return { rows, targets, defaults };
     }
     if (mode === 'new') {
-      const targets: Target[] = draft.periods.flatMap(p => p.categories.filter(c => !c.is_singleton).map(c => ({ value: c.key, label: `${p.name.trim() || 'Untitled'} · ${c.name.trim() || 'Untitled'}` })));
+      const targets: Target[] = draft.periods.flatMap(p => p.categories.map(c => ({ value: c.key, label: `${p.name.trim() || 'Untitled'} · ${c.name.trim() || 'Untitled'}`, single: !!c.is_singleton })));
       for (const p of current ? current.preset.periods : []) {
         for (const c of p.categories) {
           const same = draft.periods.find(x => norm(x.name) === norm(p.name))?.categories.find(x => norm(x.name) === norm(c.name));
@@ -62,7 +62,7 @@ export function useMoves({ mode, current, draft, entryCounts, others }: {
       return { rows: withEntries, targets, defaults };
     }
     if (mode === 'another' && target) {
-      const targets: Target[] = sorted(target).flatMap(p => p.categories.filter(c => Number(c.is_singleton) !== 1).map(c => ({ value: String(c.cat_id), label: `${p.name} · ${c.name}` })));
+      const targets: Target[] = sorted(target).flatMap(p => p.categories.map(c => ({ value: String(c.cat_id), label: `${p.name} · ${c.name}`, single: Number(c.is_singleton) === 1 })));
       const pre = current ? prefillMap(current.preset, target, entryCounts) : {};
       for (const r of withEntries) defaults[r.id] = String(pre[Number(r.id)] ?? '');
       return { rows: withEntries, targets, defaults };
@@ -77,6 +77,13 @@ export function useMoves({ mode, current, draft, entryCounts, others }: {
   }
   const problems = rows.filter(r => choices[r.id] === '')
     .map(r => ({ key: `move.${r.id}`, message: `Choose where the entries of ${r.label} go` }));
+  // A single-score category holds at most one entry (the server enforces the same rule).
+  for (const t of targets.filter(x => x.single)) {
+    const into = rows.filter(r => choices[r.id] === t.value);
+    const total = into.reduce((n, r) => n + (r.count ?? 1), 0)
+      + (mode === 'edit' ? (entryCounts[Number(t.value)] ?? 0) : 0);
+    if (total > 1) for (const r of into) problems.push({ key: `move.${r.id}`, message: `${t.label} is a single score and can hold only one entry` });
+  }
 
   const pick = async (id: number) => {
     setPicked(id); setPicks({}); setExtra({}); setTarget(null); setLoading(true);

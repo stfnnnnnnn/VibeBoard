@@ -7,7 +7,7 @@ import type { UsageSubject } from './api';
 export type Scope = 'all' | 'copy';
 /** A category whose entries need a new home. `count` is this subject's entries; null when only other subjects have some. */
 export interface MoveRow { id: string; label: string; count: number | null }
-export interface Target { value: string; label: string }
+export interface Target { value: string; label: string; single?: boolean }
 export interface SummaryItem { key: string; message: string; step: number; stepName: string }
 
 /** Old category -> new home (or delete) selects; shared by Review and "Use another system". */
