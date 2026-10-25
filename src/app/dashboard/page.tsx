@@ -3,6 +3,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { LayoutDashboard } from 'lucide-react';
 import { auth, signOut } from '@/auth';
+import { VibeBoardLogo } from '@/components/brand/VibeBoardLogo';
 import QuoteWidget  from '@/components/dashboard/QuoteWidget';
 import WeatherWidget from '@/components/dashboard/WeatherWidget';
 import VerifyEmailBanner from '@/components/dashboard/VerifyEmailBanner';
@@ -41,12 +42,17 @@ export default async function DashboardPage() {
 
       {/* ── Header row ─────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '20px', flexWrap: 'wrap' }}>
-        <h1
-          className="gradient-text text-[2rem] sm:text-[2.75rem] lg:text-[4rem]"
-          style={{ marginBottom: '25px', fontWeight: 700, lineHeight: 1.1 }}
-        >
-          {firstName}&apos;s Home
-        </h1>
+        <div>
+          <div style={{ marginBottom: '8px' }}>
+            <VibeBoardLogo size="sm" href="/dashboard" />
+          </div>
+          <h1
+            className="gradient-text text-[2rem] sm:text-[2.75rem] lg:text-[4rem]"
+            style={{ marginBottom: '25px', fontWeight: 700, lineHeight: 1.1 }}
+          >
+            {firstName}&apos;s Home
+          </h1>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '25px' }}>
           <Link
             href="/workboard"

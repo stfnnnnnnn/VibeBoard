@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <linearGradient id="vb-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fff5f8" />
+      <stop offset="50%" stop-color="#fdfbfd" />
+      <stop offset="100%" stop-color="#f0f8fd" />
+    </linearGradient>
+    <linearGradient id="vb-border" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f9c5d1" />
+      <stop offset="100%" stop-color="#a6d8ff" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1" flood-opacity="0.1" />
+    </filter>
+  </defs>
+  
+  <!-- App Squircle Background -->
+  <rect x="1" y="1" width="30" height="30" rx="7.5" fill="url(#vb-bg)" stroke="url(#vb-border)" stroke-width="1.2" filter="url(#shadow)" />
+  
+  <!-- "V" in signature vibrant pink #d9628c -->
+  <path d="M 6.8 9.5 L 10.8 9.5 L 13.8 19.8 L 14.0 19.8 L 17.0 9.5 L 20.8 9.5 L 15.6 23.5 L 12.0 23.5 Z" fill="#d9628c" />
+  
+  <!-- "B" in signature mid-blue #3d8fbf with subtle overlap -->
+  <path d="M 16.5 9.5 L 21.6 9.5 C 23.8 9.5 25.2 10.5 25.2 12.2 C 25.2 13.4 24.5 14.3 23.4 14.7 C 24.8 15.1 25.6 16.2 25.6 17.8 C 25.6 19.8 23.9 21.0 21.4 21.0 L 16.5 21.0 Z M 19.8 11.8 L 19.8 14.1 L 21.2 14.1 C 22.2 14.1 22.8 13.6 22.8 12.9 C 22.8 12.2 22.2 11.8 21.2 11.8 Z M 19.8 16.2 L 19.8 18.7 L 21.4 18.7 C 22.5 18.7 23.1 18.1 23.1 17.4 C 23.1 16.7 22.5 16.2 21.4 16.2 Z" fill="#3d8fbf" />
+</svg>

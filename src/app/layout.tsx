@@ -7,6 +7,13 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'VibeBoard',
   description: 'Your personal student productivity dashboard',
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+    apple: '/icon.png',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

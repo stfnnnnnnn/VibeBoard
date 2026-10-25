@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { VibeBoardLogo } from '@/components/brand/VibeBoardLogo';
 
 /* Sky + top bar + centred card (spec §6). The sky follows <html data-daypart> via public.css. */
 export default function AuthShell({ topRight, children }: { topRight: React.ReactNode; children: React.ReactNode }) {
@@ -12,7 +12,7 @@ export default function AuthShell({ topRight, children }: { topRight: React.Reac
           <div className="auth-glow auth-glow--c" />
         </div>
         <header className="auth-top">
-          <Link href="/" className="pub-logo" aria-label="VibeBoard home"><b>Vibe</b><i>Board</i></Link>
+          <VibeBoardLogo size="md" href="/" />
           {topRight}
         </header>
         <main className="auth-main">
