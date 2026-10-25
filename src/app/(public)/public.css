@@ -233,6 +233,13 @@ html[data-daypart="night"] .auth-ident .who span { color: #7fd4a6; } /* 9.1:1 on
 .lp-bars span { font-size: 10px; color: var(--pub-mute); font-weight: 600; }
 .lp-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 14px; padding: 9px 0; border-top: 1px solid var(--pub-line); }
 .lp-row--first { border-top: 0; }
+.lp-need { border-top: 1px solid var(--pub-line); padding-top: 10px; font-size: 14px; }
+.lp-need__top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.lp-need__top > span:first-child { color: var(--pub-mute); } .lp-need__top b { color: var(--pub-ink); }
+.lp-need__bar { height: 8px; margin: 9px 0 8px; border-radius: 999px; overflow: hidden;
+  background: repeating-linear-gradient(135deg, var(--pub-pink-soft) 0 5px, #fff 5px 10px); box-shadow: inset 0 0 0 1px var(--pub-line); }
+.lp-need__bar i { display: block; width: 60%; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #9fd3ec, var(--pub-blue)); }
+.lp-need p { margin: 0; color: var(--pub-mute); } .lp-need p b { color: var(--pub-ink); }
 .lp-row small { color: var(--pub-mute); font-size: 12px; }
 .lp-num { font-variant-numeric: tabular-nums; }
 .lp-num--lg { font-size: 20px; }
@@ -242,9 +249,8 @@ html[data-daypart="night"] .auth-ident .who span { color: #7fd4a6; } /* 9.1:1 on
 .lp-chip { position: absolute; display: inline-flex; align-items: center; gap: 7px; background: #fff; border-radius: 999px; padding: 8px 14px;
   font-size: 14px; font-weight: 600; white-space: nowrap; box-shadow: 0 10px 24px -12px rgba(31, 27, 43, .35); }
 .lp-chip .dot { width: 8px; height: 8px; border-radius: 50%; }
-/* Floating hero chips: the money chip sits over the decorative (aria-hidden) bars, never over the .lp-row claim text. */
+/* Floating hero chips. */
 .lp-chip--quiz { right: 0; top: -10px; }
-.lp-chip--money { left: -18px; bottom: 120px; }
 .lp-chip--habit { right: 8px; bottom: -2px; }
 .lp-problem { max-width: 900px; margin: 0 auto; padding: 56px 24px 24px; text-align: center; }
 .lp-eyebrow { font-size: 12.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--pub-pink-ink); margin: 0 0 6px; }
@@ -299,7 +305,6 @@ html[data-daypart="night"] .auth-ident .who span { color: #7fd4a6; } /* 9.1:1 on
   .lp-hero, .lp-problem, .lp-day, .lp-sp, .lp-foot { padding-left: 16px; padding-right: 16px; }
   .lp-hero-visual { padding: 14px 8px 20px 8px; }
   .lp-chip { font-size: 12.5px; padding: 7px 11px; }
-  .lp-chip--money { left: 0; bottom: 128px; }
   .lp-chip--quiz, .lp-chip--habit { right: 0; }
   .lp-cta__google { min-width: 0; width: 100%; }
   .lp-cta__buttons .lp-btn { width: 100%; }
