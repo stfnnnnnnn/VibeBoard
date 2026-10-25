@@ -59,3 +59,4 @@ skills-lock.json
 # local debug dumps
 debug_*.json
 debug_*.txt
+.agent/

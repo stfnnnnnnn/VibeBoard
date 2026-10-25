@@ -97,8 +97,9 @@ function createPool(): mysql.Pool {
 
 ### 4.2 Export local data (owner's PC, with XAMPP MySQL running)
 ```bash
-"C:\xampp\mysql\bin\mysqldump.exe" -u root --single-transaction --routines --triggers --no-tablespaces vibeboard > vibeboard-dump.sql
+"C:\xampp\mysql\bin\mysqldump.exe" -u root --single-transaction --routines --triggers --no-tablespaces --default-character-set=utf8mb4 --result-file=vibeboard-dump.sql vibeboard
 ```
+Use `--result-file`, **not** `> file`. In PowerShell, `>` writes UTF-16, and MySQL can't import that.
 - This captures the full current schema, including every column `migrate.ts` already added, plus triggers and all data.
 - **Prefer this dump over `database/schema.sql`.** It is the true current state.
 - **Keep the dump file out of git.** It contains users' password hashes and personal data.
@@ -110,9 +111,17 @@ mysql --host=<HOST> --port=<PORT> --user=<USER> --password --ssl-ca=ca.pem <DBNA
 ```
 Verify after the import:
 - `SHOW TABLES;` returns 49 or more tables, including `subject_links`, `workboard_entry_meta`, `canvas_announcement_bank` and `auth_tokens`.
-- `SHOW TRIGGERS;` lists the activity, quiz and exam status triggers.
+- `SHOW TRIGGERS;` lists **all 7** triggers:
+  - `trg_update_activity_status`, `trg_update_activity_status_on_update`
+  - `trg_update_quiz_status`, `trg_update_quiz_status_on_update`
+  - `trg_update_exam_status`, `trg_update_exam_status_on_update`
+  - `set_academic_year_before_insert`
 - `SELECT COUNT(*) FROM user_login;` matches the local count.
 - `SHOW COLUMNS FROM grading_categories LIKE 'include_earlier';` and `SHOW COLUMNS FROM workboard_entry_meta LIKE 'note';` both return a row. If either is missing, the app's `ensure*` functions add them on first request; that's fine.
+
+**Import client.** XAMPP's `mysql.exe` is MariaDB 10.4. It may fail to authenticate to MySQL 8 with an error mentioning `caching_sha2_password`. If that happens, install the official MySQL 8 command-line client and use it for the import and checks. Options: `winget install Oracle.MySQL`, or MySQL Shell with `mysqlsh --sql` and then `\source vibeboard-dump.sql`. MySQL Workbench → Server → Data Import also works.
+
+All tables already have a primary key, which matters because Aiven enforces `sql_require_primary_key`.
 
 **If the dump import fails on triggers** (some hosts need `log_bin_trust_function_creators`), create the triggers without `DEFINER`. Aiven allows this by default. As a last resort, import with `--skip-triggers` and re-create the three triggers from `database/schema.sql` lines 45–90.
 
@@ -142,6 +151,32 @@ Verify after the import:
 
    Keep the localhost entries for development.
 6. Deploy. If you later add a custom domain, update `AUTH_URL` and the Google URIs to match, then redeploy.
+
+### 5.1 Doing it from the terminal (agent)
+After the owner has run `vercel login` once:
+
+```bash
+npm i -g vercel
+vercel link                                         # link the folder to the Vercel project
+vercel env add DB_HOST production                   # repeat for every key in the table above (also add each to preview)
+vercel env ls                                       # confirm every key is present
+vercel deploy --prod                                # build + deploy
+vercel logs <deployment-url>                        # check runtime errors
+```
+
+- For `DB_SSL_CA`, pipe the file in: `vercel env add DB_SSL_CA production < ca.pem`.
+- Never echo secret values in the terminal transcript.
+
+## 5.2 Only the owner can do these
+The agent can't log in to the owner's accounts, so it must stop and ask the owner for each of these:
+- Create the Aiven account and service, and download its CA cert.
+- `vercel login`, and connect GitHub to Vercel.
+- Add the production URIs to the Google Cloud OAuth client.
+- Create a Gmail App Password (this needs 2-Step Verification).
+- Run the local `mysqldump` (§4.2), if the agent can't reach XAMPP.
+- Revoke the old API Ninjas key that GitGuardian flagged in commit `a518f93`. It's unrelated to deploying, but still open.
+
+Free-tier limits change. Before relying on them, check Aiven's current free MySQL limits (storage, connections, whether idle services get powered off) and Vercel Hobby's limits.
 
 ## 6. Verify the deployment (agent)
 
@@ -191,3 +226,38 @@ Run these against the production URL. All of them must pass.
   - which §6 checks passed, with the output;
   - the Aiven plan and region;
   - every deviation from this document.
+
+## 9. Skills to give the agent
+
+**Check first:** Antigravity reads Agent Skills, which are `SKILL.md` folders. The usual locations are `.agent/skills/` in the workspace and a global skills folder in `~/.gemini/antigravity/`. Confirm the exact path in Antigravity's settings before copying. These skills already exist on the owner's PC, in Claude Code's plugin cache.
+
+**Source folders**
+- Vercel skills: `C:\Users\LENOVO\.claude\plugins\cache\claude-plugins-official\vercel\0.50.0\skills\`
+- Process skills: `C:\Users\LENOVO\.claude\plugins\cache\superpowers-marketplace\superpowers\6.3.0\skills\`
+
+**Recommended, in priority order**
+
+| Skill | From | Why it helps here |
+|---|---|---|
+| `vercel-cli` | Vercel | Correct `vercel link/env/deploy/logs` usage (§5.1) |
+| `env-vars` | Vercel | Adding production and preview env vars, multi-line values like the CA cert |
+| `deployments-cicd` | Vercel | GitHub → Vercel deploys, promote and rollback |
+| `vercel-functions` | Vercel | Node runtime, regions (`sin1`), timeouts, cron behaviour |
+| `nextjs` | Vercel | Next 15 build and runtime issues on Vercel |
+| `verification` | Vercel | Checking a live deployment end to end (§6) |
+| `vercel-storage` | Vercel | Background on hosted database options, if Aiven is unavailable |
+| `systematic-debugging` | Superpowers | A disciplined loop when the build or a DB connection fails |
+| `verification-before-completion` | Superpowers | Forces real evidence (curl output, logs) before claiming "deployed" |
+
+**Not needed:** design and animation skills (`emil-design-eng`, `animate`, `impeccable`), `ai-sdk` and `ai-gateway`. This job changes no UI or AI code.
+
+**Copy command** (PowerShell, from the repo root; adjust the target if Antigravity uses another path):
+```powershell
+$V="$env:USERPROFILE\.claude\plugins\cache\claude-plugins-official\vercel\0.50.0\skills"
+$S="$env:USERPROFILE\.claude\plugins\cache\superpowers-marketplace\superpowers\6.3.0\skills"
+New-Item -ItemType Directory -Force .agent\skills | Out-Null
+foreach ($n in 'vercel-cli','env-vars','deployments-cicd','vercel-functions','nextjs','verification','vercel-storage') { Copy-Item -Recurse -Force "$V\$n" ".agent\skills\$n" }
+foreach ($n in 'systematic-debugging','verification-before-completion') { Copy-Item -Recurse -Force "$S\$n" ".agent\skills\$n" }
+```
+
+Keep `.agent/` out of git: add it to `.gitignore`, as the repo already does for `.agents/` and `.claude/`. The copied skills are third-party content.
