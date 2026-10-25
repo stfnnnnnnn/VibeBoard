@@ -229,7 +229,7 @@ Run these against the production URL. All of them must pass.
 
 ## 9. Skills to give the agent
 
-**Check first:** Antigravity reads Agent Skills, which are `SKILL.md` folders. The usual locations are `.agent/skills/` in the workspace and a global skills folder in `~/.gemini/antigravity/`. Confirm the exact path in Antigravity's settings before copying. These skills already exist on the owner's PC, in Claude Code's plugin cache.
+**Check first:** Antigravity reads Agent Skills, which are `SKILL.md` folders. The usual locations are `.agents/skills/` (this repo already uses it) or `.agent/skills/` in the workspace and a global skills folder in `~/.gemini/antigravity/`. Confirm the exact path in Antigravity's settings before copying. These skills already exist on the owner's PC, in Claude Code's plugin cache.
 
 **Source folders**
 - Vercel skills: `C:\Users\LENOVO\.claude\plugins\cache\claude-plugins-official\vercel\0.50.0\skills\`
@@ -255,9 +255,9 @@ Run these against the production URL. All of them must pass.
 ```powershell
 $V="$env:USERPROFILE\.claude\plugins\cache\claude-plugins-official\vercel\0.50.0\skills"
 $S="$env:USERPROFILE\.claude\plugins\cache\superpowers-marketplace\superpowers\6.3.0\skills"
-New-Item -ItemType Directory -Force .agent\skills | Out-Null
-foreach ($n in 'vercel-cli','env-vars','deployments-cicd','vercel-functions','nextjs','verification','vercel-storage') { Copy-Item -Recurse -Force "$V\$n" ".agent\skills\$n" }
-foreach ($n in 'systematic-debugging','verification-before-completion') { Copy-Item -Recurse -Force "$S\$n" ".agent\skills\$n" }
+New-Item -ItemType Directory -Force .agents\skills | Out-Null
+foreach ($n in 'vercel-cli','env-vars','deployments-cicd','vercel-functions','nextjs','verification','vercel-storage') { Copy-Item -Recurse -Force "$V\$n" ".agents\skills\$n" }
+foreach ($n in 'systematic-debugging','verification-before-completion') { Copy-Item -Recurse -Force "$S\$n" ".agents\skills\$n" }
 ```
 
-Keep `.agent/` out of git: add it to `.gitignore`, as the repo already does for `.agents/` and `.claude/`. The copied skills are third-party content.
+Keep the skills folder out of git. Both `.agents/` and `.agent/` are already in `.gitignore`. The copied skills are third-party content.
