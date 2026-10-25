@@ -83,7 +83,8 @@ export function useUndoToast() {
     try {
       await current.undo();
       undoing.current = false;
-      dismiss();
+      // R-c: a newer toast may have replaced this one while the request ran; close only the toast this Undo belongs to.
+      if (seq.current === current.id) dismiss();
     } catch (err) {
       show({ message: (err as Error).message || 'Couldn’t undo that. Try again.' });
     }

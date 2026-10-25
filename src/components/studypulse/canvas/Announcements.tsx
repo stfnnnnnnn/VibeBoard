@@ -143,7 +143,8 @@ export default function Announcements({ subject, subjects, toast, onCountsChange
   const open = (item: AnnouncementItem) => {
     setShownId(item.id);
     if (stacked()) { setReading(true); focusHead.current = true; }
-    if (item.seen_at !== null) return;
+    // R-d: `!= null`, so a row without seen_at (the column could not be added) reads as unread, not seen.
+    if (item.seen_at != null) return;
     // Optimistic: the dot goes at once; a failed request quietly brings it back.
     const mark = (seen: string | null) => setLists(prev => prev && ({
       ...prev, [view]: prev[view].map(x => (x.id === item.id ? { ...x, seen_at: seen } : x)),
@@ -340,7 +341,7 @@ export default function Announcements({ subject, subjects, toast, onCountsChange
                       disabled={leaving.has(item.id)} onClick={() => open(item)}>
                       <span className="sp-arow__t">{item.title}</span>
                       <span className="sp-arow__m sp-num">
-                        {item.seen_at === null && <span className="sp-arow__unread"><span className="sp-sr-only">Unread. </span></span>}
+                        {item.seen_at == null && <span className="sp-arow__unread"><span className="sp-sr-only">Unread. </span></span>}
                         <span className={`sp-chip ${code.mapped ? 'sp-chip--blue' : 'sp-chip--neutral'} sp-ann__code`} title={code.label}>{code.label}</span>
                         <span>{cap(postedLabel(item.posted_at, now).label)}</span>
                         {view === 'pending' && item.suggested_destinations.map(d => (
