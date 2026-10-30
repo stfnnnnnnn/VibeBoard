@@ -45,6 +45,15 @@
   transition: transform 160ms var(--db-ease); display: inline-flex; align-items: center; gap: 6px;
 }
 .db-pill:active { transform: scale(.97); }
+.db-btn {
+  display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 15px; border-radius: 999px;
+  font: inherit; font-size: 13px; font-weight: 600; line-height: 1; color: var(--db-ink);
+  background: linear-gradient(160deg, rgba(255,255,255,.85), rgba(255,255,255,.6)); border: 1px solid rgba(255,255,255,.9);
+  box-shadow: inset 0 1px 0 #fff, 0 6px 16px -8px rgba(60,40,110,.35);
+  cursor: pointer; white-space: nowrap; transition: transform 160ms var(--db-ease), box-shadow 200ms var(--db-ease);
+}
+.db-btn:active { transform: scale(.97); }
+.db-iconbtn { width: 34px; height: 34px; padding: 0; justify-content: center; border-radius: 50%; flex-shrink: 0; }
 .db-profile { position: relative; }
 .db-avatar {
   width: 36px; height: 36px; border-radius: 50%; border: 2.5px solid #fff; cursor: pointer;
@@ -150,6 +159,18 @@ button.db-stat { border: 0; font-family: inherit; cursor: pointer; }
 .db-due small { display: block; font-weight: 600; font-size: 10px; color: #6b6b80; }
 .db-due[data-late] { background: #ffe1e8; color: #b83259; }
 .db-due[data-late] small { color: #b83259; }
+/* adaptive Up next fillers (task 14 §3): Later / Done-this-week items and the summary card */
+.db-tag { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; padding: 2px 7px; border-radius: 6px; background: #efeaf9; color: #6a5a9a; }
+.db-tag-done { background: #e3f6ec; color: #1f7a52; }
+.db-witem-done .db-wt { color: #6b6b80; text-decoration: line-through; text-decoration-color: rgba(107,107,128,.5); }
+.db-due-done { background: #e3f6ec; color: #1f7a52; }
+.db-clear {
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 14px; min-width: 0;
+  background: linear-gradient(135deg, rgba(242,167,192,.18), rgba(116,188,217,.18));
+  border: 1px dashed rgba(107,107,128,.3);
+}
+.db-clear b { font-size: 13px; display: block; }
+.db-clear-ic { font-size: 20px; line-height: 1; flex-shrink: 0; }
 .db-list-empty { grid-column: 1 / -1; grid-row: 1 / -1; padding: 14px; font-size: 13px; color: var(--db-muted); }
 .db-week { display: flex; flex-direction: column; padding: 8px 10px; }
 .db-weekh { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; gap: 8px; }
@@ -175,6 +196,7 @@ button.db-stat { border: 0; font-family: inherit; cursor: pointer; }
 
 @media (hover: hover) and (pointer: fine) {
   a.db-cell:hover, .db-witem:hover { transform: translateY(-1px); }
+  .db-btn:hover { transform: translateY(-1px); box-shadow: inset 0 1px 0 #fff, 0 10px 22px -10px rgba(60,40,110,.45); }
   .db-tile:hover { transform: translateY(-6px); box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 26px 50px -24px rgba(60,40,110,.45); }
   .db-tile:hover .db-art-img { transform: scale(1.03); }
   .db-dcol:hover:not([aria-pressed="true"]) { background: rgba(255,255,255,.6); }
@@ -191,7 +213,7 @@ button.db-stat { border: 0; font-family: inherit; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .db-page *, .db-page *::before, .db-page *::after { animation: none !important; transition: none !important; }
   .db-skel { background: rgba(255,255,255,.7); }
-  .db-tile:hover, .db-tile:active, .db-tile:hover .db-art-img, a.db-cell:hover, .db-witem:hover { transform: none; }
+  .db-tile:hover, .db-tile:active, .db-tile:hover .db-art-img, a.db-cell:hover, .db-witem:hover, .db-btn:hover, .db-btn:active { transform: none; }
 }
 
 /* below desktop the page scrolls normally */
