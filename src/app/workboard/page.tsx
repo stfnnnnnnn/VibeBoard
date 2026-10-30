@@ -7,9 +7,10 @@ import { getWorkItems } from '@/lib/workboard/workItems';
 import { computeStats, computeWorkloadChart } from '@/lib/workboard/workStats';
 import WorkboardShell from '@/components/workboard/WorkboardShell';
 
-export default async function WorkboardPage() {
+export default async function WorkboardPage({ searchParams }: { searchParams: Promise<{ item?: string }> }) {
   const session = await auth();
   if (!session?.user?.id) redirect('/login');
+  const { item } = await searchParams;
 
   await ensureWorkboardSchema();
   // v4 chains v3, which chains v2. getWorkItems below reads v3 columns and tables
@@ -32,6 +33,7 @@ export default async function WorkboardPage() {
         stats:    computeStats(payload.items, payload.generated_at, weekStart),
         workload: computeWorkloadChart(payload.items, weekStart),
       }}
+      initialItemKey={typeof item === 'string' ? item : null}
     />
   );
 }

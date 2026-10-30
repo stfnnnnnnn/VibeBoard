@@ -138,7 +138,7 @@ function useKeyboardIntent(): React.MutableRefObject<boolean> {
 type Opened<T> = { target: T; instant: boolean };
 
 export default function WorkboardShell(
-  { initialWeek, initialWork }: { initialWeek: WorkboardWeek; initialWork: WorkPayload },
+  { initialWeek, initialWork, initialItemKey }: { initialWeek: WorkboardWeek; initialWork: WorkPayload; initialItemKey?: string | null },
 ) {
   const [view, setView] = useState<ViewKey>('list');
   const [work, setWork] = useState<WorkPayload>(initialWork);
@@ -306,6 +306,19 @@ export default function WorkboardShell(
     setDetailItem(item);
   };
   const closeDetail = () => setDetailItem(null);
+
+  /* Dashboard deep link (dashboard spec §5.5): /workboard?item=<source>-<id> opens that item once,
+     then the parameter is dropped so a refresh or Back doesn't reopen it. */
+  useEffect(() => {
+    if (!initialItemKey) return;
+    const hit = work.items.find(i => itemKey(i) === initialItemKey);
+    if (hit) openDetail(hit);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('item');
+    window.history.replaceState(window.history.state, '', url);
+    // Mount-only by design.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** The open item as the *current* payload knows it, not as it was when the title was clicked.
    *
