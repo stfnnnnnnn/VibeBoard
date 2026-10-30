@@ -54,6 +54,7 @@ export default function WorkboardStrip({ sec, onRetry, retrying }: {
 
   const d = sec.data;
   const selected = day ? d.week.find(w => w.date === day) ?? null : null;
+  const activeDay = selected?.date ?? null;
   const items = selected ? selected.items : d.upNext;
   // Client-side Manila date; it only drives the today dot, so the buttons suppress a midnight hydration diff.
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -74,34 +75,38 @@ export default function WorkboardStrip({ sec, onRetry, retrying }: {
       </div>
 
       <div className="db-wbb">
-        <div className="db-list db-fade" key={day ?? 'up-next'} aria-live={day ? 'polite' : undefined}>
-          {items.map(i => <Item key={i.key} item={i} />)}
-          {items.length === 0 && (
-            <div className="db-list-empty">
-              {!d.hasAnyItems ? <>Nothing on your plate. <Link href="/workboard" style={{ fontWeight: 700 }}>Add work in Workboard →</Link></>
-                : selected ? `Nothing due ${dayName(selected.date)}` : 'Nothing due in the next 7 days.'}
-            </div>
-          )}
+        <div aria-live="polite" aria-atomic="false" style={{ minWidth: 0 }}>
+          <div className="db-list db-fade" key={activeDay ?? 'up-next'}>
+            {items.map(i => <Item key={i.key} item={i} />)}
+            {items.length === 0 && (
+              <div className="db-list-empty">
+                {!d.hasAnyItems ? <>Nothing on your plate. <Link href="/workboard" style={{ fontWeight: 700 }}>Add work in Workboard →</Link></>
+                  : selected ? `Nothing due ${dayName(selected.date)}` : 'Nothing due in the next 7 days.'}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="db-item db-week">
           <div className="db-weekh">
-            <span className="db-k">{selected ? `${dayName(selected.date)} · ${selected.total} item${selected.total === 1 ? '' : 's'}` : 'This week'}</span>
-            {selected
+            <span className="db-k">{activeDay && selected ? `${dayName(selected.date)} · ${selected.total} item${selected.total === 1 ? '' : 's'}` : 'This week'}</span>
+            {activeDay
               ? <button type="button" onClick={() => setDay(null)} aria-label="Clear day filter">✕ Clear</button>
               : <span className="db-sub">tap a day to filter</span>}
           </div>
-          <div className="db-wk" role="radiogroup" aria-label="Filter Up next by day">
+          <div className="db-wk" role="group" aria-label="Filter Up next by day">
             {d.week.map((w, i) => (
               <button
-                key={w.date} type="button" role="radio" className="db-dcol" suppressHydrationWarning
-                aria-checked={day === w.date} data-today={w.date === today || undefined}
+                key={w.date} type="button" className="db-dcol" suppressHydrationWarning
+                aria-pressed={activeDay === w.date} data-today={w.date === today || undefined}
                 aria-label={`${dayName(w.date)}: ${w.total} due`}
-                onClick={() => setDay(day === w.date ? null : w.date)}
+                onClick={() => setDay(activeDay === w.date ? null : w.date)}
               >
                 <span className="db-stack" aria-hidden="true">
-                  {(['academic', 'project', 'organization', 'life'] as const).flatMap(c =>
-                    Array.from({ length: Math.min(w.counts[c], 4) }, (_, k) => <i key={`${c}${k}`} style={{ '--d': CONTEXT_FILL[c] } as CSSProperties} />))}
+                  {(['academic', 'project', 'organization', 'life'] as const)
+                    .flatMap(c => Array.from({ length: w.counts[c] }, (_, k) => ({ c, k })))
+                    .slice(0, 6)
+                    .map(({ c, k }) => <i key={`${c}${k}`} style={{ '--d': CONTEXT_FILL[c] } as CSSProperties} />)}
                 </span>
                 <span className="db-dn">{DAY_LETTER[i]}</span>
               </button>
