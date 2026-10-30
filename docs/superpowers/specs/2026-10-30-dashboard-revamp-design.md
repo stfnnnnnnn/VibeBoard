@@ -24,7 +24,7 @@ Today the dashboard is static. It has a greeting, a quote card, a weather card, 
 | D7 | **Everything visible without scrolling at 100% zoom** on desktop. Verified sizes: 1366×768, 1536×864 and 1920×1080 browser viewports. |
 | D8 | Tile stat chips sit **in the title row**, not on the image. The secondary stat line under the title ("2 quizzes this week") is **removed**. |
 | D9 | Workboard strip is **more defined and more functional** (§5.4). |
-| D10 | Quote and weather get **no dedicated space**. They are two slim rows stacked to the right of the Today strip. |
+| D10 | Quote and weather get **no dedicated space**. They are two slim rows stacked to the right of the Today strip. (v9: the quote was removed; weather fills that column.) |
 | D11 | Weather shows a **condition-based tip** ("Bring an umbrella, it's raining", "Shady skies, good time to head out", …). Includes the "rain later today" rule, which needs the forecast endpoint (default chosen). |
 | D12 | Keep the `.vb-bg` animated gradient, the glass look, the gradient title and the existing tile artwork. |
 
@@ -32,16 +32,16 @@ Today the dashboard is static. It has a greeting, a quote card, a weather card, 
 
 ```
 ┌ header ─────────────────────────────────────────────────────────────┐
-│ Thursday, Oct 30 · Week 7 · Good afternoon            [Sign-Out] (K)│
+│ Thursday, Oct 30 · Week 7 · Good afternoon            [Sign out] (K)│
 │ Karl's Home                                                         │
 ├ band ───────────────────────────────────────┬───────────────────────┤
-│ Today strip: Next class | Habits | Safe to  │ “ quote … — author    │
-│ spend | Due this week                       │ ☀ 31° Sunny · tip pill│
+│ Today strip: Next class | Habits | Safe to  │ ☀ 31° Sunny · 💧 🌬   │
+│ spend | Due this week                       │ [tip row]             │
 ├ tiles (3 equal, glass, 3:2 artwork) ────────┴───────────────────────┤
 │ [art]            │ [art]              │ [art]                       │
 │ Study Pulse  chip│ Finance Tracker chip│ Habit Tracker chip          │
 ├ Workboard strip ────────────────────────────────────────────────────┤
-│ Workboard [1 overdue][2 in progress][4 due]   3 of 7 ▬▬  [Open →]   │
+│ Workboard [1 overdue][2 in progress][4 due]   3 of 7 ▬▬       (→)   │
 │ ┌item┐┌item┐                                 ┌ This week M T W T F ┐│
 │ └item┘└item┘                                 └─────────────────────┘│
 └─────────────────────────────────────────────────────────────────────┘
@@ -108,7 +108,7 @@ interface DigestItem {
 
 - `page.tsx` stays a **server component**. It renders the header and the three tile images immediately, then streams each live part inside `<Suspense>` with a shimmer skeleton of the same size, so nothing shifts on load.
 - The server calls the shared summary builder directly (`src/lib/dashboard/summary.ts`). The API route exists for the client-side retry and day filter.
-- Quote and weather stay client widgets using their existing routes (`/api/quote`, `/api/weather`). Both are restyled into slim rows.
+- Weather stays a client widget using its existing route (`/api/weather`), restyled into a card. The quote was dropped in v9 (`/api/quote` is left in place, unused by the dashboard).
 
 ### 4.3 Files
 
@@ -119,22 +119,22 @@ interface DigestItem {
 | `src/lib/dashboard/weatherTip.ts` | pure tip rules (§5.3) |
 | `src/lib/workboard/dashboardDigest.ts` | pure Workboard digest (lives in the workboard lib so it can reuse its pure helpers; tested by `scripts/wb-test.mjs`) |
 | `src/app/api/dashboard/summary/route.ts` | auth + JSON |
-| `src/components/dashboard/DashboardHeader.tsx` | date/week line, title, Sign-Out, avatar |
+| `src/components/dashboard/DashboardHeader.tsx` | date/week line, title, Sign out, avatar |
 | `src/components/dashboard/ProfilePopover.tsx` | avatar menu (§5.5) |
 | `src/components/dashboard/TodayStrip.tsx` | 4 cells |
-| `src/components/dashboard/QuoteRow.tsx` / `WeatherRow.tsx` | slim rows (replace the widget layout) |
+| `src/components/dashboard/WeatherRow.tsx` | weather card (replaces the widget layout) |
 | `src/components/dashboard/ModuleTile.tsx` | glass tile with title-row chip |
 | `src/components/dashboard/WorkboardStrip.tsx` | header, Up next, This week, day filter |
 | `src/app/dashboard/dashboard.css` | tokens + layout, following the `workboard.css` glass system (imported by the page, as `workboard.css` is) |
 
-`QuoteWidget.tsx` and `WeatherWidget.tsx` are refactored into the row components; no duplicates are kept. The large inline `style={{…}}` objects in today's `page.tsx` move into `dashboard.css` classes.
+`WeatherWidget.tsx` is refactored into `WeatherRow`; no duplicates are kept. The large inline `style={{…}}` objects in today's `page.tsx` move into `dashboard.css` classes.
 
 ## 5. Components
 
 ### 5.1 Header
 - Line 1 (12px, muted): `Thursday, Oct 30 · Week 7 · Good afternoon`. The week part is omitted when no trimester is set. Greeting by Manila hour: morning <12, afternoon <18, else evening.
 - Title: `{firstName}'s Home`, `.gradient-text`, `clamp(30px, 5vh, 48px)`.
-- Right: the existing Sign-Out gradient pill, then a 36px gradient avatar showing the first initial (the session carries no photo URL), which opens the Profile popover.
+- Right: a glass **Sign out** button (`.db-btn`: white glass, ink text, lucide `LogOut` icon), then a 38px avatar: a pink→blue gradient ring around a white circle holding the first initial in gradient text (`#b8476f`→`#2c6fb0`, both ≥ 4.5:1 on white; plain text under forced colours). The session carries no photo URL. It opens the Profile popover.
 - `VerifyEmailBanner` stays above the header when the user is unverified.
 
 ### 5.2 Today strip
@@ -151,10 +151,11 @@ Four glass item cells. Each is a link into its module:
 - **Error state** (`ok: false`): a muted `Couldn't load` with a retry icon button that refetches only that section.
 - Retry refetches the whole summary (all sections are independent, so this is equivalent).
 
-### 5.3 Quote + weather (D10, D11)
-A column to the right of the Today strip, `grid-template-columns: 1.75fr 1fr`, holding two equal slim rows that together are the strip's height.
-- **Quote row:** a small gradient `“` glyph, the quote in italics on **one line** with ellipsis, and `— Author`. The full quote is in `title`.
-- **Weather row:** condition icon (the API's icon image), temperature (bold), `Condition · Feels N°`, and a **tip pill** right-aligned with ellipsis.
+### 5.3 Weather (D10, D11)
+The band's right column (`grid-template-columns: 1.75fr 1fr`) holds **weather only**; the quote row was removed in v9. The weather card is stretched by the band grid to the Today strip's height (no fixed height).
+- **Top row:** the API's condition icon (40×40), the temperature (`clamp(24px, 3.6vh, 30px)`, 800), then the condition (13.5px bold; a button that changes the city) over `City · Feels N°` (12px), and on the right humidity `💧 70%` and wind `🌬 12 km/h` (11.5px, right-aligned).
+- **Tip row:** the condition tip as a full-width row below (12px radius, ellipsis).
+- Loading shows two skeleton bars matching those rows (40px + 28px); the city form uses the same card.
 - The weather route switches from `current.json` to `forecast.json?days=1`. It is still one request and returns the same `current` block plus today's hourly `chance_of_rain`.
 - `weatherTip(current, todayHours)` is pure and unit-tested. Rules apply in order; the first match wins:
 
@@ -182,7 +183,7 @@ Tone colours: heat `#fff4e0`/`#b4690e`, rain `#e6f2ff`/`#2c6fb0`, calm `#f1edfa`
 - Hover (fine pointer only): tile lifts 6px and the artwork scales 1.03. Press: scale 0.98.
 
 ### 5.5 Workboard strip (D2, D9)
-**Header row:** `Workboard` (17px bold), then stat pills: `1 overdue` (rose), `2 in progress` (blue), `4 due this week` (neutral). Each pill links to `/workboard`. Workboard has no filter URL parameters, and its default Focus view already leads with overdue and in-progress work. Right side: `3 of 7 done this week` + 120px gradient progress bar, then the gradient pill **Open Workboard →**.
+**Header row:** `Workboard` (17px bold), then stat pills: `1 overdue` (rose), `2 in progress` (blue), `4 due this week` (neutral). Each pill links to `/workboard`. Workboard has no filter URL parameters, and its default Focus view already leads with overdue and in-progress work. Right side: `3 of 7 done this week` + 120px gradient progress bar, then a round glass arrow button (`.db-btn.db-iconbtn`, `aria-label="Open Workboard"`). With nothing due or done this week the progress text and bar are hidden and only the arrow shows.
 
 **Body:** `grid-template-columns: 1fr minmax(300px, .42fr)`.
 - **Up next:** a 2×2 grid of up to 4 items, overdue first, then by `due_at`.
@@ -193,6 +194,7 @@ Tone colours: heat `#fff4e0`/`#b4690e`, rain `#e6f2ff`/`#2c6fb0`, calm `#f1edfa`
 - **This week:** Mon–Sun columns. Each day shows a stack of 7px bars, one per item due that day, coloured by context. Today gets a dot under its letter.
   - **Clicking a day filters Up next** to that day's items (the dashboard's only interaction besides links). Clicking it again clears the filter.
   - Up next swaps with a 150ms crossfade. When a day is selected, the header shows `Fri · 2 items` and a clear ×.
+- **Adaptive fill (v9, unfiltered view only):** when Up next has fewer than 4 items, the empty slots fill in order with **Later** items (not done, not in Up next, due after today+7 or undated; tagged `Later`), then **Done this week** items (muted, struck-through title, `Done ✓ Wed`, green ✓ chip), then one **summary card** (🌿 `Light week ahead · Nothing else due until Nov 12`, or `All clear this week · Next deadline …` when Up next is empty). The card spans a full row when two cells are left; with one item left, the item and the card each take a full row, so no cell is ever empty. `Nov 12` is the earliest due date beyond today+7 not already shown. The day-filtered view is unchanged.
 - **Empty states:**
   - no items at all → `Nothing on your plate. Add work in Workboard →`
   - day with no items → `Nothing due Sat`
