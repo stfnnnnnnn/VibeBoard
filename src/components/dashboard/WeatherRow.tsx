@@ -6,12 +6,12 @@ const LS_KEY = 'vb_weather_city';   // same key the old WeatherWidget used, so s
 
 interface WeatherData {
   location: { name: string };
-  current: { temp_c: number; feelslike_c: number; condition: { text: string; icon: string } };
+  current: { temp_c: number; feelslike_c: number; humidity: number; wind_kph: number; condition: { text: string; icon: string } };
   forecast?: { forecastday?: { hour?: { time_epoch: number; chance_of_rain: number }[] }[] };
 }
 type State = { kind: 'loading' } | { kind: 'ask'; error?: string } | { kind: 'ready'; data: WeatherData };
 
-/** Slim weather row + condition tip (spec §5.3, D11). */
+/** Weather card filling the band's right column + condition tip (spec §5.3, D11; v9). */
 export default function WeatherRow() {
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [city, setCity] = useState('');
@@ -71,14 +71,19 @@ export default function WeatherRow() {
   }
 
   if (state.kind === 'loading') {
-    return <div className="db-panel db-weather" aria-busy="true"><span className="db-skel" style={{ flex: 1 }} /></div>;
+    return (
+      <div className="db-panel db-weather" aria-busy="true">
+        <span className="db-skel" style={{ width: '60%', height: 30 }} />
+        <span className="db-skel" style={{ height: 26, borderRadius: 12 }} />
+      </div>
+    );
   }
   if (state.kind === 'ask') {
     return (
       <div className="db-panel db-weather">
         <form onSubmit={submit} aria-label="Set your city for weather">
           <input value={city} onChange={e => setCity(e.target.value)} placeholder={state.error ? `${state.error} · enter a city` : 'Your city, e.g. Makati'} aria-label="City" />
-          <button type="submit" className="db-pill" style={{ padding: '4px 12px', fontSize: 12 }}>Go</button>
+          <button type="submit" className="db-btn">Go</button>
         </form>
       </div>
     );
@@ -93,14 +98,25 @@ export default function WeatherRow() {
 
   return (
     <div className="db-panel db-weather">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={`https:${cur.condition.icon}`} alt="" width={28} height={28} />
-      <span className="db-wtemp">{Math.round(cur.temp_c)}°</span>
-      <button type="button" className="db-wcond" onClick={changeCity} title={`${loc.name} · change city`}
-        aria-label={`${condition}, feels ${Math.round(cur.feelslike_c)}°. Change city (${loc.name})`}>
-        {condition} · Feels {Math.round(cur.feelslike_c)}°
-      </button>
-      <span className={`db-tip db-tip-${tip.tone}`} title={tip.text}><span aria-hidden="true">{tip.icon}</span> {tip.text}</span>
+      <div className="db-wtop">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={`https:${cur.condition.icon}`} alt="" width={40} height={40} />
+        <span className="db-wtemp">{Math.round(cur.temp_c)}°</span>
+        <div className="db-wdesc">
+          <button type="button" className="db-wcond" onClick={changeCity} title={`${loc.name} · change city`}
+            aria-label={`${condition}, feels ${Math.round(cur.feelslike_c)}°. Change city (${loc.name})`}>
+            {condition}
+          </button>
+          <span>{loc.name} · Feels {Math.round(cur.feelslike_c)}°</span>
+        </div>
+        <div className="db-wmeta">
+          <span><span aria-hidden="true">💧</span> {cur.humidity}%</span>
+          <span><span aria-hidden="true">🌬</span> {Math.round(cur.wind_kph)} km/h</span>
+        </div>
+      </div>
+      <div className={`db-tip db-tip-${tip.tone}`} title={tip.text}>
+        <span aria-hidden="true">{tip.icon}</span><span className="db-tip-t">{tip.text}</span>
+      </div>
     </div>
   );
 }

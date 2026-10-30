@@ -79,7 +79,7 @@
 @keyframes db-pop-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
 @keyframes db-pop-out { to { opacity: 0; transform: scale(.96); } }
 
-/* band: Today strip | slim quote + weather */
+/* band: Today strip | weather card */
 .db-band { display: grid; grid-template-columns: 1.75fr 1fr; gap: 14px; }
 .db-today { padding: 10px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .db-cell { padding: 9px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; position: relative; }
@@ -101,23 +101,25 @@ a.db-cell { transition: transform 160ms var(--db-ease); }
 }
 .db-retry:disabled { opacity: .5; cursor: progress; }
 
-.db-side { display: grid; grid-template-rows: 1fr 1fr; gap: 8px; min-width: 0; }
-.db-quote, .db-weather { padding: 0 16px; display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 13px; }
-.db-qmark {
-  font: 800 26px/1 Georgia, serif; margin-top: 8px; flex-shrink: 0;
-  background: linear-gradient(to bottom, #f2a7c0, #74bcd9); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+.db-weather { padding: 12px 18px; display: flex; flex-direction: column; justify-content: center; gap: 8px; min-width: 0; font-size: 13px; }
+.db-wtop { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.db-wtop img { width: 40px; height: 40px; flex-shrink: 0; }
+.db-wtemp { font-size: clamp(24px, 3.6vh, 30px); font-weight: 800; letter-spacing: -.03em; line-height: 1; flex-shrink: 0; }
+.db-wdesc { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.db-wdesc > span { font-size: 12px; color: #55556a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.db-wcond { font: inherit; font-size: 13.5px; font-weight: 700; color: var(--db-ink); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* scoped: .db-wmeta is also the Workboard item's meta line */
+.db-weather .db-wmeta { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 11.5px; color: #55556a; white-space: nowrap; flex-shrink: 0; }
+.db-tip {
+  margin-left: 0; border-radius: 12px; padding: 6px 12px; font-size: 12.5px; font-weight: 700;
+  display: flex; gap: 8px; align-items: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
 }
-.db-quote p { margin: 0; font-style: italic; color: #3a3a4e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.db-qby { font-size: 11.5px; color: var(--db-muted); font-weight: 600; white-space: nowrap; flex-shrink: 0; }
-.db-weather img { width: 28px; height: 28px; flex-shrink: 0; }
-.db-wtemp { font-size: 17px; font-weight: 800; letter-spacing: -.02em; flex-shrink: 0; }
-.db-wcond { color: #55556a; white-space: nowrap; flex-shrink: 0; background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
-.db-tip { margin-left: auto; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.db-tip-t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .db-tip-heat { background: #fff4e0; color: #8a5010; }   /* 6.0:1 */
 .db-tip-rain { background: #e6f2ff; color: #2c6fb0; }   /* 5.0:1 */
 .db-tip-calm { background: #f1edfa; color: #6a5a9a; }   /* 5.3:1 */
 .db-weather form { display: flex; gap: 6px; width: 100%; }
-.db-weather input { flex: 1; min-width: 0; border: 1px solid rgba(43,43,58,.15); border-radius: 10px; padding: 5px 10px; font: inherit; background: rgba(255,255,255,.9); }
+.db-weather input { flex: 1; min-width: 0; height: 38px; border: 1px solid rgba(43,43,58,.15); border-radius: 12px; padding: 0 12px; font: inherit; background: rgba(255,255,255,.9); }
 
 /* tiles */
 .db-tiles {
@@ -220,7 +222,6 @@ button.db-stat { border: 0; font-family: inherit; cursor: pointer; }
 @media (max-width: 1023px) {
   .db-page { justify-content: flex-start; }
   .db-band { grid-template-columns: 1fr; }
-  .db-side > * { padding: 10px 16px; }
   .db-tiles { grid-template-columns: 1fr 1fr; flex: none; max-height: none; }
   .db-art { flex: none; aspect-ratio: 3 / 2; }
   .db-wbb { grid-template-columns: 1fr; }

@@ -2,7 +2,6 @@
 import { Suspense, use, useCallback, useState, type CSSProperties, type ReactNode } from 'react';
 import type { DashboardSummary } from '@/lib/dashboard/types';
 import TodayStrip from './TodayStrip';
-import QuoteRow from './QuoteRow';
 import WeatherRow from './WeatherRow';
 import ModuleTile, { Chip } from './ModuleTile';
 import WorkboardStrip from './WorkboardStrip';
@@ -45,10 +44,7 @@ export default function DashboardBody({ summary }: { summary: Promise<DashboardS
       <section className="db-band db-enter" style={{ '--i': 0 } as CSSProperties} aria-label="Today">
         {slot(<TodayStrip s={null} animate={false} onRetry={retry} retrying={retrying} />,
           s => <TodayStrip s={s} animate={animate && !override} onRetry={retry} retrying={retrying} />)}
-        <div className="db-side">
-          <QuoteRow />
-          <WeatherRow />
-        </div>
+        <WeatherRow />
       </section>
 
       <section className="db-tiles" aria-label="Modules">
