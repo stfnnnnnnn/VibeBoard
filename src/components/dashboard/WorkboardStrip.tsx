@@ -129,7 +129,7 @@ export default function WorkboardStrip({ sec, onRetry, retrying }: {
             <span className="db-bar" role="img" aria-label={`${pct}% of this week's work done`}><i style={{ width: `${pct}%` }} /></span>
             {openLink}
           </div>
-        ) : <span style={{ marginLeft: 'auto' }}>{openLink}</span>}
+        ) : <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>{openLink}</span>}
       </div>
 
       <div className="db-wbb">
