@@ -315,7 +315,8 @@ export default function WorkboardShell(
     if (hit) openDetail(hit);
     const url = new URL(window.location.href);
     url.searchParams.delete('item');
-    window.history.replaceState(window.history.state, '', url);
+    // null, not history.state: Next skips its router sync for states carrying its own marker.
+    window.history.replaceState(null, '', url);
     // Mount-only by design.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
