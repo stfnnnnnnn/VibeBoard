@@ -128,12 +128,15 @@ a.db-cell { transition: transform 160ms var(--db-ease); }
 .db-wbh { display: flex; align-items: center; gap: 10px; }
 .db-wbh h2 { font-size: 17px; margin: 0 4px 0 0; }
 .db-stat { font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,.75); color: #55556a; display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+button.db-stat { border: 0; font-family: inherit; cursor: pointer; }
 .db-stat-late { background: #ffe1e8; color: #b83259; }
 .db-stat-prog { color: var(--db-blue); }
 .db-wprog { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #55556a; white-space: nowrap; }
 .db-wprog .db-bar { width: 120px; margin: 0; }
 .db-wbb { display: grid; grid-template-columns: 1fr minmax(300px, .42fr); gap: 14px; align-items: stretch; }
-.db-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-content: start; }
+/* Two-row floor (2 x 52px + gap, the skeleton's 2x2 box), so the body never changes height between
+   the skeleton, 0-4 items, the empty line and day-filter clicks (spec §4.2): .db-tiles flexes on it. */
+.db-list { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(2, minmax(52px, auto)); gap: 8px; align-content: start; }
 .db-witem { display: grid; grid-template-columns: auto 1fr auto; column-gap: 10px; row-gap: 3px; align-items: center; padding: 8px 12px; min-width: 0; transition: transform 160ms var(--db-ease); }
 .db-witem > .db-gdot { grid-row: 1 / 3; }
 .db-witem .db-wt { font-size: 13px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -147,7 +150,7 @@ a.db-cell { transition: transform 160ms var(--db-ease); }
 .db-due small { display: block; font-weight: 600; font-size: 10px; color: #6b6b80; }
 .db-due[data-late] { background: #ffe1e8; color: #b83259; }
 .db-due[data-late] small { color: #b83259; }
-.db-list-empty { grid-column: 1 / -1; padding: 14px; font-size: 13px; color: var(--db-muted); }
+.db-list-empty { grid-column: 1 / -1; grid-row: 1 / -1; padding: 14px; font-size: 13px; color: var(--db-muted); }
 .db-week { display: flex; flex-direction: column; padding: 8px 10px; }
 .db-weekh { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; gap: 8px; }
 .db-weekh button { border: 0; background: rgba(255,255,255,.9); border-radius: 999px; padding: 2px 8px; font: inherit; font-weight: 700; font-size: 11px; line-height: 1.4; cursor: pointer; }
@@ -203,7 +206,9 @@ a.db-cell { transition: transform 160ms var(--db-ease); }
 @media (max-width: 639px) {
   .db-page { padding: 16px; }
   .db-today { grid-template-columns: 1fr 1fr; }
+  .db-header { flex-wrap: wrap; }
   .db-tiles, .db-list { grid-template-columns: 1fr; }
+  .db-list { grid-template-rows: none; }   /* one column and the page scrolls here: no floor */
   .db-wbh { flex-wrap: wrap; }
   .db-wprog { margin-left: 0; width: 100%; }
   .db-page a, .db-page button { -webkit-tap-highlight-color: transparent; }
