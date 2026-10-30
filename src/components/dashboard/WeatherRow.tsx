@@ -18,27 +18,42 @@ export default function WeatherRow() {
 
   async function load(q: string) {
     setState({ kind: 'loading' });
+    let r: Response, d: unknown;
     try {
-      const r = await fetch(`/api/weather?q=${encodeURIComponent(q)}`);
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? 'Weather unavailable');
-      setState({ kind: 'ready', data: d });
-    } catch (e) {
-      setState({ kind: 'ask', error: (e as Error).message });
+      r = await fetch(`/api/weather?q=${encodeURIComponent(q)}`);
+      d = await r.json();
+    } catch {
+      // Network failure or a non-JSON body: never surface the raw exception text.
+      setState({ kind: 'ask', error: 'Weather unavailable' });
+      return;
     }
+    if (!r.ok) {
+      const msg = (d as { error?: unknown } | null)?.error;
+      setState({ kind: 'ask', error: typeof msg === 'string' && msg ? msg : 'Weather unavailable' });
+      return;
+    }
+    setState({ kind: 'ready', data: d as WeatherData });
   }
 
   useEffect(() => {
     let saved: string | null = null;
     try { saved = localStorage.getItem(LS_KEY); } catch { /* storage blocked */ }
     if (saved) { load(saved); return; }
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        p => load(`${p.coords.latitude},${p.coords.longitude}`),
-        () => setState({ kind: 'ask' }),
-        { timeout: 8000 },
-      );
-    } else setState({ kind: 'ask' });
+    if (!('geolocation' in navigator)) { setState({ kind: 'ask' }); return; }
+    // The geolocation timeout only starts once permission is granted, so an ignored prompt would
+    // shimmer forever. After ~10s, fall back to the city form; a late success still loads weather.
+    let fellBack = false;
+    const fallback = window.setTimeout(() => {
+      fellBack = true;
+      setState(s => (s.kind === 'loading' ? { kind: 'ask' } : s));
+    }, 10000);
+    navigator.geolocation.getCurrentPosition(
+      p => { window.clearTimeout(fallback); load(`${p.coords.latitude},${p.coords.longitude}`); },
+      // After the fallback the form is already up (and may be mid-load on a typed city): leave it be.
+      () => { window.clearTimeout(fallback); if (!fellBack) setState({ kind: 'ask' }); },
+      { timeout: 8000 },
+    );
+    return () => window.clearTimeout(fallback);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -81,7 +96,8 @@ export default function WeatherRow() {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={`https:${cur.condition.icon}`} alt="" width={28} height={28} />
       <span className="db-wtemp">{Math.round(cur.temp_c)}°</span>
-      <button type="button" className="db-wcond" onClick={changeCity} title={`${loc.name} · change city`}>
+      <button type="button" className="db-wcond" onClick={changeCity} title={`${loc.name} · change city`}
+        aria-label={`${condition}, feels ${Math.round(cur.feelslike_c)}°. Change city (${loc.name})`}>
         {condition} · Feels {Math.round(cur.feelslike_c)}°
       </button>
       <span className={`db-tip db-tip-${tip.tone}`} title={tip.text}><span aria-hidden="true">{tip.icon}</span> {tip.text}</span>
