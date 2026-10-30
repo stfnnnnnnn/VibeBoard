@@ -46,6 +46,10 @@ export function dueChip(due: string | null, time: string | null, today: string, 
   if (due < today && !revision) {
     return { top: `${daysSince(due, today)}d late`, bottom: [fmt(due, { weekday: 'short' }), t].filter(Boolean).join(' '), late: true };
   }
+  // A past-due item sent back for revision is not late, and its due date is not today either.
+  if (due < today) {
+    return { top: 'Revision', bottom: t ? `${fmt(due, { weekday: 'short' })} ${t}` : fmt(due, { month: 'short', day: 'numeric' }), late: false };
+  }
   if (due <= today)              return { top: 'Today', bottom: t, late: false };
   if (due === addDays(today, 1)) return { top: 'Tomorrow', bottom: t, late: false };
   if (due <= addDays(today, 6))  return { top: fmt(due, { weekday: 'short' }), bottom: t ?? fmt(due, { month: 'short', day: 'numeric' }), late: false };

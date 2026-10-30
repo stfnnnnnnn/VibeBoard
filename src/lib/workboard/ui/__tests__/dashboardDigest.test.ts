@@ -28,7 +28,8 @@ test('dueChip labels', () => {
   assert.equal(dueChip(null, null, T, false), null);
 });
 test('a past-due revision item is never "late"', () => {
-  assert.equal(dueChip('2026-10-28', null, T, true)?.late, false);
+  assert.deepEqual(dueChip('2026-10-28', null, T, true), { top: 'Revision', bottom: 'Oct 28', late: false });
+  assert.deepEqual(dueChip('2026-10-28', '17:00:00', T, true), { top: 'Revision', bottom: 'Wed 5 PM', late: false });
 });
 test('up next: overdue first, topped up to 4 from the coming week', () => {
   const late = mk({ due_at: '2026-10-28' });
