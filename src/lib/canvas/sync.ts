@@ -3,6 +3,7 @@ import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import { canvasGetAll } from './client';
 import { normalizeCourse } from './normalize';
 import type { CanvasConnectionRow } from './credentials';
+import { statusFor } from '@/lib/studypulse/entryStatus';
 
 async function discoverCourses(connection: CanvasConnectionRow): Promise<number> {
   const raw = await canvasGetAll(connection, '/courses', {
@@ -209,6 +210,7 @@ async function propagateToLinkedEntry(
 ): Promise<void> {
   const sets:   string[] = [];
   const params: (string | number | null)[] = [];
+  let fullyScored = false;
 
   if (changed.deadlineChanged) {
     // dueAt is already a UTC "YYYY-MM-DD HH:MM:SS" string (normalize.ts), so the date
@@ -222,6 +224,7 @@ async function propagateToLinkedEntry(
     const { grade, score, items } = gradeBreakdown(fresh.submissionScore, fresh.pointsPossible);
     sets.push('grade = ?', 'score = ?', 'items = ?');
     params.push(grade, score, items);
+    fullyScored = statusFor('', score, items, grade) === 'Done';
   }
   if (sets.length === 0) return;
 
@@ -243,6 +246,12 @@ async function propagateToLinkedEntry(
     table = 'grade_entries'; pkColumn = 'entry_id';    pkValue = link.grade_entry_id as number;
   } else {
     return;
+  }
+
+  // A fully scored activity/quiz/exam is Done (entryStatus.ts; formerly a DB trigger).
+  // grade_entries never had that rule.
+  if (fullyScored && table !== 'grade_entries') {
+    sets.push("status = 'Done'");
   }
 
   // Table/column names here are fixed internal literals, never user input.

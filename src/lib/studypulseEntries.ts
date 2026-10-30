@@ -1,6 +1,7 @@
 import pool from '@/lib/db';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 import type { Connection } from 'mysql2/promise';
+import { statusFor } from '@/lib/studypulse/entryStatus';
 
 /**
  * Anything that can run a query: the shared pool (the default, and what every existing
@@ -26,26 +27,28 @@ export interface LegacyEntryInput {
 
 export async function insertActivityEntry(input: LegacyEntryInput, db: SqlExecutor = pool): Promise<{ entryId: number }> {
   const { entryId, userSubjectId, name, specificType, urgency, status, deadline, score, items, grade, accomplishedAt } = input;
+  const finalStatus = statusFor(status, score, items, grade);
   if (entryId) {
     await db.execute(
       'UPDATE activities SET activity_name=?,activity_type=?,urgency=?,status=?,deadline=?,score=?,items=?,grade=?,accomplished_at=? WHERE activity_id=? AND user_subject_id=?',
-      [name, specificType ?? '', urgency, status, deadline, score, items, grade, accomplishedAt, entryId, userSubjectId],
+      [name, specificType ?? '', urgency, finalStatus, deadline, score, items, grade, accomplishedAt, entryId, userSubjectId],
     );
     return { entryId };
   }
   const [r] = await db.execute<ResultSetHeader>(
     'INSERT INTO activities (user_subject_id,activity_name,activity_type,urgency,status,deadline,score,items,grade,accomplished_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
-    [userSubjectId, name, specificType ?? '', urgency, status, deadline, score, items, grade, accomplishedAt],
+    [userSubjectId, name, specificType ?? '', urgency, finalStatus, deadline, score, items, grade, accomplishedAt],
   );
   return { entryId: r.insertId };
 }
 
 export async function insertQuizEntry(input: LegacyEntryInput, db: SqlExecutor = pool): Promise<{ entryId: number }> {
   const { entryId, userSubjectId, name, urgency, status, deadline, score, items, grade, accomplishedAt } = input;
+  const finalStatus = statusFor(status, score, items, grade);
   if (entryId) {
     await db.execute(
       'UPDATE quizzes SET quiz_name=?,urgency=?,status=?,deadline=?,score=?,items=?,grade=?,accomplished_at=? WHERE quiz_id=? AND user_subject_id=?',
-      [name, urgency, status, deadline, score, items, grade, accomplishedAt, entryId, userSubjectId],
+      [name, urgency, finalStatus, deadline, score, items, grade, accomplishedAt, entryId, userSubjectId],
     );
     return { entryId };
   }
@@ -54,23 +57,24 @@ export async function insertQuizEntry(input: LegacyEntryInput, db: SqlExecutor =
   );
   const [r] = await db.execute<ResultSetHeader>(
     'INSERT INTO quizzes (user_subject_id,quiz_name,quiz_number,urgency,status,deadline,score,items,grade,accomplished_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
-    [userSubjectId, name, mx[0].next_num, urgency, status, deadline, score, items, grade, accomplishedAt],
+    [userSubjectId, name, mx[0].next_num, urgency, finalStatus, deadline, score, items, grade, accomplishedAt],
   );
   return { entryId: r.insertId };
 }
 
 export async function insertExamEntry(input: LegacyEntryInput, db: SqlExecutor = pool): Promise<{ entryId: number }> {
   const { entryId, userSubjectId, name, specificType, urgency, status, deadline, score, items, grade, accomplishedAt } = input;
+  const finalStatus = statusFor(status, score, items, grade);
   if (entryId) {
     await db.execute(
       'UPDATE exams SET exam_name=?,exam_type=?,urgency=?,status=?,deadline=?,score=?,items=?,grade=?,accomplished_at=? WHERE exam_id=? AND user_subject_id=?',
-      [name, specificType ?? '', urgency, status, deadline, score, items, grade, accomplishedAt, entryId, userSubjectId],
+      [name, specificType ?? '', urgency, finalStatus, deadline, score, items, grade, accomplishedAt, entryId, userSubjectId],
     );
     return { entryId };
   }
   const [r] = await db.execute<ResultSetHeader>(
     'INSERT INTO exams (user_subject_id,exam_name,exam_type,urgency,status,deadline,score,items,grade,accomplished_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
-    [userSubjectId, name, specificType ?? '', urgency, status, deadline, score, items, grade, accomplishedAt],
+    [userSubjectId, name, specificType ?? '', urgency, finalStatus, deadline, score, items, grade, accomplishedAt],
   );
   return { entryId: r.insertId };
 }

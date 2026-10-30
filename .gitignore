@@ -60,3 +60,6 @@ skills-lock.json
 debug_*.json
 debug_*.txt
 .agent/
+
+# DB certificates/credentials used by scripts/db-copy.mjs
+.secrets/
