@@ -58,9 +58,10 @@
 }
 .db-avatar > span { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; background: #fff; font-size: 15px; font-weight: 800; line-height: 1; }
 .db-avatar b {
-  font-weight: 800; background: linear-gradient(135deg, #e47fa6, #4f9fc4);
+  font-weight: 800; background: linear-gradient(135deg, #b8476f, #2c6fb0);   /* stops 5.0:1 / 5.2:1 on #fff */
   -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent;
 }
+@media (forced-colors: active) { .db-avatar b { -webkit-text-fill-color: currentColor; background: none; } }
 .db-avatar:active { transform: scale(.95); }
 .db-popover {
   position: absolute; right: 0; top: calc(100% + 10px); z-index: 30; width: 280px; padding: 14px;
@@ -209,6 +210,7 @@ button.db-stat { border: 0; font-family: inherit; cursor: pointer; }
 
 @media (pointer: coarse) {
   .db-avatar, .db-iconbtn, .db-retry { width: 44px; height: 44px; }
+  .db-weather input { height: 44px; }
   .db-btn, .db-weekh button, .db-popover .db-pop-actions a, .db-popover .db-pop-actions button, .db-dcol { min-height: 44px; }
 }
 
@@ -234,5 +236,6 @@ button.db-stat { border: 0; font-family: inherit; cursor: pointer; }
   .db-list { grid-template-rows: none; }   /* one column and the page scrolls here: no floor */
   .db-wbh { flex-wrap: wrap; }
   .db-wprog { margin-left: 0; width: 100%; }
+  .db-v { white-space: normal; }   /* "CS0001 · 8:14 AM" wraps instead of clipping to "8:1…" */
   .db-page a, .db-page button { -webkit-tap-highlight-color: transparent; }
 }

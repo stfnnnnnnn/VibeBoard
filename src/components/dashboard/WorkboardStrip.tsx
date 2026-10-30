@@ -114,6 +114,7 @@ export default function WorkboardStrip({ sec, onRetry, retrying }: {
   // Client-side Manila date; it only drives the today dot, so the buttons suppress a midnight hydration diff.
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const pct = d.totalThisWeek ? Math.round((d.doneThisWeek / d.totalThisWeek) * 100) : 0;
+  const openLink = <Link href="/workboard" className="db-btn db-iconbtn" aria-label="Open Workboard"><ArrowRight size={16} strokeWidth={2.4} aria-hidden="true" /></Link>;
 
   return (
     <section className="db-panel db-wb db-enter" style={{ '--i': 4 } as CSSProperties} aria-labelledby="db-wb-h">
@@ -122,11 +123,13 @@ export default function WorkboardStrip({ sec, onRetry, retrying }: {
         {d.overdue > 0 && <Link href="/workboard" className="db-stat db-stat-late"><span className="db-gdot" style={{ '--d': '#e0607e', width: 6, height: 6 } as CSSProperties} />{d.overdue} overdue</Link>}
         {d.inProgress > 0 && <Link href="/workboard" className="db-stat db-stat-prog"><span className="db-gdot" style={{ '--d': '#3b8fe0', width: 6, height: 6 } as CSSProperties} />{d.inProgress} in progress</Link>}
         <Link href="/workboard" className="db-stat">{d.dueThisWeek} due this week</Link>
-        <div className="db-wprog">
-          <span><b style={{ color: 'var(--db-ink)' }}>{d.doneThisWeek} of {d.totalThisWeek}</b> done this week</span>
-          <span className="db-bar" role="img" aria-label={`${pct}% of this week's work done`}><i style={{ width: `${pct}%` }} /></span>
-          <Link href="/workboard" className="db-btn db-iconbtn" aria-label="Open Workboard"><ArrowRight size={16} strokeWidth={2.4} aria-hidden="true" /></Link>
-        </div>
+        {d.totalThisWeek > 0 ? (
+          <div className="db-wprog">
+            <span><b style={{ color: 'var(--db-ink)' }}>{d.doneThisWeek} of {d.totalThisWeek}</b> done this week</span>
+            <span className="db-bar" role="img" aria-label={`${pct}% of this week's work done`}><i style={{ width: `${pct}%` }} /></span>
+            {openLink}
+          </div>
+        ) : <span style={{ marginLeft: 'auto' }}>{openLink}</span>}
       </div>
 
       <div className="db-wbb">

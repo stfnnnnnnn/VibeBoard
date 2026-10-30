@@ -73,8 +73,9 @@ export default function WeatherRow() {
   if (state.kind === 'loading') {
     return (
       <div className="db-panel db-weather" aria-busy="true">
-        <span className="db-skel" style={{ width: '60%', height: 30 }} />
-        <span className="db-skel" style={{ height: 26, borderRadius: 12 }} />
+        {/* 40px = the ready card's icon row, 28px = its tip row: the band keeps its height on arrival */}
+        <span className="db-skel" style={{ width: '60%', height: 40, borderRadius: 12 }} />
+        <span className="db-skel" style={{ height: 28, borderRadius: 12 }} />
       </div>
     );
   }
