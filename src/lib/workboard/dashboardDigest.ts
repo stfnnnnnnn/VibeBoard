@@ -19,6 +19,7 @@ export interface DigestItem {
   subtasks: { done: number; total: number } | null;
   estimatedHours: number | null;
   due: DueChip | null;
+  doneOn: string | null;   // 'Wed' for items completed this week; null otherwise
 }
 export interface DigestDay { date: string; counts: Record<WorkContext, number>; total: number; items: DigestItem[] }
 export interface WorkboardDigest {
@@ -26,8 +27,17 @@ export interface WorkboardDigest {
   overdue: number; inProgress: number; dueThisWeek: number;
   doneThisWeek: number; totalThisWeek: number;
   upNext: DigestItem[];
+  /** Not-done items outside upNext, due after today+7 or undated; due order, undated last; at most 3. */
+  later: DigestItem[];
+  /** Items completed Mon–Sun of this week, newest completion first; at most 3; doneOn set. */
+  doneRecent: DigestItem[];
+  /** 'Nov 12': the earliest due date among not-done items due after the week; null if none. */
+  nextDueAfterWeek: string | null;
   week: DigestDay[];
 }
+
+/** How many filler items the dashboard strip may borrow from each of later / doneRecent. */
+const FILL_LIMIT = 3;
 
 const fmt = (date: string, o: Intl.DateTimeFormatOptions) =>
   new Date(`${date}T00:00:00Z`).toLocaleDateString('en-US', { ...o, timeZone: 'UTC' });
@@ -67,7 +77,7 @@ function labelOf(item: WorkItem): string {
   return item.project_name ?? item.organization_name ?? item.chip_label ?? CONTEXT_LABELS[item.context];
 }
 
-function toDigest(item: WorkItem, today: string): DigestItem {
+function toDigest(item: WorkItem, today: string, doneOn: string | null = null): DigestItem {
   const key = itemKey(item);
   return {
     key, href: `/workboard?item=${key}`, title: item.title,
@@ -77,6 +87,7 @@ function toDigest(item: WorkItem, today: string): DigestItem {
     subtasks: item.subtask_total > 0 ? { done: item.subtask_done, total: item.subtask_total } : null,
     estimatedHours: item.estimated_hours,
     due: dueChip(dueDateOf(item), item.deadline_time, today, isRevisionStage(item.work_stage)),
+    doneOn,
   };
 }
 
@@ -98,6 +109,31 @@ export function buildWorkboardDigest(items: WorkItem[], today: string, weekStart
     .filter(i => { const d = dueDateOf(i); return d !== null && d <= horizon; })
     .sort(byDueThenTime);
   const upNext = [...ranked, ...topUp].slice(0, UP_NEXT_LIMIT).map(i => toDigest(i, today));
+  const inUpNext = new Set(upNext.map(i => i.key));
+
+  const later = items
+    .filter(i => i.work_status !== 'done' && !inUpNext.has(itemKey(i)))
+    .filter(i => { const d = dueDateOf(i); return d === null || d > horizon; })
+    .sort(byDueThenTime)
+    .slice(0, FILL_LIMIT)
+    .map(i => toDigest(i, today));
+
+  const completedThisWeek = (i: WorkItem) => {
+    const c = i.completed_at?.slice(0, 10);
+    return c !== undefined && c >= weekStart && c <= weekEnd;
+  };
+  const doneRecent = items
+    .filter(completedThisWeek)
+    .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''))
+    .slice(0, FILL_LIMIT)
+    .map(i => toDigest(i, today, fmt(i.completed_at!.slice(0, 10), { weekday: 'short' })));
+
+  const afterWeek = items
+    .filter(i => i.work_status !== 'done')
+    .map(dueDateOf)
+    .filter((d): d is string => d !== null && d > weekEnd)
+    .sort();
+  const nextDueAfterWeek = afterWeek.length ? fmt(afterWeek[0], { month: 'short', day: 'numeric' }) : null;
 
   const week: DigestDay[] = load.map(day => ({
     date: day.date,
@@ -111,15 +147,12 @@ export function buildWorkboardDigest(items: WorkItem[], today: string, weekStart
   }));
 
   const dueThisWeek = load.reduce((s, d) => s + d.total, 0);
-  const doneThisWeek = items.filter(i => {
-    const c = i.completed_at?.slice(0, 10);
-    return c !== undefined && c >= weekStart && c <= weekEnd;
-  }).length;
+  const doneThisWeek = items.filter(completedThisWeek).length;
 
   return {
     hasAnyItems: items.length > 0,
     overdue: stats.overdue_count, inProgress: stats.in_progress_count,
     dueThisWeek, doneThisWeek, totalThisWeek: dueThisWeek + doneThisWeek,
-    upNext, week,
+    upNext, later, doneRecent, nextDueAfterWeek, week,
   };
 }

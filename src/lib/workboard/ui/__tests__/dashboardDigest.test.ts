@@ -76,3 +76,32 @@ test('empty board', () => {
   assert.equal(d.hasAnyItems, false);
   assert.deepEqual(d.upNext, []);
 });
+test('later: not-done items beyond the week or undated, outside up next', () => {
+  const today = mk({ due_at: '2026-10-30', title: 'today' });
+  const far = mk({ due_at: '2026-11-12', title: 'far' });
+  const undated = mk({ title: 'undated' });
+  const done = mk({ due_at: '2026-11-15', work_status: 'done', work_stage: 'done', completed_at: '2026-10-29 10:00:00' });
+  const d = buildWorkboardDigest([undated, done, far, today], T, WS);
+  assert.deepEqual(d.later.map(i => i.key), [far, undated].map(i => `owned-${i.id}`));
+  const up = new Set(d.upNext.map(i => i.key));
+  assert.equal(up.has(`owned-${far.id}`), false);
+  assert.equal(up.has(`owned-${undated.id}`), false);
+  assert.equal(d.later.every(i => i.doneOn === null), true);
+});
+test('doneRecent: completed this week, newest first, with doneOn', () => {
+  const wed = mk({ work_status: 'done', work_stage: 'done', completed_at: '2026-10-28 09:00:00' });
+  const thu = mk({ work_status: 'done', work_stage: 'done', completed_at: '2026-10-29 10:00:00' });
+  const old = mk({ work_status: 'done', work_stage: 'done', completed_at: '2026-10-20 10:00:00' });
+  const d = buildWorkboardDigest([wed, old, thu], T, WS);
+  assert.deepEqual(d.doneRecent.map(i => i.key), [thu, wed].map(i => `owned-${i.id}`));
+  assert.deepEqual(d.doneRecent.map(i => i.doneOn), ['Thu', 'Wed']);
+});
+test('nextDueAfterWeek: earliest not-done due after the week', () => {
+  const items = [
+    mk({ due_at: '2026-11-20' }),
+    mk({ due_at: '2026-11-12' }),
+    mk({ due_at: '2026-11-02', work_status: 'done', work_stage: 'done', completed_at: '2026-10-29 10:00:00' }),
+  ];
+  assert.equal(buildWorkboardDigest(items, T, WS).nextDueAfterWeek, 'Nov 12');
+  assert.equal(buildWorkboardDigest([mk({ due_at: '2026-10-30' })], T, WS).nextDueAfterWeek, null);
+});
