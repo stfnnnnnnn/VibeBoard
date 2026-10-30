@@ -100,8 +100,9 @@ interface DigestItem {
   - habits: `getSummaryForUser` (`src/lib/habits.ts`)
   - finance: `loadSpendBase` + `computeSafe` (`src/lib/finance/safeToSpendServer.ts`)
   - workboard: `getWorkItems` + `computeStats` / `computeWorkloadChart` (`src/lib/workboard/`)
-- **Targeted extraction (required):** projected GPA is computed inside `src/app/api/studypulse/stats/route.ts`, and cycle "remaining" inside `src/app/api/finance/summary/route.ts`. Move each calculation into a lib function: `src/lib/studypulse/gpaSummary.ts` and `src/lib/finance/cycleSummary.ts`. The existing route and the dashboard then both call it. The routes' responses must stay byte-identical; existing tests guard this.
-- Next class reads `schedule_blocks` for the next block from now (Manila time), rolling over to the next day that has classes. Week of term comes from the current `trimesters` row's `start_date`.
+- **Targeted extraction (required):** projected GPA is computed inside `src/app/api/studypulse/stats/route.ts`. Move `convertToGPA` into a pure `src/lib/studypulse/gpaScale.ts`, and `getCustomPeriodGrade` + `getOverallGPA` into `src/lib/studypulse/gpaSummary.ts`. The route and the dashboard then both call them, and the route's response must not change. Finance needs no extraction: both finance numbers come from `loadSpendBase` + `computeSafe` (safe total, plus per-day computed the way the safe-to-spend route does it), with tone from `safeToSpendStatus` (`src/lib/finance/status.ts`).
+- Next class reuses `getWorkboardWeek` (this week + next week), which already applies cancellations and make-up reschedules, and picks the first occurrence that hasn't ended yet (Manila time). Week of term comes from the latest `trimesters` row's `start_date`/`end_date`.
+- The Workboard digest reuses Workboard's own `rankUpNext` (`src/lib/workboard/ui/upNext.ts`), topped up with other items due in the next 7 days when it returns fewer than 4. It also reuses `itemKey`, `CONTEXT_FILL`/`CONTEXT_TEXT`, `STAGE_LABELS`, `computeStats` and `computeWorkloadChart`.
 
 ### 4.2 Rendering
 
@@ -113,9 +114,10 @@ interface DigestItem {
 
 | File | Purpose |
 |---|---|
-| `src/lib/dashboard/summary.ts` | builds `DashboardSummary` from module libs |
+| `src/lib/dashboard/summary.ts` | builds `DashboardSummary` + header data from module libs (server-only) |
+| `src/lib/dashboard/types.ts`, `section.ts`, `headerLine.ts`, `nextClass.ts` | pure types and helpers, unit-tested by `scripts/dash-test.mjs` |
 | `src/lib/dashboard/weatherTip.ts` | pure tip rules (§5.3) |
-| `src/lib/dashboard/digest.ts` | pure Workboard digest (sorting, week buckets, labels) |
+| `src/lib/workboard/dashboardDigest.ts` | pure Workboard digest (lives in the workboard lib so it can reuse its pure helpers; tested by `scripts/wb-test.mjs`) |
 | `src/app/api/dashboard/summary/route.ts` | auth + JSON |
 | `src/components/dashboard/DashboardHeader.tsx` | date/week line, title, Sign-Out, avatar |
 | `src/components/dashboard/ProfilePopover.tsx` | avatar menu (§5.5) |
@@ -123,7 +125,7 @@ interface DigestItem {
 | `src/components/dashboard/QuoteRow.tsx` / `WeatherRow.tsx` | slim rows (replace the widget layout) |
 | `src/components/dashboard/ModuleTile.tsx` | glass tile with title-row chip |
 | `src/components/dashboard/WorkboardStrip.tsx` | header, Up next, This week, day filter |
-| `src/components/dashboard/dashboard.css` | tokens + layout, following the `workboard.css` glass system |
+| `src/app/dashboard/dashboard.css` | tokens + layout, following the `workboard.css` glass system (imported by the page, as `workboard.css` is) |
 
 `QuoteWidget.tsx` and `WeatherWidget.tsx` are refactored into the row components; no duplicates are kept. The large inline `style={{…}}` objects in today's `page.tsx` move into `dashboard.css` classes.
 
@@ -132,7 +134,7 @@ interface DigestItem {
 ### 5.1 Header
 - Line 1 (12px, muted): `Thursday, Oct 30 · Week 7 · Good afternoon`. The week part is omitted when no trimester is set. Greeting by Manila hour: morning <12, afternoon <18, else evening.
 - Title: `{firstName}'s Home`, `.gradient-text`, `clamp(30px, 5vh, 48px)`.
-- Right: the existing Sign-Out gradient pill, then a 36px gradient avatar (initial, or Google photo when present) that opens the Profile popover.
+- Right: the existing Sign-Out gradient pill, then a 36px gradient avatar showing the first initial (the session carries no photo URL), which opens the Profile popover.
 - `VerifyEmailBanner` stays above the header when the user is unverified.
 
 ### 5.2 Today strip
@@ -179,14 +181,14 @@ Tone colours: heat `#fff4e0`/`#b4690e`, rain `#e6f2ff`/`#2c6fb0`, calm `#f1edfa`
 - Hover (fine pointer only): tile lifts 6px and the artwork scales 1.03. Press: scale 0.98.
 
 ### 5.5 Workboard strip (D2, D9)
-**Header row:** `Workboard` (17px bold), then stat pills: `1 overdue` (rose), `2 in progress` (blue), `4 due this week` (neutral). Each pill deep-links to Workboard with that filter applied. Right side: `3 of 7 done this week` + 120px gradient progress bar, then the gradient pill **Open Workboard →**.
+**Header row:** `Workboard` (17px bold), then stat pills: `1 overdue` (rose), `2 in progress` (blue), `4 due this week` (neutral). Each pill links to `/workboard`. Workboard has no filter URL parameters, and its default Focus view already leads with overdue and in-progress work. Right side: `3 of 7 done this week` + 120px gradient progress bar, then the gradient pill **Open Workboard →**.
 
 **Body:** `grid-template-columns: 1fr minmax(300px, .42fr)`.
 - **Up next:** a 2×2 grid of up to 4 items, overdue first, then by `due_at`.
   - Line 1: priority glow dot (high = rose, normal/low = grey), then the title (ellipsis).
   - Line 2: context tag (course code / org / project, tinted by `src/lib/workboard/color.ts`), stage (coloured as Workboard does), then `◔ 2/5 subtasks` when subtasks exist, else `~2h` when estimated.
   - Due chip spanning both lines: `2d late` / `Today` / weekday, with the time or date underneath. Rose when late.
-  - Click opens the item in Workboard (deep link).
+  - Click opens the item in Workboard via `/workboard?item=<source>-<id>`. Workboard gains this one parameter: on load it opens that item's detail drawer, then removes the parameter from the URL.
 - **This week:** Mon–Sun columns. Each day shows a stack of 7px bars, one per item due that day, coloured by context. Today gets a dot under its letter.
   - **Clicking a day filters Up next** to that day's items (the dashboard's only interaction besides links). Clicking it again clears the filter.
   - Up next swaps with a 150ms crossfade. When a day is selected, the header shows `Fri · 2 items` and a clear ×.
@@ -196,7 +198,7 @@ Tone colours: heat `#fff4e0`/`#b4690e`, rain `#e6f2ff`/`#2c6fb0`, calm `#f1edfa`
 
 ### 5.6 Profile popover
 Opens from the avatar. Anchored top-right, scale-from-origin, closes on Esc or outside click, and focus is trapped while open.
-- Contents: name, email + verified badge, Google linked / Canvas connected status rows, `Change password`, `Sign out`.
+- Contents: name, email + verified badge, Google linked / Canvas connected status rows, `Reset password` (links to `/forgot-password`, the app's only password flow), `Sign out`.
 - It contains no term stats (they already appear on the page) and no recent activity (D6).
 
 ## 6. Motion (via `animate`, reviewed with `emil-design-eng`)
