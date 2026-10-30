@@ -31,8 +31,8 @@ export interface WorkboardDigest {
   later: DigestItem[];
   /** Items completed Mon–Sun of this week, newest completion first; at most 3; doneOn set. */
   doneRecent: DigestItem[];
-  /** 'Nov 12': the earliest due date among not-done items not in upNext and due after today+7
-   *  (the `later` horizon), so it never names an item already visible; null if none. */
+  /** 'Nov 12': the earliest due date among not-done items outside upNext that are due after
+   *  today+7 (these can also appear in the `later` fill); null if none. */
   nextDueAfterWeek: string | null;
   week: DigestDay[];
 }
