@@ -1,3 +1,4 @@
+import { LogOut } from 'lucide-react';
 import ProfilePopover, { type ProfileInfo } from './ProfilePopover';
 
 export default function DashboardHeader({ firstName, dateLine, profile, signOut }: {
@@ -11,7 +12,7 @@ export default function DashboardHeader({ firstName, dateLine, profile, signOut 
       </div>
       <div className="db-header-actions">
         <form action={signOut} style={{ margin: 0 }}>
-          <button type="submit" className="db-pill">Sign-Out</button>
+          <button type="submit" className="db-btn"><LogOut size={15} aria-hidden="true" />Sign out</button>
         </form>
         <ProfilePopover profile={profile} signOut={signOut} />
       </div>

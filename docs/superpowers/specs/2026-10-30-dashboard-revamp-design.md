@@ -221,7 +221,6 @@ Opens from the avatar. Anchored top-right, scale-from-origin, closes on Esc or o
 - Day filter: `role="radiogroup"` of buttons with `aria-pressed`. The Up next list gets `aria-live="polite"` while a filter is active.
 - All text ≥ 4.5:1 on the glass. The muted text `#6b6b80` was checked on the lightest glass. Focus rings are visible (2px `#3b8fe0` + 2px offset).
 - Touch targets ≥ 44px on touch devices (day columns, pills, avatar).
-- Accepted deviation: white text on the pink→blue gradient pill and avatar (`.db-pill`, `.db-avatar`) stays below 4.5:1. It is VibeBoard's existing app-wide button style, kept per D12.
 
 ## 8. Testing & verification
 

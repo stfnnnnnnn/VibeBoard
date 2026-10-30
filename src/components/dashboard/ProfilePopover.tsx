@@ -46,7 +46,7 @@ export default function ProfilePopover({ profile, signOut }: { profile: ProfileI
         aria-haspopup="dialog" aria-expanded={open} aria-label={`Account menu for ${profile.name}`}
         onClick={() => (open ? close(false) : setOpen(true))}
       >
-        {profile.name.trim().charAt(0).toUpperCase() || 'V'}
+        <span><b>{profile.name.trim().charAt(0).toUpperCase() || 'V'}</b></span>
       </button>
       {open && (
         <div ref={panel} role="dialog" aria-label="Account" className="db-popover db-panel" data-closing={closing || undefined}>
