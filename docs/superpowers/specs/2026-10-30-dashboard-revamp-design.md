@@ -149,6 +149,7 @@ Four glass item cells. Each is a link into its module:
 
 - **Empty state:** if a module has no setup (no schedule, no habits, no finance plan, no items), the cell shows a muted label and `Set up →` instead of a zero.
 - **Error state** (`ok: false`): a muted `Couldn't load` with a retry icon button that refetches only that section.
+- Retry refetches the whole summary (all sections are independent, so this is equivalent).
 
 ### 5.3 Quote + weather (D10, D11)
 A column to the right of the Today strip, `grid-template-columns: 1.75fr 1fr`, holding two equal slim rows that together are the strip's height.
@@ -220,6 +221,7 @@ Opens from the avatar. Anchored top-right, scale-from-origin, closes on Esc or o
 - Day filter: `role="radiogroup"` of buttons with `aria-pressed`. The Up next list gets `aria-live="polite"` while a filter is active.
 - All text ≥ 4.5:1 on the glass. The muted text `#6b6b80` was checked on the lightest glass. Focus rings are visible (2px `#3b8fe0` + 2px offset).
 - Touch targets ≥ 44px on touch devices (day columns, pills, avatar).
+- Accepted deviation: white text on the pink→blue gradient pill and avatar (`.db-pill`, `.db-avatar`) stays below 4.5:1. It is VibeBoard's existing app-wide button style, kept per D12.
 
 ## 8. Testing & verification
 
