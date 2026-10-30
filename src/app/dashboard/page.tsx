@@ -13,7 +13,7 @@ const SEEN_SCRIPT = "try{if(sessionStorage.getItem('db-seen'))document.documentE
 
 export default async function DashboardPage() {
   const session = await auth();
-  if (!session?.user) redirect('/login');
+  if (!session?.user?.id) redirect('/login');
   const userId = Number(session.user.id);
 
   // Not awaited: DashboardBody streams each live slot as this resolves. It never rejects.

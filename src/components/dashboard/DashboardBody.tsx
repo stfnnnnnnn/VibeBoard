@@ -31,6 +31,8 @@ export default function DashboardBody({ summary }: { summary: Promise<DashboardS
     try {
       const r = await fetch('/api/dashboard/summary', { cache: 'no-store' });
       if (r.ok) setOverride(await r.json());
+    } catch {
+      // Network or JSON failure: keep the current state; the error card stays up for another try.
     } finally { setRetrying(false); }
   }, []);
 
@@ -42,7 +44,7 @@ export default function DashboardBody({ summary }: { summary: Promise<DashboardS
     <>
       <section className="db-band db-enter" style={{ '--i': 0 } as CSSProperties} aria-label="Today">
         {slot(<TodayStrip s={null} animate={false} onRetry={retry} retrying={retrying} />,
-          s => <TodayStrip s={s} animate={animate} onRetry={retry} retrying={retrying} />)}
+          s => <TodayStrip s={s} animate={animate && !override} onRetry={retry} retrying={retrying} />)}
         <div className="db-side">
           <QuoteRow />
           <WeatherRow />

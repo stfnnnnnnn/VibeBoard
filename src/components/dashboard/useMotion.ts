@@ -8,7 +8,15 @@ export function useEntranceMotion(): boolean {
   useEffect(() => {
     const seen = document.documentElement.hasAttribute('data-db-seen');
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    setOn(!seen && !reduce);
+    const play = !seen && !reduce;
+    setOn(play);
+    if (!play) return;
+    // The inline script never runs on a client-side render, so mark the session here once the
+    // entrance (~280ms rise + 4x40ms stagger) and the 600ms count-ups are done. Never synchronously:
+    // the attribute disables the running CSS animation. Cleanup marks it too, so unmounting counts.
+    const mark = () => document.documentElement.setAttribute('data-db-seen', '');
+    const t = window.setTimeout(mark, 700);
+    return () => { window.clearTimeout(t); mark(); };
   }, []);
   return on;
 }
