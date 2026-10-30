@@ -31,7 +31,8 @@ export interface WorkboardDigest {
   later: DigestItem[];
   /** Items completed Mon–Sun of this week, newest completion first; at most 3; doneOn set. */
   doneRecent: DigestItem[];
-  /** 'Nov 12': the earliest due date among not-done items due after the week; null if none. */
+  /** 'Nov 12': the earliest due date among not-done items not in upNext and due after today+7
+   *  (the `later` horizon), so it never names an item already visible; null if none. */
   nextDueAfterWeek: string | null;
   week: DigestDay[];
 }
@@ -128,12 +129,12 @@ export function buildWorkboardDigest(items: WorkItem[], today: string, weekStart
     .slice(0, FILL_LIMIT)
     .map(i => toDigest(i, today, fmt(i.completed_at!.slice(0, 10), { weekday: 'short' })));
 
-  const afterWeek = items
-    .filter(i => i.work_status !== 'done')
+  const beyondHorizon = items
+    .filter(i => i.work_status !== 'done' && !inUpNext.has(itemKey(i)))
     .map(dueDateOf)
-    .filter((d): d is string => d !== null && d > weekEnd)
+    .filter((d): d is string => d !== null && d > horizon)
     .sort();
-  const nextDueAfterWeek = afterWeek.length ? fmt(afterWeek[0], { month: 'short', day: 'numeric' }) : null;
+  const nextDueAfterWeek = beyondHorizon.length ? fmt(beyondHorizon[0], { month: 'short', day: 'numeric' }) : null;
 
   const week: DigestDay[] = load.map(day => ({
     date: day.date,

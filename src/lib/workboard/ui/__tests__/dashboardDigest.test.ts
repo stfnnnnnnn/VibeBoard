@@ -105,3 +105,11 @@ test('nextDueAfterWeek: earliest not-done due after the week', () => {
   assert.equal(buildWorkboardDigest(items, T, WS).nextDueAfterWeek, 'Nov 12');
   assert.equal(buildWorkboardDigest([mk({ due_at: '2026-10-30' })], T, WS).nextDueAfterWeek, null);
 });
+test('nextDueAfterWeek skips items already shown in up next', () => {
+  const shownSoon = mk({ due_at: '2026-11-02' });          // after weekEnd but within today+7: in upNext
+  const far = mk({ due_at: '2026-11-12' });
+  const d = buildWorkboardDigest([shownSoon, far], T, WS);
+  assert.equal(d.upNext.some(i => i.key === `owned-${shownSoon.id}`), true);
+  assert.equal(d.nextDueAfterWeek, 'Nov 12');
+  assert.equal(buildWorkboardDigest([mk({ due_at: '2026-11-02' })], T, WS).nextDueAfterWeek, null);
+});
